@@ -30,6 +30,18 @@ Not verified: whether Ollama itself contacts the internet (update checks). The m
 - Descriptions: about 10 s per photo when the Mac is otherwise idle (37 s while tests and the server competed for the GPU). No place or person names appeared in the samples read. Some descriptions repeated the prompt ("no people visible", "text visible is empty"); `tidy_description` removes those sentences when saving and showing them.
 - Translation waits for Ollama. While a describe job runs, a search may wait up to 12 s for translation, then searches without it and says so.
 
+## Keeping the Mac cool (owner's request, 2026-11-12)
+
+The owner does not want the MacBook running at full load. macOS cannot cap the GPU share of one process, so long AI jobs (search index, descriptions) use a duty cycle: after each photo or batch that kept the GPU busy for W seconds they rest W × (100 / share − 1) seconds. The share is a setting on `/timeline` (25, 30 default, 50, no limit) stored in `local-data/settings.json`. A running job reads it again after every photo.
+
+Also:
+- Ollama runs with macOS background priority (`taskpolicy -b`; checked: priority 4 for `ollama` and `llama-server`), one request at a time, one model loaded.
+- The model is unloaded right after a job and after 2 idle minutes (was 10).
+- Jobs pause while macOS reports a thermal or performance warning (`pmset -g therm`), and optionally while on battery (off by default). The thermal check has only been tested with simulated output.
+- Model answers are capped at 320 tokens. The model sometimes kept listing tags for over 1,000 tokens, which made one description take 20–40 s.
+
+Measured with `ioreg` (GPU "Device Utilization %", whole Mac, sampled every second): idle with the owner's apps 18 % on average; during a describe job at the 30 % setting 30 % on average, with full-load bursts in 39 of 120 samples (a third of the time, as set). One photo takes about 7 s of work plus 16 s of rest.
+
 ## Not done or not verified
 
 - No place names yet: GPS reverse geocoding and landmark evidence are needed first (brief 6.2). Planned with events (M4).

@@ -51,3 +51,4 @@ Branch `claude/m3-local-ai`. Owner approved downloading the models into the proj
 Tests: 49 pass (7 new, fake models). Real set: search index 236 photos in 24 s; English queries correct in top 3; Slovenian with translation correct. Descriptions about 10 s per photo; the full run on 202 photos was still going when this was written.
 Not done: place names (needs GPS/landmark evidence, M4), faces, review of all descriptions.
 Owner feedback: write to Žaž only in Slovenian (no mixed or other languages).
+Update: owner asked that the MacBook never runs at full load. Added a GPU time share setting (default 30 %, duty cycle with pauses), background priority for Ollama, model unload after jobs, thermal pause and optional battery pause. Measured: GPU 30 % on average during describing vs 18 % idle. An unrequested background describe run earlier heated the Mac; describing now runs only when the owner starts it or knows about it.

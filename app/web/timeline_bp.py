@@ -273,3 +273,18 @@ def start_describe(cid):
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_describe, args=(cid, int(limit) if limit else None), daemon=True).start()
     return jsonify({'ok': True})
+
+
+@bp.route('/api/settings', methods=['GET'])
+def get_settings():
+    from app import settings
+    return jsonify({'settings': settings.load(), 'choices': settings.CHOICES})
+
+
+@bp.route('/api/settings', methods=['POST'])
+def change_settings():
+    from app import settings
+    try:
+        return jsonify({'ok': True, 'settings': settings.save(request.get_json() or {})})
+    except ValueError as e:
+        return _err(str(e))

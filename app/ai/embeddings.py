@@ -6,6 +6,7 @@ all photos. Vectors are cached per file content (SHA-256) and model.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Callable, Iterable, Optional
 
 import numpy as np
@@ -99,13 +100,18 @@ def compute_embeddings(conn, progress: Optional[Callable] = None,
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         "AND a.sha256 NOT IN (SELECT sha256 FROM image_embeddings WHERE model = ?) "
         "GROUP BY a.sha256", (emb.name,)).fetchall()
+    from app.ai.throttle import Throttle
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
     done = failed = 0
     for i in range(0, len(rows), BATCH):
         if cancelled():
             break
+        if i:
+            throttle.after_work(busy)
         chunk = rows[i:i + BATCH]
         if progress:
             progress('Search index (SigLIP 2)', i, len(rows))
+        busy = time.time()
         ims, keep = [], []
         for r in chunk:
             im = load_image(r['path'])
@@ -115,8 +121,10 @@ def compute_embeddings(conn, progress: Optional[Callable] = None,
             ims.append(im)
             keep.append(r['sha256'])
         if not ims:
+            busy = 0.0
             continue
         vecs = emb.images(ims)
+        busy = time.time() - busy
         with conn:
             conn.executemany('INSERT OR REPLACE INTO image_embeddings (sha256, model, vec, computed_at) '
                              'VALUES (?, ?, ?, ?)',

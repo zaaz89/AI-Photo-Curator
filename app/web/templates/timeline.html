@@ -130,7 +130,16 @@
       <div class="bar"><div id="fill"></div></div>
       <div class="status" id="status"></div>
       <button class="btn ghost" id="describe" style="width:100%;margin-top:10px">Describe photos with local AI</button>
-      <p class="hint" id="aiState">Runs on this Mac. Skips photos marked as duplicates. About 10 s per photo.</p>
+      <p class="hint" id="aiState">Runs on this Mac. Skips photos marked as duplicates.</p>
+      <label class="hint" for="gpuShare" style="display:block;margin-top:8px">How hard local AI may work</label>
+      <select id="gpuShare" style="margin-top:4px">
+        <option value="25">Gentle: GPU busy about 25 % of the time</option>
+        <option value="30">Default: about 30 %</option>
+        <option value="50">Faster: about 50 %</option>
+        <option value="100">No limit (the Mac gets warm)</option>
+      </select>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px">
+        <input type="checkbox" id="pauseBattery"> Pause while on battery</label>
     </section>
     <section id="clockBox" hidden>
       <h2>Device clocks</h2>
@@ -190,6 +199,15 @@ $('#add').onclick=()=>addSource(false);
 function status(msg,bad){$('#status').textContent=msg;$('#status').style.color=bad?'var(--bad)':'';}
 $('#index').onclick=async()=>{const d=await api(`/api/collections/${cid}/index`,{method:'POST'});
   if(d.error){status(d.error,true);return;} checkJob();};
+async function loadSettings(){
+  const d=await api('/api/settings');const s=d.settings||{};
+  $('#gpuShare').value=String(s.ai_gpu_share??30);$('#pauseBattery').checked=!!s.ai_pause_on_battery;
+}
+async function saveSettings(){
+  const r=await api('/api/settings',{method:'POST',body:JSON.stringify({ai_gpu_share:+$('#gpuShare').value,ai_pause_on_battery:$('#pauseBattery').checked})});
+  status(r.error||'Saved. A running job uses the new setting from the next photo.',!!r.error);
+}
+$('#gpuShare').onchange=saveSettings;$('#pauseBattery').onchange=saveSettings;loadSettings();
 $('#describe').onclick=async()=>{
   if($('#describe').dataset.running){await api(`/api/collections/${cid}/index`,{method:'DELETE'});return;}
   const d=await api(`/api/collections/${cid}/describe`,{method:'POST',body:'{}'});

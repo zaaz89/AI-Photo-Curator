@@ -129,7 +129,7 @@ def describe(path: str) -> dict:
     if img is None:
         raise ValueError('image could not be decoded')
     r = _post('/api/generate', {'model': VLM_MODEL, 'prompt': PROMPT, 'images': [img], 'format': SCHEMA,
-                                'stream': False, 'think': False, 'keep_alive': '10m',
+                                'stream': False, 'think': False, 'keep_alive': '2m',
                                 # Cap the answer: the model sometimes keeps listing tags for 1,000+ tokens.
                                 'options': {'temperature': 0, 'num_predict': 320}})
     return clean(json.loads(r.get('response') or '{}'))
@@ -137,7 +137,7 @@ def describe(path: str) -> dict:
 
 def translate_to_english(text: str) -> str:
     r = _post('/api/generate', {
-        'model': VLM_MODEL, 'stream': False, 'think': False, 'keep_alive': '10m',
+        'model': VLM_MODEL, 'stream': False, 'think': False, 'keep_alive': '2m',
         'options': {'temperature': 0},
         'prompt': ('Translate this photo search query into short natural English. If it is already English, '
                    'repeat it unchanged. Answer with the query only, no quotes.\n\nQuery: ' + text)}, timeout=12)
@@ -162,24 +162,43 @@ def describe_collection(conn, progress: Optional[Callable] = None,
         'GROUP BY a.sha256 ORDER BY t', (VLM_MODEL, PROMPT_VERSION)).fetchall()
     if limit:
         rows = rows[:limit]
+    from app.ai.throttle import Throttle
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
     done = failed = 0
     t0 = time.time()
-    for i, r in enumerate(rows):
-        if cancelled():
-            break
-        if progress:
-            eta = ((time.time() - t0) / i * (len(rows) - i)) if i else 0
-            progress(f'Describing photos (about {eta / 60:.0f} min left)' if i else 'Describing photos', i, len(rows))
-        try:
-            res, err = describe(r['path']), None
-            done += 1
-        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as e:
-            res, err = {'description': None, 'tags': [], 'people': None, 'text_visible': None}, str(e)
-            failed += 1
-        with conn:
-            conn.execute('INSERT OR REPLACE INTO ai_annotations (sha256, model, prompt_version, description, '
-                         'tags_json, people, text_visible, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                         (r['sha256'], VLM_MODEL, PROMPT_VERSION, res['description'],
-                          json.dumps(res['tags'], ensure_ascii=False), res['people'], res['text_visible'],
-                          err, now_iso()))
+    try:
+        for i, r in enumerate(rows):
+            if cancelled():
+                break
+            if progress:
+                eta = ((time.time() - t0) / i * (len(rows) - i)) if i else 0
+                lim = f', limited to {throttle.share} % GPU time' if throttle.share < 100 else ''
+                progress(f'Describing photos (about {eta / 60:.0f} min left{lim})' if i
+                         else f'Describing photos{lim}', i, len(rows))
+            busy = time.time()
+            try:
+                res, err = describe(r['path']), None
+                done += 1
+            except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as e:
+                res, err = {'description': None, 'tags': [], 'people': None, 'text_visible': None}, str(e)
+                failed += 1
+            busy = time.time() - busy
+            with conn:
+                conn.execute('INSERT OR REPLACE INTO ai_annotations (sha256, model, prompt_version, description, '
+                             'tags_json, people, text_visible, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                             (r['sha256'], VLM_MODEL, PROMPT_VERSION, res['description'],
+                              json.dumps(res['tags'], ensure_ascii=False), res['people'], res['text_visible'],
+                              err, now_iso()))
+            if i < len(rows) - 1:
+                throttle.after_work(busy)
+    finally:
+        unload()
     return {'described': done, 'failed': failed, 'remaining': len(rows) - done - failed}
+
+
+def unload() -> None:
+    """Free the model's memory right away instead of after Ollama's idle timeout."""
+    try:
+        _post('/api/generate', {'model': VLM_MODEL, 'keep_alive': 0}, timeout=10)
+    except Exception:
+        pass
