@@ -165,7 +165,8 @@ def translate_to_english(text: str) -> str:
 def describe_collection(conn, progress: Optional[Callable] = None,
                         cancelled: Callable[[], bool] = lambda: False, limit: Optional[int] = None) -> dict:
     """Describe present images that are not marked as non-keeper duplicates and
-    have no description for this model + prompt version yet."""
+    have no valid description yet. A valid description from an earlier model
+    or prompt is kept (owner's decision 2026-11-12: do not redo good work)."""
     ensure_running()
     if not status()['model_ready']:
         raise OllamaUnavailable(f'model {VLM_MODEL} is not downloaded; run scripts/download-models.sh')
@@ -175,8 +176,8 @@ def describe_collection(conn, progress: Optional[Callable] = None,
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.id NOT IN (SELECT m.asset_id FROM duplicate_members m JOIN duplicate_groups g ON g.id = m.group_id '
         "                 WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id) "
-        'AND a.sha256 NOT IN (SELECT sha256 FROM ai_annotations WHERE model = ? AND prompt_version = ? AND error IS NULL) '
-        'GROUP BY a.sha256 ORDER BY t', (VLM_MODEL, PROMPT_VERSION)).fetchall()
+        "AND a.sha256 NOT IN (SELECT sha256 FROM ai_annotations WHERE error IS NULL AND COALESCE(description, '') != '') "
+        'GROUP BY a.sha256 ORDER BY t').fetchall()
     if limit:
         rows = rows[:limit]
     from app.ai.throttle import Throttle

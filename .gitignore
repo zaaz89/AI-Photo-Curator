@@ -17,3 +17,6 @@ local-data/
 *.sqlite
 *.sqlite3
 *.db
+
+# Small real test set (owner's photos, never committed)
+test-photos/

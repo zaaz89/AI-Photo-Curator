@@ -815,7 +815,7 @@ Avoid a complete rewrite unless the repository audit establishes a clear technic
 | Exact duplicate detection | SHA-256 |
 | Near duplicate detection | Existing perceptual hash + ORB |
 | Semantic image retrieval | SigLIP 2 base (`google/siglip2-base-patch16-224`, decided 2026-11-12) |
-| Local vision AI | Ollama with `qwen3-vl:4b` (decided 2026-11-12; models stored in `local-data/models/`) |
+| Local vision AI | Ollama with `qwen3-vl:4b-instruct` (decided 2026-11-12; the thinking variant `qwen3-vl:4b` was replaced; models stored in `local-data/models/`) |
 | Face detection | Apple Vision or suitable local model |
 | Background processing | Python workers |
 | Frontend | Existing interface initially |

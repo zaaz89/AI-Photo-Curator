@@ -35,7 +35,8 @@ Shared instructions for every AI agent working on this repository. Two agents wo
 - Dependency audit: `uv run pip-audit -r requirements.txt`.
 - ExifTool is required (`brew install exiftool`).
 - Local AI (M3): `brew install ollama`, then `scripts/download-models.sh` once. Models live in `local-data/models/`. The app starts Ollama via `scripts/ollama-serve.sh`. Tests use fake models and never need them.
-- Real test photos on the owner's Mac: `~/Desktop/photos` (read-only source; never write into it).
+- Real test photos on the owner's Mac: `~/Desktop/photos` (236 photos, read-only source; never write into it).
+- Owner's rule (2026-11-12): check changes on real photos with the small collection `test-10` (10 copies in `test-photos/`, ignored by git: 8 Sony A7 IV incl. one near-duplicate pair, 2 Sony A7 III). Full pipeline takes about 10 s. Run the full 236-photo folder or any long AI job only when the owner asks, and never leave a long AI job running without telling the owner.
 
 ## Hard safety rules (from the brief, sections 15 and 16)
 

@@ -9,7 +9,7 @@
 | Job | Model | License | Size | Where |
 |---|---|---|---|---|
 | Search (image and text embeddings) | `google/siglip2-base-patch16-224` | Apache 2.0 | 1.4 GB | `local-data/models/huggingface` |
-| Descriptions, tags, query translation | `qwen3-vl:4b` via Ollama 0.40 | Apache 2.0 | 3.3 GB | `local-data/models/ollama` |
+| Descriptions, tags, query translation | `qwen3-vl:4b-instruct` via Ollama 0.40 | Apache 2.0 | 3.3 GB | `local-data/models/ollama` |
 
 Setup on a new machine: `brew install ollama exiftool`, `uv sync`, `scripts/download-models.sh`. The app starts Ollama itself through `scripts/ollama-serve.sh` (models in the project, loopback only). At runtime the Hugging Face hub runs offline (`HF_HUB_OFFLINE=1`). Photos go only to the Ollama server on 127.0.0.1, as a 768 px JPEG in memory.
 
@@ -41,6 +41,14 @@ Also:
 - Model answers are capped at 320 tokens. The model sometimes kept listing tags for over 1,000 tokens, which made one description take 20–40 s.
 
 Measured with `ioreg` (GPU "Device Utilization %", whole Mac, sampled every second): idle with the owner's apps 18 % on average; during a describe job at the 30 % setting 30 % on average, with full-load bursts in 39 of 120 samples (a third of the time, as set). One photo takes about 7 s of work plus 16 s of rest.
+
+## Model switch (2026-11-12)
+
+The first model, `qwen3-vl:4b`, is the thinking variant: it writes 300–400 tokens of reasoning even with `think: false`, which three different ways of disabling did not stop. With the 320-token answer cap that left 177 of 202 answers empty, and the code stored them as empty successes. Fixed: empty answers or answers without a description are errors (retried next run), the cap is 1,024 tokens, and a cut-off answer is retried once with a repeat penalty. The owner approved switching to `qwen3-vl:4b-instruct` (no thinking) and removing the old model.
+
+On the `test-10` collection with the 30 % limit: 9 photos described (the tenth is a duplicate and skipped) in 76 s, about 3 s of model work per photo. No empty answers, every photo has tags, people counts were right, no place or person names. Some descriptions interpret the moment ("proposing to a woman"), which matches what is visible.
+
+Valid descriptions from the earlier model are kept; only photos without one are described (owner: do not redo good work).
 
 ## Not done or not verified
 
