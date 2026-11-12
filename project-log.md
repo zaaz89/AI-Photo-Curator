@@ -63,3 +63,8 @@ Not done: Live Photo pairing on real files (no .MOV in the owner's set), moving 
 PR #7 (M4) merged into `main` on the owner's request. M5 on branch `claude/m5-smart-export`: export plan with four name templates, five folder layouts and three duplicate options; preview in a new Export tab; execution through the verified copy exporter with manifest (original names recorded); pairs share names; undated fallback; resume of interrupted exports. Details: `notes/m5-smart-export.md`.
 Tests: 71 pass. test-10: 18 of 18 files exported and verified, sources unchanged; preview checked in the browser.
 Not done: cancel and resume buttons on the page, writing metadata into copies (copies stay byte-identical by design).
+
+### 2026-11-12 — PR #8 merged; M6 one app, EN/SL (Claude)
+PR #8 (M5) merged. M6 on branch `claude/m6-unified-ui`: owner chose English by default (Slovenian optional) and moving all upstream features at once. New single page with sidebar views, inspector, Quick Look, keyboard; focus tiers, Best photos ranking and phone wallpapers moved onto the collection index; old page, folder routes, map and two dead modules removed. Details: `notes/m6-unified-ui.md`.
+Tests: 73 pass. Browser checks on test-10 in both languages and both themes.
+Not done: offline map, multi-select, drag between events.

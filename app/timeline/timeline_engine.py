@@ -104,6 +104,16 @@ def timeline(conn: sqlite3.Connection) -> dict:
         'described': sum(1 for i in items if i['ai']),
         'corrected_clocks': conn.execute("SELECT COUNT(*) FROM clock_corrections WHERE applied_s != 0").fetchone()[0],
     }
+    from app.quality.scoring import focus_tiers
+    tiers = focus_tiers(conn)
+    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded FROM marks')}
+    sha_of = {r['id']: r['sha256'] for r in rows}
+    for i in items:
+        i['focus'] = tiers.get(i['id'])
+        m = marks.get(sha_of.get(i['id']))
+        i['wallpaper'] = bool(m['wallpaper']) if m else False
+        i['excluded'] = bool(m['excluded']) if m else False
+    summary['focus'] = dict(Counter(v['tier'] for v in tiers.values()))
     counts = Counter(i['event_id'] for i in items if i['event_id'])
     events = [{'id': e['id'], 'day': e['day'], 'name': e['name'], 'name_source': e['name_source'],
                'place_label': e['place_label'], 'locked': bool(e['locked']), 'count': counts.get(e['id'], 0)}

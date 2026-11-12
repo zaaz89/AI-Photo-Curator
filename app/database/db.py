@@ -179,6 +179,23 @@ MIGRATIONS = [
     """,
     # 5: other names of a place (e.g. Firence, Firenze) so search works in any language
     "ALTER TABLE places ADD COLUMN aliases TEXT;",
+    # 6: focus and ranking scores (moved from the upstream cull/rank steps) and the owner's marks
+    """
+    CREATE TABLE quality (
+        sha256           TEXT PRIMARY KEY,
+        region_sharpness REAL NOT NULL,
+        quick_quality    REAL NOT NULL,
+        scores_json      TEXT NOT NULL,       -- composition, technical, sharpness, color, aesthetic + sub-scores
+        computed_at      TEXT NOT NULL
+    );
+    CREATE TABLE marks (                      -- by content, so they survive re-indexing; never move files
+        sha256     TEXT PRIMARY KEY,
+        focus      TEXT,                      -- owner's override: sharp | soft | blurry
+        wallpaper  INTEGER NOT NULL DEFAULT 0, -- flagged as phone wallpaper
+        excluded   INTEGER NOT NULL DEFAULT 0, -- removed from Best photos
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

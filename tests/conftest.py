@@ -79,10 +79,8 @@ def pc():
 
 @pytest.fixture
 def client(pc):
-    for step in ('cull', 'dedup', 'rank'):
-        pc.state[step]['running'] = False
-    pc.state['phone_bg'].clear()
-    pc.state['excluded'].clear()
+    from app.web import timeline_bp
+    timeline_bp._job['running'] = False
     return pc.app.test_client()
 
 

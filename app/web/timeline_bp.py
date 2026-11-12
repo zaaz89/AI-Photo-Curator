@@ -19,7 +19,7 @@ from app.timeline.clock_sync import list_clocks, set_correction
 from app.timeline.timeline_engine import duplicate_groups, timeline
 from app.ai import vision_analyzer as vlm
 
-bp = Blueprint('timeline', __name__, template_folder='templates')
+bp = Blueprint('timeline', __name__, template_folder='templates', static_folder='static', static_url_path='/ui')
 
 _job_lock = threading.Lock()
 _job = {'running': False, 'collection': None, 'status': 'Idle', 'progress': 0,
@@ -32,11 +32,6 @@ folder_dialog = None
 
 def _err(msg, code=400):
     return jsonify({'ok': False, 'error': msg}), code
-
-
-@bp.route('/timeline')
-def page():
-    return render_template('timeline.html')
 
 
 @bp.route('/api/collections', methods=['GET'])
@@ -343,8 +338,10 @@ def reset_events(cid):
 
 
 def _export_options(data):
+    from app import settings
     return {'template': data.get('template', 'default'), 'folders': data.get('folders', 'day'),
-            'duplicates': data.get('duplicates', 'skip')}
+            'duplicates': data.get('duplicates', 'skip'), 'selection': data.get('selection', 'all'),
+            'topn': int(data.get('topn') or 50), 'weights': settings.load()['rank_weights']}
 
 
 @bp.route('/api/collections/<cid>/export/preview', methods=['POST'])
@@ -407,3 +404,86 @@ def start_smart_export(cid):
     threading.Thread(target=_run_smart_export,
                      args=(cid, _export_options(data), dest, data.get('resume_dir')), daemon=True).start()
     return jsonify({'ok': True, 'dest': dest})
+
+
+
+@bp.route('/api/collections/<cid>/marks', methods=['POST'])
+def set_marks(cid):
+    """Body: {"asset_id": int, "focus": "sharp"|"soft"|"blurry"|null, "wallpaper": bool, "excluded": bool}.
+    Marks only; no file is moved."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.quality.scoring import set_mark
+    data = dict(request.get_json() or {})
+    try:
+        aid = int(data.pop('asset_id'))
+        return jsonify({'ok': True, 'marks': set_mark(conn, aid, **data)})
+    except (KeyError, TypeError, ValueError) as e:
+        return _err(str(e))
+
+
+@bp.route('/api/collections/<cid>/best')
+def get_best(cid):
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app import settings
+    from app.quality.scoring import best_photos
+    return jsonify({'weights': settings.load()['rank_weights'],
+                    'photos': best_photos(conn, settings.load()['rank_weights'], int(request.args.get('topn', 50)))})
+
+
+def _run_wallpapers(cid, dest):
+    try:
+        from app.quality.scoring import crop_to_phone
+        from app.safety.safe_export import ExportItem, ExportError, export_copies
+        conn = col.open_db(cid)
+        rows = conn.execute("SELECT a.filename, s.path || '/' || a.rel_path AS path FROM assets a "
+                            'JOIN sources s ON s.id = a.source_id JOIN marks m ON m.sha256 = a.sha256 '
+                            "WHERE m.wallpaper = 1 AND a.status = 'present' GROUP BY a.sha256").fetchall()
+        items = []
+        for k, r in enumerate(rows, 1):
+            stem = f"{k:03d}_{Path(r['filename']).stem}"
+            items.append(ExportItem(source=r['path'], dest_name=f"Original/{stem}{Path(r['filename']).suffix}"))
+            items.append(ExportItem(source=r['path'], dest_name=f'Wallpaper_19.5x9/{stem}.jpg', kind='derived'))
+
+        def derive(it, target):
+            from raw_loader import open_image_pil
+            with open_image_pil(it.source) as im, open(target, 'xb') as fout:
+                crop_to_phone(im).save(fout, format='JPEG', quality=92)
+
+        roots = [r[0] for r in conn.execute('SELECT path FROM sources')]
+        res = export_copies(items, dest, roots, 'Phone wallpapers', derive=derive)
+        _job['result'] = {'export': {'ok': res.ok, 'dest': res.job_dir, 'verified': res.verified,
+                                     'failed': res.failed}}
+        _job['status'] = (f'Wallpapers done: {len(rows)} photos in {res.job_dir}' if res.ok
+                          else f'Wallpapers incomplete: {res.failed} failed. See {res.manifest}')
+        _job['progress'] = 100
+    except Exception as e:
+        _job['error'] = str(e)
+        _job['status'] = f'Error: {e}'
+    finally:
+        _job['running'] = False
+
+
+@bp.route('/api/collections/<cid>/export/wallpapers', methods=['POST'])
+def export_wallpapers(cid):
+    """Flagged photos as verified originals plus 1290x2796 phone crops (upstream Phone BG feature)."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    n = conn.execute('SELECT COUNT(*) FROM marks WHERE wallpaper = 1').fetchone()[0]
+    if not n:
+        return _err('No photos are flagged as wallpaper yet.')
+    data = request.get_json() or {}
+    dest = data.get('dest') or (folder_dialog('Choose where to export wallpapers') if folder_dialog else None)
+    if not dest:
+        return jsonify({'ok': False, 'cancelled': True})
+    with _job_lock:
+        if _job['running']:
+            return _err(f"a job for {_job['collection']} is still running", 409)
+        _job.update(running=True, collection=cid, status='Exporting wallpapers…', progress=0,
+                    result=None, error=None, cancel=False, started=time.time())
+    threading.Thread(target=_run_wallpapers, args=(cid, dest), daemon=True).start()
+    return jsonify({'ok': True})

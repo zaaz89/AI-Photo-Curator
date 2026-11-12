@@ -23,13 +23,13 @@ Shared instructions for every AI agent working on this repository. Two agents wo
 - Remote `origin`: the owner's fork `zaaz89/AI-Photo-Curator`. It is public, so nothing personal goes into git.
 - Remote `upstream`: the original open-source project `kotyzap/Photo-Curator` (MIT). Keep its LICENSE and copyright notice. Pull upstream changes only deliberately, through a PR.
 - `docs/` is the upstream landing page, not documentation for this fork. Put new architecture notes in `notes/`.
-- `photo_curator.py` is the upstream Flask app (UI + cull/dedup/rank). New code goes into the `app/` package, not into this file.
+- `photo_curator.py` is the slim server: request guard, security headers, read-only thumbnail/image/EXIF endpoints. The UI is `app/web/templates/app.html` + `app/web/static/` (since M6); everything else lives in the `app/` package.
 - `local-data/` holds app data (caches, databases, recents). Git ignores it.
 
 ## Setup, run, test
 
 - Python 3.12 managed by `uv`: `uv sync`. `requirements.txt` is generated from `pyproject.toml` (`uv export`), do not edit it by hand.
-- Run the app: `uv run python photo_curator.py` → http://127.0.0.1:5014 (timeline at `/timeline`)
+- Run the app: `uv run python photo_curator.py` → http://127.0.0.1:5014
 - Collections from the command line: `uv run python -m app.cli --help` (create, add-source, index, timeline, list).
 - Tests: `uv run pytest`. Every PR runs them and reports the result. `tests/test_source_safety.py` must always pass.
 - Dependency audit: `uv run pip-audit -r requirements.txt`.
