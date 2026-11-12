@@ -13,6 +13,7 @@ are verified copies in a destination the owner chooses.
 """
 
 import os
+import sys
 import json
 import time
 import hashlib
@@ -206,9 +207,13 @@ def save_recent(folder):
 
 def native_folder_dialog(prompt="Select a folder"):
     try:
-        script = f'POSIX path of (choose folder with prompt "{prompt}")'
-        out = subprocess.run(['osascript', '-e', script],
-                             capture_output=True, text=True, timeout=120)
+        # The prompt is passed as an argument, never spliced into the script, so a
+        # name with quotes cannot run AppleScript.
+        out = subprocess.run(['osascript', '-e', 'on run argv',
+                              '-e', 'activate',
+                              '-e', 'POSIX path of (choose folder with prompt (item 1 of argv))',
+                              '-e', 'end run', str(prompt)],
+                             capture_output=True, text=True, timeout=300)
         path = out.stdout.strip()
         if path:
             return path.rstrip('/')
@@ -390,5 +395,12 @@ app.register_blueprint(timeline_bp.bp)
 
 
 if __name__ == '__main__':
+    import atexit
+    import signal
+    from app.ai.vision_analyzer import stop_started_ollama
+    # The Mac app stops the server with SIGTERM; exit cleanly so the Ollama server
+    # this app started (if any) is stopped too.
+    atexit.register(stop_started_ollama)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     # Bind to loopback only: never reachable from the local network.
     app.run(host='127.0.0.1', port=PORT, debug=False, threaded=True)

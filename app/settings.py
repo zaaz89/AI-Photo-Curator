@@ -16,6 +16,9 @@ DEFAULTS = {
     'ui_language': 'en',
     # Best photos: weights of the five ranking categories (upstream defaults).
     'rank_weights': {'aesthetic': 30, 'composition': 22, 'technical': 20, 'sharpness': 16, 'color': 12},
+    # Choosing the better of near-identical photos: faces (eyes open, looking at the camera,
+    # face sharp), whole-frame focus, overall look, resolution.
+    'keeper_weights': {'faces': 40, 'focus': 30, 'look': 20, 'resolution': 10},
 }
 CHOICES = {'ai_gpu_share': (25, 30, 50, 100), 'ui_language': ('en', 'sl')}
 
@@ -42,6 +45,10 @@ def save(changes: dict) -> dict:
             raise ValueError(f'{k} must be one of {CHOICES[k]}')
         if isinstance(DEFAULTS[k], bool):
             v = bool(v)
+        if k == 'keeper_weights':
+            if not isinstance(v, dict) or any(c not in DEFAULTS['keeper_weights'] for c in v):
+                raise ValueError('keeper_weights must map faces, focus, look, resolution to numbers')
+            v = {c: max(0, min(100, int(v.get(c, 0)))) for c in DEFAULTS['keeper_weights']}
         if k == 'rank_weights':
             if not isinstance(v, dict) or any(c not in DEFAULTS['rank_weights'] for c in v):
                 raise ValueError('rank_weights must map the five categories to numbers')

@@ -5,6 +5,7 @@ and security headers apply. Indexing runs in one background thread at a time.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -219,8 +220,10 @@ def choose_keeper(cid, gid):
 @bp.route('/api/ai/status')
 def ai_status():
     from app.ai.models import EMBED_MODEL, models_dir
+    from app.quality.faces import helper_available
     return jsonify({'search_model': EMBED_MODEL,
                     'search_ready': (models_dir() / 'huggingface').exists(),
+                    'faces_ready': helper_available(),
                     'vlm': vlm.status()})
 
 
@@ -339,6 +342,11 @@ def reset_events(cid):
 
 def _export_options(data):
     from app import settings
+    if data.get('preset') == 'google_photos':
+        # One folder, the kept photos (no rejected, no blurry unless favourite, no extra duplicates),
+        # Live Photo videos next to their stills.
+        return {'template': 'default', 'folders': 'flat', 'duplicates': 'skip', 'selection': 'no_blurry',
+                'topn': 50, 'weights': settings.load()['rank_weights']}
     return {'template': data.get('template', 'default'), 'folders': data.get('folders', 'day'),
             'duplicates': data.get('duplicates', 'skip'), 'selection': data.get('selection', 'all'),
             'topn': int(data.get('topn') or 50), 'weights': settings.load()['rank_weights']}
@@ -351,14 +359,16 @@ def export_preview(cid):
     if err:
         return err
     from app.organization.export_plan import plan_export
+    data = request.get_json() or {}
     try:
-        plan = plan_export(conn, **_export_options(request.get_json() or {}))
+        plan = plan_export(conn, **_export_options(data))
+        plan['writes_metadata'] = data.get('preset') == 'google_photos' or bool(data.get('write_metadata'))
     except ValueError as e:
         return _err(str(e))
     return jsonify(plan)
 
 
-def _run_smart_export(cid, opts, dest, resume_dir):
+def _run_smart_export(cid, opts, dest, resume_dir, write_meta=False):
     def progress(msg, i, n):
         _job['status'] = f'{msg} ({i}/{n})' if n else msg
         _job['progress'] = int(i / n * 100) if n else _job['progress']
@@ -368,11 +378,12 @@ def _run_smart_export(cid, opts, dest, resume_dir):
         conn = col.open_db(cid)
         plan = plan_export(conn, **opts)
         try:
-            res = run_export(conn, dest, plan, resume_dir=resume_dir, progress=progress)
+            res = run_export(conn, dest, plan, resume_dir=resume_dir, progress=progress, write_meta=write_meta)
         except ExportError as e:
             raise RuntimeError(str(e))
         _job['result'] = {'export': {'ok': res.ok, 'dest': res.job_dir, 'manifest': res.manifest,
-                                     'verified': res.verified, 'failed': res.failed, 'skipped': res.skipped}}
+                                     'verified': res.verified, 'failed': res.failed, 'skipped': res.skipped,
+                                     'metadata': res.metadata}}
         _job['status'] = (f'Export done: {res.verified} files copied and verified in {res.job_dir}' if res.ok else
                           f'Export incomplete: {res.verified} verified, {res.failed} failed, {res.skipped} skipped. '
                           f'See {res.manifest}')
@@ -402,7 +413,9 @@ def start_smart_export(cid):
         _job.update(running=True, collection=cid, status='Preparing export…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_smart_export,
-                     args=(cid, _export_options(data), dest, data.get('resume_dir')), daemon=True).start()
+                     args=(cid, _export_options(data), dest, data.get('resume_dir'),
+                           data.get('preset') == 'google_photos' or bool(data.get('write_metadata'))),
+                     daemon=True).start()
     return jsonify({'ok': True, 'dest': dest})
 
 
@@ -487,3 +500,110 @@ def export_wallpapers(cid):
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_wallpapers, args=(cid, dest), daemon=True).start()
     return jsonify({'ok': True})
+
+
+
+@bp.route('/api/collections/<cid>/marks/batch', methods=['POST'])
+def set_marks_batch(cid):
+    """Body: {"asset_ids": [...], "favorite"|"rejected"|"focus"|"wallpaper"|"excluded": value}."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.quality.scoring import set_mark
+    data = dict(request.get_json() or {})
+    ids = data.pop('asset_ids', None) or []
+    try:
+        for a in ids:
+            set_mark(conn, int(a), **data)
+    except (TypeError, ValueError) as e:
+        return _err(str(e))
+    return jsonify({'ok': True, 'count': len(ids)})
+
+
+@bp.route('/api/collections/<cid>/events/move', methods=['POST'])
+def move_photos(cid):
+    """Body: {"asset_ids": [...], "event_id": int | null, "name": str (for a new event)}."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.timeline.event_detector import move_to_event
+    data = request.get_json() or {}
+    try:
+        eid = move_to_event(conn, [int(a) for a in data.get('asset_ids') or []], data.get('event_id'),
+                            (data.get('name') or '').strip() or None)
+    except (TypeError, ValueError) as e:
+        return _err(str(e))
+    return jsonify({'ok': True, 'event_id': eid})
+
+
+@bp.route('/api/collections/<cid>/workflow', methods=['GET', 'POST'])
+def workflow(cid):
+    """The trip checklist. POST {"step": str, "done": bool}."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    steps = ('import', 'times', 'duplicates', 'blurry', 'events', 'descriptions', 'export')
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        if data.get('step') not in steps:
+            return _err('unknown step')
+        with conn:
+            conn.execute('INSERT INTO workflow (step, done, updated_at) VALUES (?, ?, ?) ON CONFLICT(step) '
+                         'DO UPDATE SET done = excluded.done, updated_at = excluded.updated_at',
+                         (data['step'], int(bool(data.get('done'))), now_iso()))
+    done = {r['step']: bool(r['done']) for r in conn.execute('SELECT step, done FROM workflow')}
+    return jsonify({'steps': [{'step': s, 'done': done.get(s, False)} for s in steps]})
+
+
+@bp.route('/api/collections/<cid>/poster/<int:asset_id>')
+def video_poster(cid, asset_id):
+    """Poster frame of a video, made by the helper into local-data/cache/video-thumbs."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from flask import abort, send_file
+    row = conn.execute('SELECT v.thumb FROM assets a JOIN video_meta v ON v.sha256 = a.sha256 WHERE a.id = ?',
+                       (asset_id,)).fetchone()
+    base = os.path.realpath(col.data_dir() / 'cache' / 'video-thumbs')
+    if not row or not row['thumb'] or not os.path.realpath(row['thumb']).startswith(base + os.sep):
+        abort(404)
+    return send_file(row['thumb'], mimetype='image/jpeg', max_age=86400)
+
+
+@bp.route('/api/collections/<cid>/media/<int:asset_id>')
+def media(cid, asset_id):
+    """Stream a video (read-only, range requests) from a source folder of this collection."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from flask import abort, send_file
+    row = conn.execute("SELECT s.path AS root, a.rel_path, a.kind FROM assets a JOIN sources s ON s.id = a.source_id "
+                       "WHERE a.id = ? AND a.status = 'present'", (asset_id,)).fetchone()
+    if not row or row['kind'] != 'video':
+        abort(404)
+    root = os.path.realpath(row['root'])
+    path = os.path.realpath(os.path.join(root, row['rel_path']))
+    if not path.startswith(root + os.sep) or not os.path.isfile(path):
+        abort(404)
+    return send_file(path, conditional=True, max_age=0)
+
+
+@bp.route('/api/reveal-export', methods=['POST'])
+def reveal_export():
+    """Open a finished export folder in Finder. Only folders that hold this app's
+    export manifest are accepted, so the endpoint cannot open arbitrary paths."""
+    import subprocess
+    from app.safety.safe_export import MANIFEST_NAME
+    path = os.path.realpath(str((request.get_json() or {}).get('path') or ''))
+    if not path or not os.path.isdir(path) or not os.path.isfile(os.path.join(path, MANIFEST_NAME)):
+        return _err('not an export folder', 404)
+    subprocess.run(['open', path], timeout=10)
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/browse-folder', methods=['POST'])
+def browse_folder():
+    """Native folder picker; returns the chosen path only (nothing is added)."""
+    prompt = (request.get_json() or {}).get('prompt') or 'Choose a folder'
+    path = folder_dialog(str(prompt)[:120]) if folder_dialog else None
+    return jsonify({'path': path})

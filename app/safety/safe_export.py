@@ -52,6 +52,7 @@ class ExportResult:
     failed: int = 0
     skipped: int = 0
     items: list = field(default_factory=list)
+    metadata: Optional[dict] = None
 
 
 def _is_within(child: str, parent: str) -> bool:

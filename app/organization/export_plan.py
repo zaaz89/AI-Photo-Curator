@@ -70,7 +70,8 @@ def _event_part(r, place: str) -> str:
 def _rows(conn):
     return conn.execute(
         "SELECT a.id, a.filename, a.ext, a.kind, a.size, a.sha256, a.source_id, s.path || '/' || a.rel_path AS path, "
-        'c.local_time, c.confidence, c.sort_key + COALESCE(cc.applied_s, 0) AS t, COALESCE(cc.applied_s, 0) AS shift, '
+        'c.local_time, c.confidence, c.rule, c.offset_minutes, '
+        'c.sort_key + COALESCE(cc.applied_s, 0) AS t, COALESCE(cc.applied_s, 0) AS shift, '
         'p.name AS place_name, p.label AS place_label, p.precision AS place_precision, p.region, p.country, '
         'e.id AS event_id, e.name AS event_name, e.name_source AS event_source, e.place_label AS event_place, e.day '
         'FROM assets a JOIN sources s ON s.id = a.source_id '
@@ -118,9 +119,14 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     if selection not in SELECTIONS:
         raise ValueError(f'selection must be one of {SELECTIONS}')
     keep_only = None
+    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, favorite, rejected FROM marks')}
+    favorites = {r[0] for r in conn.execute("SELECT a.id FROM assets a JOIN marks m ON m.sha256 = a.sha256 "
+                                             "WHERE m.favorite = 1")}
+    rejected = {r[0] for r in conn.execute("SELECT a.id FROM assets a JOIN marks m ON m.sha256 = a.sha256 "
+                                            "WHERE m.rejected = 1")}
     if selection == 'no_blurry':
         from app.quality.scoring import focus_tiers
-        blurry = {a for a, v in focus_tiers(conn).items() if v['tier'] == 'blurry'}
+        blurry = {a for a, v in focus_tiers(conn).items() if v['tier'] == 'blurry'} - favorites
     else:
         blurry = set()
     if selection == 'best':
@@ -130,6 +136,10 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     rows = _rows(conn)
     pairs = _pairs(conn)
     skip_dups = _non_keepers(conn)
+    warnings = Counter()
+    ai = {r['sha256']: r['description'] for r in conn.execute(
+        "SELECT sha256, description FROM ai_annotations WHERE error IS NULL AND COALESCE(description, '') != '' "
+        'ORDER BY created_at')}
     days = sorted({_local_dt(r).date() for r in rows if _local_dt(r)})
     day_no = {d: (d - days[0]).days + 1 for d in days}          # calendar days since the first photo
     day_place = {}
@@ -138,6 +148,10 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                     and r['place_precision'] == 'in' and r['place_name'])
         day_place[d] = c.most_common(1)[0][0] if c else ''
 
+    if rejected:
+        before = len(rows)
+        rows = [r for r in rows if r['id'] not in rejected and pairs.get(r['id']) not in rejected]
+        warnings['rejected by you'] = before - len(rows)
     excluded_by_selection = 0
     if keep_only is not None or blurry:
         before = len(rows)
@@ -148,7 +162,7 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     by_id = {r['id']: r for r in rows}
     seq = defaultdict(int)
     stems = {}
-    entries, warnings = [], Counter()
+    entries = []
 
     def folder_for(r, dt):
         top = []
@@ -197,7 +211,7 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                 parts = [trip, f'Day-{day_no[dt.date()]}', clean_part(r['event_name'] or ''), n]
             stem = '_'.join(p for p in parts if p)
         stems[r['id']] = (folder, stem)
-        entries.append(_entry(r, folder, stem, r['id'] in skip_dups))
+        entries.append(_entry(r, folder, stem, r['id'] in skip_dups, meta=_meta(r, dt, ai, r['id'] in favorites)))
 
     for sec, pri in pairs.items():
         r = by_id.get(sec)
@@ -218,17 +232,67 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
             'warnings': dict(warnings), 'entries': entries}
 
 
-def _entry(r, folder, stem, alternative, paired_with=None):
+def _meta(r, dt, ai, favorite) -> dict:
+    """What the Google Photos export writes into a copy (photos only)."""
+    if r['kind'] != 'image':
+        return {}
+    m = {}
+    off = r['offset_minutes']
+    if dt is not None and (r['shift'] or (off is not None and r['rule'] != 'exif_dto_offset')):
+        m['datetime'] = dt.strftime('%Y:%m:%d %H:%M:%S')
+        if off is not None:
+            m['offset'] = f"{'+' if off >= 0 else '-'}{abs(off) // 60:02d}:{abs(off) % 60:02d}"
+    if ai.get(r['sha256']):
+        from app.ai.vision_analyzer import tidy_description
+        m['description'] = tidy_description(ai[r['sha256']])
+    if r['place_precision'] == 'in' and r['place_name']:     # 'near X' is not written as city X
+        m['city'] = r['place_name']
+    if r['place_precision'] in ('in', 'near', 'region') and r['country']:
+        m['country'] = r['country']
+    if favorite:
+        m['favorite'] = True
+    return m
+
+
+def _entry(r, folder, stem, alternative, paired_with=None, meta=None):
     ext = os.path.splitext(r['filename'])[1] or r['ext']          # original case kept (.HEIC stays .HEIC)
     dest = f'{folder}/{stem}{ext}' if folder else f'{stem}{ext}'
     return {'asset_id': r['id'], 'source': r['path'], 'original_name': r['filename'], 'dest': dest,
-            'size': r['size'], 'sha256': r['sha256'], 'alternative': alternative, 'paired_with': paired_with}
+            'size': r['size'], 'sha256': r['sha256'], 'alternative': alternative, 'paired_with': paired_with,
+            'meta': meta or {}}
 
 
-def run_export(conn, dest_root: str, plan: dict, resume_dir: str | None = None, progress=None):
+def run_export(conn, dest_root: str, plan: dict, resume_dir: str | None = None, progress=None,
+               write_meta: bool = False):
     from app.safety.safe_export import ExportItem, export_copies
     items = [ExportItem(source=e['source'], dest_name=e['dest']) for e in plan['entries']]
     roots = sorted({r[0] for r in conn.execute('SELECT path FROM sources')})
-    return export_copies(items, dest_root, roots, plan['trip'], resume_dir=resume_dir, progress=progress,
+    res = export_copies(items, dest_root, roots, plan['trip'], resume_dir=resume_dir, progress=progress,
                          extra={'plan': {k: plan[k] for k in ('template', 'folders', 'duplicates', 'selection', 'files', 'bytes')},
                                 'original_names': {e['dest']: e['original_name'] for e in plan['entries']}})
+    if write_meta and res.verified:
+        import json
+        from app.organization.metadata_writer import write_into_copies
+        if progress:
+            progress('Writing time, place and description into the copies', 0, 0)
+        work = [{'dest': it['dest'], 'meta': e['meta']} for it, e in zip(res.items, plan['entries'])
+                if it['status'] == 'verified' and e.get('meta')]
+        res.metadata = write_into_copies(res.job_dir, work, roots)
+        m = json.loads(open(res.manifest, encoding='utf-8').read())
+        by_dest = {w['dest']: w for w in work}
+        for it in m['items']:
+            w = by_dest.get(it['dest'])
+            if w and 'metadata_written' in w:
+                it['metadata_written'] = w['metadata_written']
+                it['metadata_verified'] = w['metadata_verified']
+                from app.safety.safe_export import sha256_file
+                it['sha256_dest_after_metadata'] = sha256_file(it['dest'])
+            elif w and 'metadata_error' in w:
+                it['metadata_error'] = w['metadata_error']
+        m['metadata'] = res.metadata
+        from app.safety.safe_export import _write_manifest
+        from pathlib import Path as _P
+        _write_manifest(_P(res.manifest), m)
+    else:
+        res.metadata = None
+    return res

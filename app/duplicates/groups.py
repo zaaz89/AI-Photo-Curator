@@ -168,6 +168,13 @@ def build_groups(conn, progress: Optional[Callable] = None,
                 groups.append((cat, part))
 
     choices = {r['group_key']: r['sha256'] for r in conn.execute('SELECT group_key, sha256 FROM keeper_choices')}
+    from app import settings
+    from app.quality.faces import summaries
+    face_map = summaries(conn)
+    qual = {}
+    for r in conn.execute('SELECT sha256, region_sharpness, scores_json FROM quality'):
+        qual[r['sha256']] = (r['region_sharpness'], json.loads(r['scores_json']).get('aesthetic'))
+    kw = settings.load().get('keeper_weights')
     with conn:
         conn.execute('DELETE FROM duplicate_groups')
         counts = defaultdict(int)
@@ -176,7 +183,7 @@ def build_groups(conn, progress: Optional[Callable] = None,
             if cat == 'similar_scene':
                 keeper, reasons = None, ['different shots of the same scene: keep both']
             else:
-                keeper, reasons = _recommend(rows, feats, members, cat, choices.get(key))
+                keeper, reasons = _recommend(rows, feats, members, cat, choices.get(key), face_map, qual, kw)
             pair_notes = sorted({e for a in members for b in members if a < b
                                  for e in evidence.get(frozenset((a, b)), [])})
             cur = conn.execute('INSERT INTO duplicate_groups (group_key, category, keeper_id, reasons_json) '
@@ -198,7 +205,13 @@ def similarity_matrix_block(sigs: np.ndarray, start: int, stop: int) -> np.ndarr
     return agree / sigs.shape[1]
 
 
-def _recommend(rows, feats, members, cat, chosen_sha):
+def _recommend(rows, feats, members, cat, chosen_sha, faces=None, quality=None, weights=None):
+    """Pick the keeper. Criteria (weights from settings 'keeper_weights'):
+    faces  eyes open, looking at the camera, face sharp (Apple Vision)
+    focus  region sharpness of the whole frame
+    look   the overall-look score of the ranking
+    resolution
+    A criterion that is missing for the whole group (e.g. no faces) is left out."""
     if chosen_sha:
         for m in members:
             if rows[m]['sha256'] == chosen_sha:
@@ -206,16 +219,47 @@ def _recommend(rows, feats, members, cat, chosen_sha):
     if cat == 'exact':
         m = min(members, key=lambda m: (rows[m]['source_id'], rows[m]['rel_path']))
         return rows[m]['id'], ['identical files: any copy is the same; suggested the first source\'s copy']
-    sharp = {m: feats[rows[m]['sha256']][1] for m in members}
-    res = {m: (rows[m]['width'] or 0) * (rows[m]['height'] or 0) for m in members}
-    smax, rmax = max(sharp.values()) or 1, max(res.values()) or 1
-    score = {m: 0.7 * sharp[m] / smax + 0.3 * res[m] / rmax for m in members}
-    best = max(members, key=lambda m: score[m])
-    reasons = [f'sharpest frame ({sharp[best]:.1f} vs median {np.median(list(sharp.values())):.1f})'
-               if sharp[best] == smax else f'best balance of sharpness and resolution']
-    if res[best] == rmax and len(set(res.values())) > 1:
+    faces, quality = faces or {}, quality or {}
+    w = {'faces': 40, 'focus': 30, 'look': 20, 'resolution': 10, **(weights or {})}
+    sha = {m: rows[m]['sha256'] for m in members}
+    crit = {
+        'faces': {m: (faces.get(sha[m]) or {}).get('score') for m in members},
+        'focus': {m: (quality.get(sha[m]) or (feats[sha[m]][1],))[0] for m in members},
+        'look': {m: (quality.get(sha[m]) or (None, None))[1] for m in members},
+        'resolution': {m: (rows[m]['width'] or 0) * (rows[m]['height'] or 0) for m in members},
+    }
+    total = {m: 0.0 for m in members}
+    used = 0.0
+    for name, vals in crit.items():
+        known = [v for v in vals.values() if v is not None]
+        if not known or w.get(name, 0) <= 0 or len(set(known)) == 1:
+            continue
+        hi = max(known) or 1
+        used += w[name]
+        for m in members:
+            total[m] += w[name] * ((vals[m] or 0) / hi)
+    best = max(members, key=lambda m: (total[m], -rows[m]['id']))
+    reasons = []
+    fb = faces.get(sha[best])
+    others = [faces.get(sha[m]) for m in members if m != best and faces.get(sha[m])]
+    if fb:
+        if fb['eyes_closed'] == 0 and any(o['eyes_closed'] for o in others):
+            reasons.append('eyes open (closed eyes in another frame)')
+        elif fb['eyes_closed'] == 0:
+            reasons.append('eyes open on all faces')
+        else:
+            reasons.append(f"{fb['eyes_closed']} face(s) with eyes possibly closed, still the best frame overall")
+        if fb['looking_away'] == 0 and any(o['looking_away'] for o in others):
+            reasons.append('looking at the camera (someone looks away in another frame)')
+    if crit['focus'][best] == max(v for v in crit['focus'].values() if v is not None):
+        reasons.append('sharpest frame')
+    if crit['look'][best] is not None and crit['look'][best] == max(v for v in crit['look'].values() if v is not None):
+        reasons.append('best overall look')
+    if crit['resolution'][best] == max(crit['resolution'].values()) and len(set(crit['resolution'].values())) > 1:
         reasons.append('highest resolution')
+    if not reasons:
+        reasons.append('best balance of the criteria')
     if len(members) >= LONG_GROUP:
         reasons.append(f'{len(members)} frames: a long sequence, frames may differ in expression or moment')
-    reasons.append('a recommendation only: expressions and moments are not judged yet')
+    reasons.append('a recommendation: change it with K or "Keep this one"')
     return rows[best]['id'], reasons

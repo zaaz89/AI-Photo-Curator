@@ -196,6 +196,35 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL
     );
     """,
+    # 7: face quality (Apple Vision, no identities), video metadata, favourite / reject marks
+    """
+    CREATE TABLE faces (
+        sha256      TEXT PRIMARY KEY,
+        n_faces     INTEGER NOT NULL,
+        faces_json  TEXT NOT NULL,            -- quality, yaw/roll/pitch, eye openness, box; no identity
+        computed_at TEXT NOT NULL
+    );
+    CREATE TABLE video_meta (
+        sha256      TEXT PRIMARY KEY,
+        duration    REAL,
+        width       INTEGER,
+        height      INTEGER,
+        created     TEXT,
+        thumb       TEXT,                     -- poster frame in local-data/cache/video-thumbs
+        error       TEXT,
+        computed_at TEXT NOT NULL
+    );
+    ALTER TABLE marks ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE marks ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0;
+    """,
+    # 8: the trip checklist (which steps the owner marked done)
+    """
+    CREATE TABLE workflow (
+        step       TEXT PRIMARY KEY,
+        done       INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

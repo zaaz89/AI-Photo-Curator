@@ -36,6 +36,8 @@ Shared instructions for every AI agent working on this repository. Two agents wo
 - ExifTool is required (`brew install exiftool`).
 - Places (M4): `scripts/download-geodata.sh` once (GeoNames, CC BY 4.0, into `local-data/geo/`).
 - Local AI (M3): `brew install ollama`, then `scripts/download-models.sh` once. Models live in `local-data/models/`. The app starts Ollama via `scripts/ollama-serve.sh`. Tests use fake models and never need them.
+- Faces and videos (M7): `scripts/build-helper.sh` once (Swift + Apple Vision/AVFoundation, into `local-data/bin/pc-helper`). Without it the app skips face and video analysis; tests never need it.
+- Mac app (M7): `scripts/build-mac-app.sh` builds `dist/Photo Curator.app` (`--install` copies it to `~/Applications`). It starts the server from this folder and stops it on quit; rebuild if the folder moves.
 - Real test photos on the owner's Mac: `~/Desktop/photos` (236 photos, read-only source; never write into it).
 - Owner's rule (2026-11-12): check changes on real photos with the small collection `test-10` (10 copies in `test-photos/`, ignored by git: 8 Sony A7 IV incl. one near-duplicate pair, 2 Sony A7 III). Full pipeline takes about 10 s. Run the full 236-photo folder or any long AI job only when the owner asks, and never leave a long AI job running without telling the owner.
 

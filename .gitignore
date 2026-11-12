@@ -20,3 +20,6 @@ local-data/
 
 # Small real test set (owner's photos, never committed)
 test-photos/
+
+# Built Mac app
+dist/
