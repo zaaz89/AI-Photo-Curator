@@ -194,9 +194,14 @@ class FastBatchDeduplicator:
             from raw_loader import open_image_pil
             img = open_image_pil(image_path)   # RAW-aware (EXIF from preview)
             exif = img.getexif()
-            # 36867 = DateTimeOriginal, 306 = DateTime
-            for tag in (36867, 306):
-                val = exif.get(tag)
+            # DateTimeOriginal (36867) lives in the Exif sub-IFD (0x8769), not
+            # in IFD0. IFD0 DateTime (306) is the last save/edit time and is
+            # only a fallback.
+            try:
+                sub = exif.get_ifd(0x8769)
+            except Exception:
+                sub = {}
+            for val in (sub.get(36867), exif.get(36867), exif.get(306)):
                 if val:
                     import time as _t
                     result = _t.mktime(_t.strptime(str(val), "%Y:%m:%d %H:%M:%S"))

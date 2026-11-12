@@ -7,10 +7,9 @@ Ranking Studio:
 
   1 · CULL   contrast-normalized sharpness (haze/night/low-contrast shots are
              kept; only true blur is flagged). Per-photo Sharp/Blurry override
-             that physically moves files in/out of Blurred/.
+             (a mark only; files never move).
   2 · DEDUP  global perceptual-hash clustering (FastBatchDeduplicator) — burst
-             sequences collapse to their sharpest frame; optional auto-move of
-             duplicates to Duplicates/.
+             sequences collapse to their sharpest frame (marked, never moved).
   3 · RANK   the advanced engine (photo_ranking_v3) with LIVE weight sliders,
              per-photo radar + sub-score breakdown, and non-destructive
              Remove/Restore from both the grid and the lightbox.
@@ -18,7 +17,10 @@ Ranking Studio:
 Steps feed each other: Rank uses Dedup survivors if present, else Cull
 survivors, else the whole folder.
 
-Pure cv2 / numpy / Pillow + Flask. Fully offline. Port 5001.
+Pure cv2 / numpy / Pillow + Flask. Port 5014 (PHOTOCURATOR_PORT).
+
+AI Photo Curator fork rule: source folders are read-only. App data lives in
+local-data/; exports are verified copies in a destination you choose.
 """
 
 import os
@@ -44,7 +46,7 @@ from raw_loader import (RAW_EXTS, HAS_RAWPY, is_raw,
                         open_image_pil, imread_bgr, imread_gray)
 from photo_ranking_v3 import AdvancedPhotoAnalyzer
 from photo_dedup_batch import FastBatchDeduplicator
-from photo_file_organizer import PhotoOrganizer
+from app.safety.safe_export import ExportItem, ExportError, export_copies
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -130,9 +132,19 @@ VENDOR_FILES = {'maplibre-gl-csp.js': 'text/javascript',
                 'maplibre-gl-csp-worker.js': 'text/javascript',
                 'maplibre-gl.css': 'text/css'}
 
-RECENTS_FILE = Path.home() / '.photo_curator_recents.json'
-THUMB_DIR = Path('/tmp/photocurator_thumbs')
+# All app data (caches, recents) lives in the project's local-data/ folder,
+# which git ignores. Nothing is ever written inside a photo (source) folder.
+# PHOTOCURATOR_DATA_DIR overrides the location (used by the tests).
+DATA_DIR = Path(os.environ.get('PHOTOCURATOR_DATA_DIR',
+                               Path(__file__).resolve().parent / 'local-data'))
+CACHE_DIR = DATA_DIR / 'cache'
+RECENTS_FILE = DATA_DIR / 'recents.json'
+THUMB_DIR = CACHE_DIR / 'thumbs'
+DEDUP_CACHE_FILE = CACHE_DIR / 'dedup_sig_cache.json'
 THUMB_DIR.mkdir(parents=True, exist_ok=True)
+
+# Serializes "is this step already running?" checks in api_run.
+_run_lock = threading.Lock()
 
 DEFAULT_WEIGHTS = {'aesthetic': 30, 'composition': 22, 'technical': 20,
                    'sharpness': 16, 'color': 12}
@@ -203,7 +215,6 @@ state = {
     'topn': 50,
     'excluded': set(),
     'phone_bg': set(),   # paths flagged "suitable as phone wallpaper"
-    'auto': {'cull': False, 'dedup': False},
     'cull':  {**_blank(), 'sharp': 0, 'soft': 0, 'blurry': 0, 'sharp_paths': []},
     'dedup': {**_blank(), 'groups': 0, 'kept_paths': []},
     'rank':  {**_blank(), 'scores': [], 'total': 0, 'analyzed': 0},
@@ -655,55 +666,16 @@ def run_cull(folder, strictness, adaptive, rescue_on):
                 classify_all()
         classify_all()
 
-        # Blurry photos are NOT moved automatically — they stay in place so you
-        # can review them first, then move them with the "Move blurry → Blurred/"
-        # button (mirrors the TOP-N export flow).
+        # Blurry photos are only MARKED. Originals are never moved; the mark
+        # just keeps them out of Dedup/Rank and therefore out of exports.
         s['progress'] = 100
         s['complete'] = True   # full pass finished — survivors are safe to chain
-        s['status'] = (f"Done in {_fmt(time.time()-t0)} · {_tiers(total)}"
-                       + (" · review, then Move blurry → Blurred/" if s['blurry'] else ""))
+        s['status'] = f"Done in {_fmt(time.time()-t0)} · {_tiers(total)}"
     except Exception as e:
         logger.error(f"cull failed: {e}", exc_info=True)
         s['status'] = f"Error: {e}"
     finally:
         s['running'] = False
-
-
-def _relocate_for_status(path, now_kept):
-    """Keep disk in sync: kept (Sharp/Soft) live in the folder, Blurry go to
-    Blurred/. Soft is treated as kept — never auto-moved."""
-    folder = state.get('folder')
-    if not folder or not Path(folder).is_dir():
-        return path
-    folder = Path(folder)
-    blurred = folder / "Blurred"
-    name = Path(path).name
-    cur = None
-    for cand in (Path(path), folder / name, blurred / name):
-        if cand.exists():
-            cur = cand
-            break
-    if cur is None:
-        return path
-    if now_kept:
-        target = folder
-    else:
-        if not (state['auto']['cull'] or blurred.is_dir()):
-            return str(cur)
-        target = blurred
-    if cur.parent == target:
-        return str(cur)
-    try:
-        target.mkdir(parents=True, exist_ok=True)
-        dst = target / name
-        if dst.exists():
-            dst = target / f"{cur.stem}_{int(time.time())}{cur.suffix}"
-        shutil.move(str(cur), str(dst))
-        logger.info(f"Moved {name} → {target.name}/ (status change)")
-        return str(dst)
-    except Exception as e:
-        logger.warning(f"relocate fail {name}: {e}")
-        return str(cur)
 
 
 # --------------------------------------------------------------------------- #
@@ -747,9 +719,10 @@ def run_dedup(folder, threshold, ftype='all', pair='both'):
                            else f'No {ftype_label(ftype)} images to dedup')
             return
         dd = FastBatchDeduplicator(threshold=threshold)
-        # Persist perceptual signatures so a repeat run on this folder is fast.
+        # Persist perceptual signatures so a repeat run is fast. The cache lives
+        # in local-data/ (keyed by path|mtime|size), never in the photo folder.
         try:
-            dd.enable_disk_cache(Path(paths[0]).parent / '.dedup_sig_cache.json')
+            dd.enable_disk_cache(DEDUP_CACHE_FILE)
         except Exception:
             pass
         dd.reset()
@@ -820,21 +793,9 @@ def run_dedup(folder, threshold, ftype='all', pair='both'):
         removed = total - len(kept)
         took = _fmt(time.time() - t0)
         pct_uniq = (len(kept) / total * 100) if total else 0
-        if state['auto']['dedup'] and removed:
-            try:
-                org = PhotoOrganizer(folder)
-                kept_set = set(kept)
-                dups = [str(p) for p in paths if str(p) not in kept_set]
-                r = org.move_duplicate_photos(dups)
-                s['status'] = (f"Done in {took} · {len(kept)} unique of {total} "
-                               f"({pct_uniq:.0f}%) · moved {r.get('moved', 0)} → Duplicates/")
-            except Exception as e:
-                logger.warning(f"dedup auto-move failed: {e}")
-                s['status'] = (f"Done in {took} · {len(kept)} unique of {total} "
-                               f"({pct_uniq:.0f}%) · {removed} dupes")
-        else:
-            s['status'] = (f"Done in {took} · {len(kept)} unique of {total} "
-                           f"({pct_uniq:.0f}%) · {removed} dupes")
+        # Duplicates are only marked; originals are never moved.
+        s['status'] = (f"Done in {took} · {len(kept)} unique of {total} "
+                       f"({pct_uniq:.0f}%) · {removed} dupes")
         s['progress'] = 100
     except Exception as e:
         logger.error(f"dedup failed: {e}", exc_info=True)
@@ -1081,8 +1042,6 @@ HTML = r'''<!doctype html><html lang="en"><head>
   .exmap .cred a{color:inherit}
   .maplibregl-ctrl-attrib,.maplibregl-ctrl-logo{display:none!important}
   .top-right{display:flex;align-items:center;gap:10px}
-  .kofi-btn{display:block;line-height:0;transition:transform .12s}
-  .kofi-btn:hover{transform:translateY(-2px)} .kofi-btn img{display:block;border-radius:8px;box-shadow:0 3px 12px var(--shadow)}
   /* toasts */
   .toast-wrap{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:400;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
   .toast{background:var(--panel);color:var(--text);border:1px solid var(--border);border-left:4px solid var(--accent);
@@ -1099,7 +1058,6 @@ HTML = r'''<!doctype html><html lang="en"><head>
     <div class="step" data-step="rank">3 · Rank</div>
   </div>
   <div class="top-right">
-    <a class="kofi-btn" href='https://ko-fi.com/B3S720JCU6' target='_blank' rel='noopener'><img height='32' style='border:0;height:32px' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' alt='Buy Me a Coffee at ko-fi.com'></a>
     <button class="theme" id="themeToggle">🌙</button>
   </div>
 </div>
@@ -1131,7 +1089,6 @@ HTML = r'''<!doctype html><html lang="en"><head>
     <div class="sidebar-actions">
       <button class="btn-ghost" id="exportBtn" style="display:none">⬇ Export TOP photos…</button>
       <button class="btn-ghost" id="exportPbgBtn" style="display:none">📱 Export Phone BG…</button>
-      <button class="btn-ghost" id="moveBlurryBtn" style="display:none">🗂️ Move blurry → Blurred/</button>
       <button class="btn" id="startBtn">🚀 Start</button>
       <button class="btn god" id="godBtn" title="Run Cull → Dedup → Rank automatically">⚡ God Mode · Run All</button>
     </div>
@@ -1203,8 +1160,7 @@ function settingsHTML(step){
         <option value="raw">Keep RAW only</option>
         <option value="jpg">Keep JPG only</option>
       </select>
-      <div class="slider-value">Same-name pairs (IMG_0001.CR2 + .JPG) collapse to one before dedup</div></div>
-      <label class="check"><input type="checkbox" id="autoOrg"> Auto-move duplicates → Duplicates/</label>`;
+      <div class="slider-value">Same-name pairs (IMG_0001.CR2 + .JPG) collapse to one before dedup</div></div>`;
   // rank
   return `<div class="sidebar-title" style="margin-bottom:4px">⚖️ Scoring weights</div>
     <div class="panel-box" id="weightPanel"></div>
@@ -1236,8 +1192,6 @@ function renderSettings(){
   if(opt&&val)opt.oninput=()=>{val.textContent=(currentStep==='dedup'||currentStep==='cull')?parseFloat(opt.value).toFixed(2):opt.value;};
   const pm=document.getElementById('pairMode');
   if(pm){pm.value=pairMode;pm.onchange=()=>{pairMode=pm.value;};}
-  const ao=document.getElementById('autoOrg');
-  if(ao)ao.onchange=()=>fetch('/api/set-auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({step:currentStep,enabled:ao.checked})}).catch(()=>{});
   if(currentStep==='rank'){renderWeights();
     const rw=document.getElementById('resetWeights');if(rw)rw.onclick=()=>{weights={...DEFAULTS};renderWeights();scheduleReweight();};}
 }
@@ -1249,7 +1203,6 @@ function activateStep(step){
   renderSettings();
   document.getElementById('exportBtn').style.display='none';
   document.getElementById('exportPbgBtn').style.display='none';
-  {const mb=document.getElementById('moveBlurryBtn');mb.style.display='none';mb.classList.add('btn-ghost');mb.classList.remove('btn','cta');startBtn.classList.remove('secondary');}
   document.getElementById('progressWrap').style.display='none';  // clear stale summary
   document.getElementById('gallery').innerHTML=emptyHTML(currentStep);
   lastRankSig='';renderedCount=0;photoIdx=0;lastStep=null;
@@ -1345,7 +1298,7 @@ function startStep(step){
   gPage=0;lastGallerySig='';document.getElementById('pager').style.display='none';
   document.getElementById('exportBtn').style.display='none';
   document.getElementById('exportPbgBtn').style.display='none';
-  {const mb=document.getElementById('moveBlurryBtn');mb.style.display='none';mb.classList.add('btn-ghost');mb.classList.remove('btn','cta');startBtn.classList.remove('secondary');}setRemoved(0);
+  setRemoved(0);
   setStartBtn(true);
   // Settings come from the active step's panel (activateStep switched it first).
   const opt=document.getElementById('opt');
@@ -1360,7 +1313,8 @@ function startStep(step){
       adaptive:ad?ad.checked:true, rescue:rs?rs.checked:true,
       ftype:step==='cull'?'all':cullType,
       pair:step==='cull'?'both':pairMode,
-      topn:parseInt((document.getElementById('topn')||{}).value)||50})});
+      topn:parseInt((document.getElementById('topn')||{}).value)||50})})
+    .then(r=>{if(r.status===409)r.json().then(d=>toast(d.error||'Another step is running','bad'));});
   setTimeout(()=>poll(step),200);
 }
 function doStart(){
@@ -1386,15 +1340,11 @@ async function godRun(){
     for(const step of ['cull','dedup','rank']){
       if(godAbort)break;
       activateStep(step);
-      // Lock the auto-move checkbox during a God-mode run (only present on the
-      // Dedup step) so it can't be toggled mid-pipeline.
-      {const ao=document.getElementById('autoOrg'); if(ao)ao.disabled=true;}
       await new Promise(res=>{ godResolve=res; startStep(step); });
     }
     if(!godAbort)toast('✨ God mode complete — your TOP photos are ranked','good');
   } finally {
     godMode=false;setGodBtn(false);startBtn.disabled=false;
-    const ao=document.getElementById('autoOrg'); if(ao)ao.disabled=false;  // re-enable
   }
 }
 godBtn.onclick=()=>{
@@ -1421,14 +1371,6 @@ function poll(step){
       document.getElementById('progressFill').style.width='100%';
       setStartBtn(false);runningStep=null;
       if(step==='rank'&&photos.length)document.getElementById('exportBtn').style.display='block';
-      // After Cull, the obvious next action is moving the blurry shots: make
-      // that the primary (blue, emphasised) button and mute Start. Suppressed
-      // during God mode (the pipeline moves straight on to Dedup).
-      if(!godMode&&step==='cull'&&(st.blurry||0)>0){
-        const mb=document.getElementById('moveBlurryBtn');
-        mb.style.display='block';mb.classList.remove('btn-ghost');mb.classList.add('btn','cta');
-        startBtn.classList.add('secondary');
-      }
       // God mode: let the orchestrator advance to the next step.
       if(godResolve){const r=godResolve;godResolve=null;r();}}
   });
@@ -1809,29 +1751,28 @@ document.addEventListener('keydown',e=>{
   if(currentStep==='rank'&&(e.key==='x'||e.key==='X'||e.key==='Delete'||e.key==='Backspace')){e.preventDefault();lbRemoveCurrent();}});
 
 /* export */
+/* Exports copy originals into a NEW folder inside a destination you choose
+   (a macOS folder dialog opens). Every copy is checksum-verified and listed
+   in manifest.json. The photo folder itself is never written to. */
+function exportMsg(d){
+  if(d.error)return ['Export failed: '+d.error,'bad'];
+  if(d.cancelled)return ['Export cancelled','bad'];
+  const extra=d.cropped?(' + '+d.cropped+' wallpapers'):'';
+  return d.ok?['✓ '+d.verified+' files copied and verified'+extra+' →\n'+d.dest,'good']
+             :['⚠ Export incomplete: '+d.verified+' verified, '+d.failed+' failed, '+d.skipped+' skipped. See manifest.json in\n'+d.dest,'bad'];
+}
 document.getElementById('exportBtn').onclick=function(){
-  this.disabled=true;this.textContent='Exporting…';
+  this.disabled=true;this.textContent='Choose destination…';
   fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topn:parseInt((document.getElementById('topn')||{}).value)||50})})
     .then(r=>r.json()).then(d=>{this.disabled=false;this.textContent='⬇ Export TOP photos…';
-      toast(d.error?('Export failed: '+d.error):('✓ Copied '+d.copied+' photos to\n'+d.dest), d.error?'bad':'good');});
+      const [m,k]=exportMsg(d);toast(m,k);});
 };
 document.getElementById('exportPbgBtn').onclick=function(){
-  this.disabled=true;this.textContent='Exporting…';
+  this.disabled=true;this.textContent='Choose destination…';
   fetch('/api/export-phonebg',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
     .then(r=>r.json()).then(d=>{this.disabled=false;this.textContent='📱 Export Phone BG…';
-      if(d.error){toast('Export failed: '+d.error,'bad');return;}
-      if(!d.copied&&!d.cropped){toast(d.note||'Nothing flagged as Phone BG.','bad');return;}
-      toast('✓ '+d.copied+' originals + '+d.cropped+' wallpapers (1290×2796) to\n'+d.dest,'good');});
-};
-document.getElementById('moveBlurryBtn').onclick=function(){
-  const b=document.querySelectorAll('.photo-card[data-tier="blurry"]').length;
-  if(!confirm('Move blurry photos to a Blurred/ subfolder?\n\nThey are moved (not deleted) — you can move them back anytime.'))return;
-  this.disabled=true;this.textContent='Moving…';
-  fetch('/api/move-blurry',{method:'POST'})
-    .then(r=>r.json()).then(d=>{this.disabled=false;this.textContent='🗂️ Move blurry → Blurred/';
-      if(d.error){toast('Move failed: '+d.error,'bad');return;}
-      toast('✓ Moved '+d.moved+' blurry photos to\n'+d.dest,'good');
-      this.style.display='none';this.classList.remove('cta');startBtn.classList.remove('secondary');});
+      if(d.note){toast(d.note,'bad');return;}
+      const [m,k]=exportMsg(d);toast(m,k);});
 };
 </script></body></html>'''
 
@@ -1959,12 +1900,6 @@ def extract_exif(path):
             if not exif:
                 return out
             tags = {TAGS.get(k, k): v for k, v in exif.items()}
-            # Date / time
-            dt = tags.get('DateTimeOriginal') or tags.get('DateTime')
-            if isinstance(dt, str) and ' ' in dt:
-                d, t = dt.split(' ', 1)
-                out['date'] = d.replace(':', '-')
-                out['time'] = t
             # Camera / lens
             make = (tags.get('Make') or '').strip()
             model = (tags.get('Model') or '').strip()
@@ -1979,10 +1914,22 @@ def extract_exif(path):
                 subtags = {TAGS.get(k, k): v for k, v in sub.items()}
             except Exception:
                 subtags = {}
-            dto = subtags.get('DateTimeOriginal')
-            if isinstance(dto, str) and ' ' in dto and 'date' not in out:
+            # Capture time: DateTimeOriginal (Exif sub-IFD, rarely IFD0). IFD0
+            # DateTime is the last save/edit time, used only as a labelled
+            # fallback so it is never mistaken for the capture time.
+            dto = subtags.get('DateTimeOriginal') or tags.get('DateTimeOriginal')
+            if isinstance(dto, str) and ' ' in dto:
                 d, t = dto.split(' ', 1)
                 out['date'] = d.replace(':', '-'); out['time'] = t
+                off = subtags.get('OffsetTimeOriginal')
+                if isinstance(off, str) and off.strip():
+                    out['time'] = f"{t} ({off.strip()})"
+            else:
+                dt = tags.get('DateTime')
+                if isinstance(dt, str) and ' ' in dt:
+                    d, t = dt.split(' ', 1)
+                    out['date'] = d.replace(':', '-')
+                    out['time'] = f"{t} (file modified, not capture time)"
             fnum = _ratio(subtags.get('FNumber'))
             if fnum:
                 out['aperture'] = 'f/' + (str(int(fnum)) if fnum == int(fnum) else str(round(fnum, 1)))
@@ -1999,10 +1946,9 @@ def extract_exif(path):
             fl = _ratio(subtags.get('FocalLength'))
             if fl:
                 out['focal'] = str(int(round(fl))) + 'mm'
-            if not subtags.get('LensModel') and subtags.get('LensModel') is None and 'lens' not in out:
-                lm = subtags.get('LensModel')
-                if lm:
-                    out['lens'] = str(lm).strip()
+            lm = subtags.get('LensModel')
+            if lm and 'lens' not in out:
+                out['lens'] = str(lm).strip()
             # GPS
             try:
                 gps = exif.get_ifd(0x8825)
@@ -2027,20 +1973,20 @@ def api_exif():
     return jsonify(extract_exif(str(p)))
 
 
-@app.route('/api/set-auto', methods=['POST'])
-def api_set_auto():
-    data = request.get_json() or {}
-    step = data.get('step')
-    if step in state['auto']:
-        state['auto'][step] = bool(data.get('enabled'))
-    return jsonify({'ok': True})
-
-
 @app.route('/api/run/<step>', methods=['POST'])
 def api_run(step):
+    if step not in ('cull', 'dedup', 'rank'):
+        return jsonify({'error': 'bad step'}), 404
     data = request.get_json() or {}
     folder = data.get('folder', '')
-    state['folder'] = folder
+    # One step at a time: a second start would race on the shared state and
+    # could switch the folder under a running step.
+    with _run_lock:
+        busy = [k for k in ('cull', 'dedup', 'rank') if state[k].get('running')]
+        if busy:
+            return jsonify({'error': f'{busy[0]} is still running'}), 409
+        state[step]['running'] = True
+        state['folder'] = folder
     if folder and Path(folder).is_dir():
         save_recent(folder)
     if step == 'cull':
@@ -2121,8 +2067,8 @@ def api_restore():
 
 @app.route('/api/toggle-status', methods=['POST'])
 def api_toggle_status():
-    """Manually set a photo's tier (client cycles Sharp→Soft→Blurry). Moves the
-    file to/from Blurred/ to match (Soft stays in the folder)."""
+    """Manually set a photo's tier (client cycles Sharp→Soft→Blurry). This is
+    a mark only: the file never moves."""
     data = request.get_json() or {}
     path = data.get('path', '')
     tier = data.get('tier', 'sharp')
@@ -2133,7 +2079,7 @@ def api_toggle_status():
     if not photo:
         return jsonify({'error': 'photo not found'}), 404
     now_kept = tier != 'blurry'
-    new_path = _relocate_for_status(path, now_kept)
+    new_path = path   # marks only; originals stay where they are
     badge, bt = _badge_for(tier, False)
     photo.update({'path': new_path, 'thumb': thumb_url(new_path), 'tier': tier,
                   'kept': now_kept, 'rejected': not now_kept,
@@ -2152,47 +2098,54 @@ def api_toggle_status():
                     'sharp': s['sharp'], 'soft': s['soft'], 'blurry': s['blurry']})
 
 
-@app.route('/api/move-blurry', methods=['POST'])
-def api_move_blurry():
-    """Move the current Blurry-tier photos into a Blurred/ subfolder. Done on
-    demand (after review) rather than automatically during Cull."""
+def _export_destination(data):
+    """Destination from the request (tests, scripts) or a native folder dialog.
+    Returns (path, None) or (None, response)."""
+    dest = data.get('dest')
+    if not dest:
+        dest = native_folder_dialog("Choose where to export (outside your photo folder)")
+    if not dest:
+        return None, jsonify({'ok': False, 'cancelled': True})
+    return dest, None
+
+
+def _run_export(items, dest, job_name, derive=None):
     folder = state.get('folder')
-    if not folder or not Path(folder).is_dir():
-        return jsonify({'error': 'No valid folder'}), 400
-    blurry = [pp['path'] for pp in state['cull'].get('photos', [])
-              if pp.get('tier') == 'blurry']
-    if not blurry:
-        return jsonify({'ok': True, 'moved': 0, 'dest': str(Path(folder) / 'Blurred')})
+    roots = [folder] + sorted({str(Path(it.source).parent) for it in items})
     try:
-        org = PhotoOrganizer(folder)
-        res = org.move_blurry_photos(blurry)
-    except Exception as e:
-        logger.error(f"move-blurry failed: {e}")
-        return jsonify({'error': str(e)}), 500
-    return jsonify({'ok': True, 'moved': res.get('moved', 0),
-                    'dest': str(Path(folder) / 'Blurred')})
+        res = export_copies(items, dest, roots, job_name, derive=derive)
+    except ExportError as e:
+        return None, (jsonify({'ok': False, 'error': str(e)}), 400)
+    if not res.ok:
+        logger.warning(f"export incomplete: {res.failed} failed, {res.skipped} skipped "
+                       f"(manifest {res.manifest})")
+    return res, None
 
 
 @app.route('/api/export', methods=['POST'])
 def api_export():
+    """Copy the TOP N into a new folder inside a user-chosen destination,
+    verify every copy by SHA-256 and write manifest.json. Never writes into
+    the photo folder and never overwrites anything."""
     data = request.get_json() or {}
     topn = int(data.get('topn', state['topn']))
     folder = state.get('folder')
     if not folder or not Path(folder).is_dir():
         return jsonify({'error': 'No valid folder'}), 400
     top = build_topn(topn=topn)
-    dest = Path(folder) / f"TOP_{topn}"
-    dest.mkdir(parents=True, exist_ok=True)
-    copied = 0
-    for item in top:
-        try:
-            src = Path(item['path'])
-            if src.is_file():
-                shutil.copy2(str(src), str(dest / f"{item['rank']:03d}_{src.name}"))
-                copied += 1
-        except Exception as e:
-            logger.warning(f"export fail {item['path']}: {e}")
-    return jsonify({'ok': True, 'copied': copied, 'dest': str(dest)})
+    if not top:
+        return jsonify({'ok': False, 'error': 'Nothing ranked yet'}), 400
+    dest, resp = _export_destination(data)
+    if resp:
+        return resp
+    items = [ExportItem(source=item['path'],
+                        dest_name=f"{item['rank']:03d}_{Path(item['path']).name}")
+             for item in top]
+    res, err = _run_export(items, dest, f"{Path(folder).name}_TOP_{topn}")
+    if err:
+        return err
+    return jsonify({'ok': res.ok, 'dest': res.job_dir, 'manifest': res.manifest,
+                    'verified': res.verified, 'failed': res.failed, 'skipped': res.skipped})
 
 
 # --------------------------------------------------------------------------- #
@@ -2245,8 +2198,9 @@ def crop_to_phone(img, target_w=WALLPAPER_W, target_h=WALLPAPER_H):
 
 @app.route('/api/export-phonebg', methods=['POST'])
 def api_export_phonebg():
-    """Export flagged wallpapers: an Original/ full-res copy and a Wallpaper/
-    1290x2796 (universal 19.5:9) center-cropped version, into a PhoneBG/ folder."""
+    """Export flagged wallpapers into a new folder inside a user-chosen
+    destination: Original/ (verified byte copies) and Wallpaper_19.5x9/
+    (1290x2796 center-cropped JPEGs generated from the originals)."""
     folder = state.get('folder')
     if not folder or not Path(folder).is_dir():
         return jsonify({'error': 'No valid folder'}), 400
@@ -2254,34 +2208,31 @@ def api_export_phonebg():
     top = build_topn()
     flagged = [item for item in top if item['path'] in state['phone_bg']]
     if not flagged:
-        return jsonify({'ok': True, 'copied': 0, 'cropped': 0,
-                        'dest': str(Path(folder) / 'PhoneBG'),
+        return jsonify({'ok': True, 'verified': 0, 'cropped': 0,
                         'note': 'No photos flagged as Phone BG yet.'})
-    dest = Path(folder) / 'PhoneBG'
-    orig_dir = dest / 'Original'
-    crop_dir = dest / 'Wallpaper_19.5x9'
-    orig_dir.mkdir(parents=True, exist_ok=True)
-    crop_dir.mkdir(parents=True, exist_ok=True)
-    copied = cropped = 0
+    dest, resp = _export_destination(request.get_json() or {})
+    if resp:
+        return resp
+    items = []
     for item in flagged:
         src = Path(item['path'])
-        if not src.is_file():
-            continue
         stem = f"{item['rank']:03d}_{src.stem}"
-        try:
-            shutil.copy2(str(src), str(orig_dir / f"{stem}{src.suffix}"))
-            copied += 1
-        except Exception as e:
-            logger.warning(f"phonebg original fail {src}: {e}")
-        try:
-            with open_image_pil(src) as im:   # RAW-aware
-                crop_to_phone(im).save(str(crop_dir / f"{stem}.jpg"),
-                                       format='JPEG', quality=92)
-            cropped += 1
-        except Exception as e:
-            logger.warning(f"phonebg crop fail {src}: {e}")
-    return jsonify({'ok': True, 'copied': copied, 'cropped': cropped,
-                    'dest': str(dest)})
+        items.append(ExportItem(source=str(src), dest_name=f"Original/{stem}{src.suffix}"))
+        items.append(ExportItem(source=str(src), dest_name=f"Wallpaper_19.5x9/{stem}.jpg",
+                                kind='derived'))
+
+    def derive(it, target):
+        with open_image_pil(it.source) as im:   # RAW-aware, read-only
+            with open(target, 'xb') as fout:     # never overwrite
+                crop_to_phone(im).save(fout, format='JPEG', quality=92)
+
+    res, err = _run_export(items, dest, f"{Path(folder).name}_PhoneBG", derive=derive)
+    if err:
+        return err
+    cropped = sum(1 for i in res.items if i['kind'] == 'derived' and i['status'] == 'verified')
+    return jsonify({'ok': res.ok, 'dest': res.job_dir, 'manifest': res.manifest,
+                    'verified': res.verified - cropped, 'cropped': cropped,
+                    'failed': res.failed, 'skipped': res.skipped})
 
 
 if __name__ == '__main__':

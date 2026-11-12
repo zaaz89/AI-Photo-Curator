@@ -21,3 +21,10 @@ Next: owner answers the open questions in section 10 of the audit and decides wh
 ### 2026-11-12 — Owner decisions after audit (Claude)
 ExifTool approved and installed (Homebrew, 13.55). App data goes to `local-data/` in the project folder. Move features are removed from the fork. Real test set is `~/Desktop/photos` (read-only): 236 JPEGs, two Sony cameras, one event, no GPS/HEIC/video. Brief and audit updated.
 Next: owner decides who does M0 and M1.
+
+### 2026-11-12 — M0 safety lock (Claude)
+Branch `claude/m0-safety-lock`. Python 3.12 via `uv` (`pyproject.toml`, `uv.lock`); Pillow 13.0.0, Werkzeug 3.1.9, pillow-heif 1.8.1; `pip-audit` clean.
+Removed every path that moves originals: tier toggle relocation, dedup auto-move, "Move blurry" (`photo_file_organizer.py` deleted). Dedup cache, thumbnails and recents moved to `local-data/`. Exports (TOP N, Phone BG) go through `app/safety/safe_export.py`: new job folder in a user-chosen destination outside the source, exclusive create, SHA-256 verification, `manifest.json`. Capture time now reads `DateTimeOriginal` from the Exif sub-IFD first (EXIF panel and dedup); IFD0 `DateTime` is a labelled fallback. Only one step can run at a time (409 otherwise). Ko-fi badge removed. Also fixed the dead LensModel branch in the EXIF panel (not requested).
+Tests: 17 pytest tests pass; a deliberate regression (cache back in the source folder) makes the safety test fail. Real run on `~/Desktop/photos/Engagement` (212 JPEGs): cull 28 s, dedup 42 s (58 marked as duplicates of 186), rank 17 s, export of TOP 10 verified; source folder byte-identical, mtimes unchanged.
+Not verified: UI clicked through in a browser (page renders, embedded JS parses); duplicate accuracy on the real set; RAW/HEIC files (none in the real set).
+Next: M1 multi-source indexing and timeline.
