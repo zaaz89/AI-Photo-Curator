@@ -58,3 +58,8 @@ Update: the thinking variant `qwen3-vl:4b` left 177 of 202 descriptions empty (t
 Branch `claude/m4-events-places`. Owner added 9 iPhone HEIC photos with GPS (copied into `test-photos/iphone`, test collection now 19 photos) and approved the GeoNames download. Added offline places from GPS (in / near / region, with other names for Slovenian search), automatic events per day (time and place gaps, names from facts), rename / merge / split / undo with locked days, timeline grouped by events, place in photo details, place matches in search, clock differences ≤ 2 s reported as matching. Details: `notes/m4-events-places.md`.
 Tests: 64 pass. test-10: 11 s full analysis, 9 places, 8 sensible events, DST change correct, "Firence" finds Florence. Checked in the browser.
 Not done: Live Photo pairing on real files (no .MOV in the owner's set), moving single photos between events, landmarks.
+
+### 2026-11-12 — PR #7 merged; M5 smart export (Claude)
+PR #7 (M4) merged into `main` on the owner's request. M5 on branch `claude/m5-smart-export`: export plan with four name templates, five folder layouts and three duplicate options; preview in a new Export tab; execution through the verified copy exporter with manifest (original names recorded); pairs share names; undated fallback; resume of interrupted exports. Details: `notes/m5-smart-export.md`.
+Tests: 71 pass. test-10: 18 of 18 files exported and verified, sources unchanged; preview checked in the browser.
+Not done: cancel and resume buttons on the page, writing metadata into copies (copies stay byte-identical by design).
