@@ -29,7 +29,8 @@ Shared instructions for every AI agent working on this repository. Two agents wo
 ## Setup, run, test
 
 - Python 3.12 managed by `uv`: `uv sync`. `requirements.txt` is generated from `pyproject.toml` (`uv export`), do not edit it by hand.
-- Run the app: `uv run python photo_curator.py` → http://127.0.0.1:5014
+- Run the app: `uv run python photo_curator.py` → http://127.0.0.1:5014 (timeline at `/timeline`)
+- Collections from the command line: `uv run python -m app.cli --help` (create, add-source, index, timeline, list).
 - Tests: `uv run pytest`. Every PR runs them and reports the result. `tests/test_source_safety.py` must always pass.
 - Dependency audit: `uv run pip-audit -r requirements.txt`.
 - ExifTool is required (`brew install exiftool`).

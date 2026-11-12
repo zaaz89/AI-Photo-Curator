@@ -47,6 +47,8 @@ from raw_loader import (RAW_EXTS, HAS_RAWPY, is_raw,
 from photo_ranking_v3 import AdvancedPhotoAnalyzer
 from photo_dedup_batch import FastBatchDeduplicator
 from app.safety.safe_export import ExportItem, ExportError, export_copies
+from app.collections import all_source_paths
+from app.web import timeline_bp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -159,9 +161,23 @@ CATEGORIES = ['composition', 'technical', 'sharpness', 'color', 'aesthetic']
 #  (e.g. ../../etc/passwd or /Users/you/.ssh/id_rsa) via a malicious web page
 #  pointed at 127.0.0.1.
 # --------------------------------------------------------------------------- #
+_coll_roots_cache = {'t': 0.0, 'paths': []}
+
+
+def _collection_roots():
+    """Source folders of all collections (cached for 5 s; thumbnails ask often)."""
+    if time.time() - _coll_roots_cache['t'] > 5:
+        try:
+            _coll_roots_cache['paths'] = all_source_paths()
+        except Exception as e:
+            logger.warning(f"collection roots: {e}")
+        _coll_roots_cache['t'] = time.time()
+    return _coll_roots_cache['paths']
+
+
 def _allowed_roots():
     """Resolved real paths the app is permitted to read from: the current
-    folder plus any recently-used folders."""
+    folder, recently-used folders and the source folders of collections."""
     roots = []
     cur = state.get('folder')
     if cur:
@@ -170,6 +186,7 @@ def _allowed_roots():
         roots.extend(load_recents())
     except Exception:
         pass
+    roots.extend(_collection_roots())
     out = []
     for r in roots:
         try:
@@ -1058,6 +1075,7 @@ HTML = r'''<!doctype html><html lang="en"><head>
     <div class="step" data-step="rank">3 · Rank</div>
   </div>
   <div class="top-right">
+    <a class="btn-ghost" href="/timeline" style="text-decoration:none;padding:6px 12px">Timeline →</a>
     <button class="theme" id="themeToggle">🌙</button>
   </div>
 </div>
@@ -2233,6 +2251,12 @@ def api_export_phonebg():
     return jsonify({'ok': res.ok, 'dest': res.job_dir, 'manifest': res.manifest,
                     'verified': res.verified - cropped, 'cropped': cropped,
                     'failed': res.failed, 'skipped': res.skipped})
+
+
+# Collections + unified timeline (M1). Same app, so the same request guard and
+# security headers apply.
+timeline_bp.folder_dialog = native_folder_dialog
+app.register_blueprint(timeline_bp.bp)
 
 
 if __name__ == '__main__':
