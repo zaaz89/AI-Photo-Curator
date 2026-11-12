@@ -7,11 +7,16 @@ public struct JobStatus: Decodable, Equatable, Sendable {
     public let status: String
     public let progress: Double
     public let error: String?
+    /// Where a finished export went (from the job result), for "Show in Finder".
+    public let exportFolder: String?
+    public let exportOK: Bool?
 
     public init(running: Bool, collection: String? = nil, status: String, progress: Double = 0, error: String? = nil) {
         self.running = running; self.collection = collection; self.status = status; self.progress = progress; self.error = error
+        self.exportFolder = nil; self.exportOK = nil
     }
-    enum CodingKeys: String, CodingKey { case running, collection, status, progress, error }
+    enum CodingKeys: String, CodingKey { case running, collection, status, progress, error, result }
+    struct Result: Decodable { struct Export: Decodable { let ok: Bool?; let dest: String? }; let export: Export? }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         running = try c.decode(Bool.self, forKey: .running)
@@ -19,6 +24,9 @@ public struct JobStatus: Decodable, Equatable, Sendable {
         status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
         progress = try c.decodeIfPresent(Double.self, forKey: .progress) ?? 0
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        let result = try? c.decodeIfPresent(Result.self, forKey: .result)
+        exportFolder = result?.export?.dest
+        exportOK = result?.export?.ok
     }
 
     /// The phase for the live activity view.

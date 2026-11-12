@@ -144,6 +144,65 @@ public final class APIClient: Sendable {
         return (res.removed_cache_files, res.freed_bytes)
     }
 
+    // MARK: album assistant
+
+    public func suggest(paths: [String]) async throws -> Suggestion {
+        try await post("api/suggest", ["paths": paths])
+    }
+
+    /// Creates an album and returns its id.
+    public func createAlbum(name: String) async throws -> String {
+        struct R: Decodable { let id: String }
+        return try await post("api/collections", ["name": name], as: R.self).id
+    }
+
+    public func addFolder(trip: String, path: String, owner: String) async throws {
+        try await post("api/collections/\(trip)/sources", ["path": path, "owner": owner], as: OK.self)
+    }
+
+    public func overview(trip: String) async throws -> Overview {
+        try await get("api/collections/\(trip)/overview")
+    }
+
+    public func clocks(trip: String) async throws -> [DeviceClock] {
+        struct R: Decodable { let clocks: [DeviceClock] }
+        return try await get("api/collections/\(trip)/clocks", as: R.self).clocks
+    }
+
+    /// action: accept | reject | manual (with seconds) | reset
+    public func clock(trip: String, id: Int, action: String, seconds: Double? = nil) async throws {
+        var body: [String: Any] = ["action": action]
+        if let seconds { body["seconds"] = seconds }
+        try await post("api/collections/\(trip)/clocks/\(id)", body, as: OK.self)
+    }
+
+    public func moments(trip: String) async throws -> [MomentGroup] {
+        struct R: Decodable { let groups: [MomentGroup] }
+        return try await get("api/collections/\(trip)/duplicates", as: R.self).groups.filter { $0.category != "similar_scene" }
+    }
+
+    /// Keep this photo of a moment; `nil` goes back to the recommendation.
+    public func keep(trip: String, group: Int, photo: Int?) async throws {
+        try await post("api/collections/\(trip)/duplicates/\(group)/keeper", ["asset_id": photo.map { $0 as Any } ?? NSNull()], as: OK.self)
+    }
+
+    public func setStep(trip: String, step: String, done: Bool) async throws {
+        try await post("api/collections/\(trip)/workflow", ["step": step, "done": done], as: OK.self)
+    }
+
+    public func describePhotos(trip: String) async throws {
+        try await post("api/collections/\(trip)/describe", [:], as: OK.self)
+    }
+
+    public func exportPreview(trip: String) async throws -> ExportPreview {
+        try await post("api/collections/\(trip)/export/preview", ["preset": "google_photos"])
+    }
+
+    /// Starts the Google Photos export into `destination` (a folder outside the photo folders).
+    public func startExport(trip: String, destination: String) async throws {
+        try await post("api/collections/\(trip)/export", ["preset": "google_photos", "dest": destination], as: OK.self)
+    }
+
     public func jobStatus(trip: String) async throws -> JobStatus {
         try await get("api/collections/\(trip)/index")
     }

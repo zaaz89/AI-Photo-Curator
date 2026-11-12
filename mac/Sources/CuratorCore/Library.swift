@@ -7,6 +7,7 @@ public enum LibraryFilter: Hashable, Sendable {
     case favourites
     case leftOut
     case videos
+    case blurry              // out of focus, kept or left out, so the owner can decide
     case day(String)
     case ids([Int])          // search results, in the given order
 
@@ -17,6 +18,7 @@ public enum LibraryFilter: Hashable, Sendable {
         case .favourites: return p.favorite
         case .leftOut: return p.rejected
         case .videos: return p.isVideo && !p.rejected
+        case .blurry: return p.focus?.tier == "blurry" || p.focus?.autoTier == "blurry"
         case .day(let d): return p.day == d && !p.rejected
         }
     }
