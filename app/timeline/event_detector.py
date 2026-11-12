@@ -143,12 +143,13 @@ def detect_events(conn) -> dict:
 
 
 def _refresh_bounds(conn, day):
+    # Events left without photos (all moved elsewhere) go first, so the bounds below are never NULL.
+    conn.execute('DELETE FROM events WHERE day = ? AND id NOT IN (SELECT DISTINCT event_id FROM event_members)', (day,))
     conn.execute(
         'UPDATE events SET start_key = (SELECT MIN(c.sort_key) FROM event_members m JOIN capture_time c '
         '  ON c.asset_id = m.asset_id WHERE m.event_id = events.id), '
         'end_key = (SELECT MAX(c.sort_key) FROM event_members m JOIN capture_time c '
         '  ON c.asset_id = m.asset_id WHERE m.event_id = events.id) WHERE day = ?', (day,))
-    conn.execute('DELETE FROM events WHERE day = ? AND id NOT IN (SELECT DISTINCT event_id FROM event_members)', (day,))
 
 
 # --- owner's edits --------------------------------------------------------- #
@@ -216,3 +217,36 @@ def reset_day(conn, day: str) -> None:
     with conn:
         conn.execute('DELETE FROM events WHERE day = ?', (day,))
     detect_events(conn)
+
+
+def move_to_event(conn, asset_ids: list[int], event_id: int | None, new_name: str | None = None) -> int:
+    """Move photos into an existing event, or (event_id None) into a new event named new_name.
+    Locks every affected day so re-analysis keeps the owner's arrangement."""
+    if not asset_ids:
+        raise ValueError('no photos selected')
+    days = {r[0] for r in conn.execute(
+        f"SELECT DISTINCT e.day FROM event_members m JOIN events e ON e.id = m.event_id "
+        f"WHERE m.asset_id IN ({','.join('?' * len(asset_ids))})", asset_ids)}
+    with conn:
+        if event_id is None:
+            members = [m for m in _rows(conn) if m['id'] in set(asset_ids)]
+            if not members:
+                raise ValueError('unknown photos')
+            name, place = auto_name(members)
+            cur = conn.execute('INSERT INTO events (day, start_key, end_key, name, name_source, place_label, locked) '
+                               'VALUES (?, ?, ?, ?, ?, ?, 1)',
+                               (members[0]['day'], members[0]['t'], members[-1]['t'], (new_name or name)[:120],
+                                'user' if new_name else 'auto', place))
+            event_id = cur.lastrowid
+            days.add(members[0]['day'])
+        else:
+            ev = conn.execute('SELECT day FROM events WHERE id = ?', (event_id,)).fetchone()
+            if not ev:
+                raise ValueError('unknown event')
+            days.add(ev['day'])
+        conn.executemany('INSERT OR REPLACE INTO event_members (event_id, asset_id) VALUES (?, ?)',
+                         [(event_id, a) for a in asset_ids])
+        for d in days:
+            _lock(conn, d)
+            _refresh_bounds(conn, d)
+    return event_id

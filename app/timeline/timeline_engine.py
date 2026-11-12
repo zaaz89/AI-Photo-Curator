@@ -106,14 +106,26 @@ def timeline(conn: sqlite3.Connection) -> dict:
     }
     from app.quality.scoring import focus_tiers
     tiers = focus_tiers(conn)
-    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded FROM marks')}
+    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded, favorite, rejected FROM marks')}
+    from app.quality.faces import summaries
+    face_map = summaries(conn)
+    videos = {r['sha256']: dict(r) for r in conn.execute('SELECT sha256, duration, thumb FROM video_meta')}
     sha_of = {r['id']: r['sha256'] for r in rows}
     for i in items:
         i['focus'] = tiers.get(i['id'])
         m = marks.get(sha_of.get(i['id']))
         i['wallpaper'] = bool(m['wallpaper']) if m else False
         i['excluded'] = bool(m['excluded']) if m else False
+        i['favorite'] = bool(m['favorite']) if m else False
+        i['rejected'] = bool(m['rejected']) if m else False
+        i['faces'] = face_map.get(sha_of.get(i['id']))
+        v = videos.get(sha_of.get(i['id']))
+        i['duration'] = v['duration'] if v else None
+        i['poster'] = bool(v and v['thumb'])
     summary['focus'] = dict(Counter(v['tier'] for v in tiers.values()))
+    summary['favorites'] = sum(1 for i in items if i['favorite'])
+    summary['rejected'] = sum(1 for i in items if i['rejected'])
+    summary['videos'] = sum(1 for i in items if i['kind'] == 'video')
     counts = Counter(i['event_id'] for i in items if i['event_id'])
     events = [{'id': e['id'], 'day': e['day'], 'name': e['name'], 'name_source': e['name_source'],
                'place_label': e['place_label'], 'locked': bool(e['locked']), 'count': counts.get(e['id'], 0)}

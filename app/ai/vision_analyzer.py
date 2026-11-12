@@ -59,15 +59,31 @@ def status() -> dict:
     return {'running': True, 'model_ready': VLM_MODEL in names, 'model': VLM_MODEL}
 
 
+_STARTED = None          # the Ollama process this app started (None if it was already running)
+
+
+def stop_started_ollama() -> None:
+    """Stop the Ollama server only if this app started it; an Ollama the owner runs is left alone."""
+    global _STARTED
+    proc, _STARTED = _STARTED, None
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def ensure_running(wait_s: float = 20) -> None:
     """Start the project-local Ollama server (scripts/ollama-serve.sh) if needed."""
     if status()['running']:
         return
     if not OLLAMA_SCRIPT.exists():
         raise OllamaUnavailable('scripts/ollama-serve.sh is missing')
+    global _STARTED
     try:
-        subprocess.Popen([str(OLLAMA_SCRIPT)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        _STARTED = subprocess.Popen([str(OLLAMA_SCRIPT)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    start_new_session=True)
     except OSError as e:
         raise OllamaUnavailable(f'could not start Ollama: {e}. Install it with: brew install ollama')
     t0 = time.time()

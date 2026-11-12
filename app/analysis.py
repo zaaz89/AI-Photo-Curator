@@ -21,9 +21,13 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
     if progress:
         progress('Visual signatures', 0, 0)
     res['features_computed'] = compute_features(conn, progress, cancelled)
-    res['duplicate_groups'] = build_groups(conn, progress, cancelled)
+    # Focus, ranking and faces first: the duplicate keeper uses them.
     from app.quality.scoring import compute_quality
+    from app.quality.faces import compute_faces, compute_videos
     res['quality'] = compute_quality(conn, progress, cancelled)
+    res['faces'] = compute_faces(conn, progress, cancelled)
+    res['videos'] = compute_videos(conn, progress, cancelled)
+    res['duplicate_groups'] = build_groups(conn, progress, cancelled)
     # Search index (M3). Optional: without the local model the rest still works.
     from app.ai.embeddings import ModelUnavailable, compute_embeddings
     try:

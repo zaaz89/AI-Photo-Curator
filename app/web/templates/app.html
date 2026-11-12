@@ -7,32 +7,37 @@
 <body>
 <div class="app">
   <aside class="sidebar" aria-label="Navigation">
-    <div class="brand">Photo Curator</div>
-    <label class="sr" for="coll" data-t="collection">Collection</label>
-    <select id="coll" class="coll"></select>
+    <div class="trip">
+      <label class="sr" for="coll" data-t="trip">Trip</label>
+      <select id="coll"></select>
+      <button class="iconbtn" id="newTrip" data-ta="newTrip" title="New trip" aria-label="New trip"></button>
+    </div>
     <nav id="nav"></nav>
     <div class="job">
-      <div class="bar"><div id="fill"></div></div>
+      <div class="bar" aria-hidden="true"><div id="fill"></div></div>
       <div id="status" class="status" aria-live="polite"></div>
-      <button class="btn primary" id="indexBtn" data-t="index">Index photos</button>
-      <button class="btn" id="describeBtn" data-t="describe">Describe with local AI</button>
+      <button class="btn" id="indexBtn" data-t="reanalyse">Analyse again</button>
     </div>
   </aside>
   <section class="content">
     <header class="toolbar">
-      <h1 id="title"></h1>
+      <div><h1 id="title"></h1><div id="subtitle" class="sub"></div></div>
       <span class="spacer"></span>
       <form id="searchForm" class="search" role="search">
-        <input type="search" id="q" data-tp="searchPh" placeholder="Search photos" aria-label="Search photos">
+        <span id="searchIcon"></span>
+        <input type="search" id="q" data-tp="searchPh" placeholder="Search" aria-label="Search photos">
       </form>
       <label class="zoom" title="Thumbnail size"><span class="sr" data-t="thumbSize">Thumbnail size</span>
-        <input type="range" id="zoom" min="100" max="320" step="20" value="160"></label>
+        <input type="range" id="zoom" min="110" max="320" step="10" value="170"></label>
     </header>
     <div id="tools" class="tools"></div>
     <main id="main" tabindex="-1"></main>
   </section>
   <aside id="inspector" class="inspector" aria-label="Photo details" hidden></aside>
 </div>
-<div id="quicklook" class="quicklook" hidden><img alt=""><div class="qlbar"></div></div>
+<div id="selbar" class="selbar" role="toolbar" aria-label="Selected photos" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="sheet" class="backdrop" hidden></div>
+<div id="quicklook" class="quicklook" hidden><img alt=""><video controls hidden></video><div class="qlbar"></div></div>
 <script src="/ui/app.js"></script>
 </body></html>

@@ -174,12 +174,13 @@ def best_photos(conn, weights: Optional[dict] = None, topn: int = 50) -> list:
         "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")}
     rows = conn.execute(
         "SELECT a.id, a.filename, a.sha256, s.owner, s.path || '/' || a.rel_path AS path, q.scores_json, "
-        'COALESCE(m.excluded, 0) AS excluded, COALESCE(m.wallpaper, 0) AS wallpaper FROM assets a '
+        'COALESCE(m.excluded, 0) AS excluded, COALESCE(m.wallpaper, 0) AS wallpaper, '
+        'COALESCE(m.rejected, 0) AS rejected FROM assets a '
         'JOIN sources s ON s.id = a.source_id JOIN quality q ON q.sha256 = a.sha256 '
         "LEFT JOIN marks m ON m.sha256 = a.sha256 WHERE a.status = 'present'").fetchall()
     seen, ranked = set(), []
     for r in rows:
-        if r['sha256'] in seen or r['id'] in non_keepers or r['excluded']:
+        if r['sha256'] in seen or r['id'] in non_keepers or r['excluded'] or r['rejected']:
             continue
         if tiers.get(r['id'], {}).get('tier') == 'blurry':
             continue
@@ -200,7 +201,7 @@ def set_mark(conn, asset_id: int, **fields) -> dict:
     if not row:
         raise ValueError('unknown photo')
     allowed = {'focus': (None, 'sharp', 'soft', 'blurry'), 'wallpaper': (True, False, 0, 1),
-               'excluded': (True, False, 0, 1)}
+               'excluded': (True, False, 0, 1), 'favorite': (True, False, 0, 1), 'rejected': (True, False, 0, 1)}
     clean = {}
     for k, v in fields.items():
         if k not in allowed or v not in allowed[k]:
@@ -210,7 +211,8 @@ def set_mark(conn, asset_id: int, **fields) -> dict:
         conn.execute('INSERT OR IGNORE INTO marks (sha256, updated_at) VALUES (?, ?)', (row['sha256'], now_iso()))
         for k, v in clean.items():
             conn.execute(f'UPDATE marks SET {k} = ?, updated_at = ? WHERE sha256 = ?', (v, now_iso(), row['sha256']))
-    r = conn.execute('SELECT focus, wallpaper, excluded FROM marks WHERE sha256 = ?', (row['sha256'],)).fetchone()
+    r = conn.execute('SELECT focus, wallpaper, excluded, favorite, rejected FROM marks WHERE sha256 = ?',
+                     (row['sha256'],)).fetchone()
     return dict(r)
 
 
