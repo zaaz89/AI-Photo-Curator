@@ -127,43 +127,70 @@ def _write_manifest(path: Path, payload: dict) -> None:
 
 def export_copies(items: list[ExportItem], dest_root: str, source_roots: Iterable[str],
                   job_name: str,
-                  derive: Optional[Callable[[ExportItem, Path], None]] = None) -> ExportResult:
+                  derive: Optional[Callable[[ExportItem, Path], None]] = None,
+                  resume_dir: Optional[str] = None, extra: Optional[dict] = None,
+                  progress: Optional[Callable[[str, int, int], None]] = None) -> ExportResult:
     """Copy (or derive) every item into a fresh job folder and verify it.
 
     derive(item, target_path) must create target_path for items of kind
     'derived' (e.g. a cropped wallpaper). It is never given the source path
-    for writing."""
+    for writing.
+
+    resume_dir: an earlier job folder of the same plan (interrupted export).
+    Files already there with the source's checksum count as done; a file
+    with other content is never overwritten (the copy gets a new name)."""
     source_roots = [s for s in source_roots if s]
     dest = validate_destination(dest_root, source_roots)
 
-    needed = sum(os.path.getsize(i.source) for i in items
-                 if i.kind == 'copy' and os.path.isfile(i.source))
-    free = shutil.disk_usage(dest).free
-    if needed * 1.05 + 50 * 1024 * 1024 > free:
-        raise ExportError(f'Not enough free space at {dest}: need about '
-                          f'{needed / 1e9:.2f} GB, {free / 1e9:.2f} GB free')
-
     stamp = time.strftime('%Y%m%d-%H%M%S')
-    job_dir = _unique_path(dest, safe_name(f'{job_name}_{stamp}'), set())
-    job_dir.mkdir()
+    if resume_dir:
+        job_dir = Path(os.path.realpath(resume_dir))
+        if not _is_within(str(job_dir), str(dest)) or not (job_dir / MANIFEST_NAME).is_file():
+            raise ExportError('Resume folder must be an earlier export (with manifest.json) inside the destination')
+    else:
+        job_dir = _unique_path(dest, safe_name(f'{job_name}_{stamp}'), set())
     manifest = job_dir / MANIFEST_NAME
     taken: set = {MANIFEST_NAME}
 
     # Plan: resolve every target name before touching anything.
-    for it in items:
+    done_already = set()
+    for idx, it in enumerate(items):
         sub = Path(it.dest_name)
         folder = job_dir.joinpath(*[safe_name(p) for p in sub.parts[:-1]]) if len(sub.parts) > 1 else job_dir
+        planned = folder / safe_name(sub.name)
+        if resume_dir and planned.is_file() and planned.name.lower() not in taken \
+                and os.path.isfile(it.source) and sha256_file(str(planned)) == sha256_file(it.source):
+            taken.add(planned.name.lower())
+            it.dest = str(planned)
+            done_already.add(idx)
+            continue
         it.dest = str(_unique_path(folder, safe_name(sub.name), taken))
 
+    needed = sum(os.path.getsize(i.source) for k, i in enumerate(items)
+                 if i.kind == 'copy' and k not in done_already and os.path.isfile(i.source))
+    free = shutil.disk_usage(dest).free
+    if needed * 1.05 + 50 * 1024 * 1024 > free:
+        raise ExportError(f'Not enough free space at {dest}: need about '
+                          f'{needed / 1e9:.2f} GB, {free / 1e9:.2f} GB free')
+    job_dir.mkdir(exist_ok=bool(resume_dir))
+
     header = {'tool': 'AI Photo Curator', 'job': job_name, 'created': stamp,
-              'destination': str(job_dir), 'source_roots': source_roots}
+              'destination': str(job_dir), 'source_roots': source_roots,
+              'resumed': bool(resume_dir), **(extra or {})}
     _write_manifest(manifest, {**header, 'status': 'planned',
                                'items': [asdict(i) for i in items]})
 
-    for it in items:
+    for idx, it in enumerate(items):
         target = Path(it.dest)
+        if progress:
+            progress(f'Copying and verifying {Path(it.dest_name).name}', idx, len(items))
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
+            if idx in done_already:
+                it.sha256_source = it.sha256_dest = sha256_file(str(target))
+                it.size = target.stat().st_size
+                it.status, it.error = 'verified', None
+                continue
             if it.kind == 'copy':
                 if not os.path.isfile(it.source):
                     it.status, it.error = 'skipped', 'source file missing'

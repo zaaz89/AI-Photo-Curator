@@ -339,3 +339,71 @@ def reset_events(cid):
         return _err('day is required')
     ed.reset_day(conn, day)
     return jsonify({'ok': True})
+
+
+
+def _export_options(data):
+    return {'template': data.get('template', 'default'), 'folders': data.get('folders', 'day'),
+            'duplicates': data.get('duplicates', 'skip')}
+
+
+@bp.route('/api/collections/<cid>/export/preview', methods=['POST'])
+def export_preview(cid):
+    """Plan only: no file is read for content or written."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.organization.export_plan import plan_export
+    try:
+        plan = plan_export(conn, **_export_options(request.get_json() or {}))
+    except ValueError as e:
+        return _err(str(e))
+    return jsonify(plan)
+
+
+def _run_smart_export(cid, opts, dest, resume_dir):
+    def progress(msg, i, n):
+        _job['status'] = f'{msg} ({i}/{n})' if n else msg
+        _job['progress'] = int(i / n * 100) if n else _job['progress']
+    try:
+        from app.organization.export_plan import plan_export, run_export
+        from app.safety.safe_export import ExportError
+        conn = col.open_db(cid)
+        plan = plan_export(conn, **opts)
+        try:
+            res = run_export(conn, dest, plan, resume_dir=resume_dir, progress=progress)
+        except ExportError as e:
+            raise RuntimeError(str(e))
+        _job['result'] = {'export': {'ok': res.ok, 'dest': res.job_dir, 'manifest': res.manifest,
+                                     'verified': res.verified, 'failed': res.failed, 'skipped': res.skipped}}
+        _job['status'] = (f'Export done: {res.verified} files copied and verified in {res.job_dir}' if res.ok else
+                          f'Export incomplete: {res.verified} verified, {res.failed} failed, {res.skipped} skipped. '
+                          f'See {res.manifest}')
+        _job['progress'] = 100
+    except Exception as e:
+        _job['error'] = str(e)
+        _job['status'] = f'Error: {e}'
+    finally:
+        _job['running'] = False
+
+
+@bp.route('/api/collections/<cid>/export', methods=['POST'])
+def start_smart_export(cid):
+    """Body: template, folders, duplicates, optional dest (else a folder dialog), optional resume_dir."""
+    try:
+        col.db_path(cid)
+    except ValueError as e:
+        return _err(str(e), 404)
+    data = request.get_json() or {}
+    dest = data.get('dest') or (folder_dialog('Choose where to export (outside your photo folders)')
+                                if folder_dialog else None)
+    if not dest:
+        return jsonify({'ok': False, 'cancelled': True})
+    with _job_lock:
+        if _job['running']:
+            return _err(f"a job for {_job['collection']} is still running", 409)
+        _job.update(running=True, collection=cid, status='Preparing export…', progress=0,
+                    result=None, error=None, cancel=False, started=time.time())
+    threading.Thread(target=_run_smart_export,
+                     args=(cid, _export_options(data), dest, data.get('resume_dir')), daemon=True).start()
+    return jsonify({'ok': True, 'dest': dest})

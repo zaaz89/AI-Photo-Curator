@@ -74,6 +74,11 @@
   .pill.high{background:color-mix(in srgb,#16a34a 18%,transparent);color:#15803d}
   .pill.medium{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
   .pill.low,.pill.unknown{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+  .exportform{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 16px;align-items:end;margin-bottom:14px}
+  .exportform .field,.exportform>p{grid-column:1/-1}
+  .exportform .hint{margin:0}
+  table.plan{width:100%;border-collapse:collapse;font-size:12px}
+  table.plan th,table.plan td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);word-break:break-all}
   .evhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 8px}
   .evname{font-weight:650;font-size:15px}
   .evhead small{color:var(--muted)}
@@ -299,6 +304,7 @@ function tabs(){
       <button class="btn">Search</button></form>
     <div class="tabs" role="tablist"><button role="tab" aria-selected="${view==='timeline'}" data-view="timeline">Timeline</button>
     <button role="tab" aria-selected="${view==='dups'}" data-view="dups">Duplicates (${n})</button>
+    <button role="tab" aria-selected="${view==='export'}" data-view="export">Export</button>
     ${searchRes?`<button role="tab" aria-selected="${view==='search'}" data-view="search">Search results</button>`:''}</div>`;
 }
 function bindTabs(){
@@ -318,12 +324,40 @@ function renderSearch(){
       <span class="meta"><span class="t">${k+1}.</span><span class="who">${esc((x.local_time||'').slice(11,19))} ${esc(x.owner)}</span></span></button>`;}).join('')}</div>`;
 }
 
+let exportOpts={template:'default',folders:'day',duplicates:'skip'}, exportPlan=null;
+function sel(id,label,opts,cur){return `<div><label class="hint" for="${id}" style="display:block;margin-bottom:4px">${label}</label><select id="${id}">${opts.map(([v,t])=>`<option value="${v}" ${v===cur?'selected':''}>${esc(t)}</option>`).join('')}</select></div>`;}
+function renderExport(){
+  const p=exportPlan;
+  const form=`<div class="exportform">
+    ${sel('xTemplate','File names',[['default','2026-10-28_11-02-02_Florence_morning_001.HEIC'],['original','20261028_110202_IMG_0581.HEIC'],['place','2026-10-28_Florence_001.HEIC'],['trip','Trip_Day-6_Florence-morning_001.HEIC']],exportOpts.template)}
+    ${sel('xFolders','Folders',[['day','By day and place: 2026-10-28_Florence/'],['date','By day: 2026-10-28/'],['event','By day and event: 2026-10-28/Florence, morning/'],['place','By place: Italy/Florence/'],['flat','One folder']],exportOpts.folders)}
+    ${sel('xDups','Duplicates (not the kept photo)',[['skip','Leave out'],['alternatives','Put in Alternatives/, the rest in Selected/'],['include','Export them too']],exportOpts.duplicates)}
+    <div class="field"><button class="btn ghost" id="xPreview">Preview</button><button class="btn" id="xRun" ${p?'':'disabled'}>Choose destination and export</button></div>
+    <p class="hint">Exports copy the original files into a new folder you choose. Every copy is checked by checksum and listed in manifest.json with its original name. Your photo folders are never changed.</p></div>`;
+  if(!p)return form+'<div class="empty"><strong>No preview yet</strong>Choose the options, then Preview.</div>';
+  const w=Object.entries(p.warnings||{}).map(([k,n])=>`<span class="chip">${n} ${esc(k)}</span>`).join('');
+  const rows=p.entries.slice(0,200).map(e=>`<tr><td>${esc(e.dest)}</td><td class="hint">${esc(e.original_name)}${e.paired_with?' (paired)':''}${e.alternative?' (alternative)':''}</td></tr>`).join('');
+  return form+`<p><b>${p.files} files</b>, ${(p.bytes/1e6).toFixed(0)} MB, ${p.folders_count} folders</p><div class="legend" style="margin-bottom:10px">${w}</div>
+    <table class="plan"><thead><tr><th>New path</th><th>Original</th></tr></thead><tbody>${rows}</tbody></table>
+    ${p.entries.length>200?`<p class="hint">Showing 200 of ${p.entries.length}.</p>`:''}`;
+}
+function bindExport(){
+  const read=()=>{exportOpts={template:$('#xTemplate').value,folders:$('#xFolders').value,duplicates:$('#xDups').value};};
+  ['xTemplate','xFolders','xDups'].forEach(id=>$('#'+id).onchange=()=>{read();exportPlan=null;$('#xRun').disabled=true;});
+  $('#xPreview').onclick=async()=>{read();const r=await api(`/api/collections/${cid}/export/preview`,{method:'POST',body:JSON.stringify(exportOpts)});
+    if(r.error){status(r.error,true);return;} exportPlan=r;loadTimeline();};
+  $('#xRun').onclick=async()=>{read();status('Choose a destination folder in the dialog…');
+    const r=await api(`/api/collections/${cid}/export`,{method:'POST',body:JSON.stringify(exportOpts)});
+    if(r.cancelled){status('Export cancelled.');return;} if(r.error){status(r.error,true);return;} checkJob();};
+}
+
 async function loadTimeline(){
   if(!cid)return;
   [data]=await Promise.all([api(`/api/collections/${cid}/timeline`),loadDuplicates(),loadClocks()]);
   const items=data.items||[];
   if(!items.length){$('#main').innerHTML=`<div class="empty"><strong>Nothing indexed yet</strong>Add a source folder for each person or device, then choose Index photos.</div>`;return;}
   if(view==='dups'){$('#main').innerHTML=tabs()+renderDuplicates();bindTabs();bindDuplicates();return;}
+  if(view==='export'){$('#main').innerHTML=tabs()+renderExport();bindTabs();bindExport();return;}
   if(view==='search'&&searchRes){$('#main').innerHTML=tabs()+renderSearch();bindTabs();
     document.querySelectorAll('.tile').forEach(t=>t.onclick=()=>+t.dataset.i>=0&&showDetail(+t.dataset.i,t));return;}
   const s=data.summary, byOwner={};
