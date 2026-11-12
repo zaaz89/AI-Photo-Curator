@@ -112,3 +112,39 @@ def all_source_paths() -> list[str]:
             paths += [r['path'] for r in conn.execute('SELECT path FROM sources')]
             conn.close()
     return paths
+
+
+def remove_album(slug: str, cache_files: list[Path] | None = None) -> dict:
+    """"Finish album": delete this album's working data (database, AI data, its cached
+    thumbnails and video posters). Never touches the photo folders: every file removed must
+    be inside the app's data folder and outside every source folder of the album."""
+    import shutil
+    folder = db_path(slug).parent                       # validates the id
+    if not (folder / 'curator.db').exists():
+        raise FileNotFoundError(f'collection {slug} not found')
+    data = os.path.realpath(data_dir())
+    conn = connect(folder / 'curator.db')
+    roots = [os.path.realpath(r[0]) for r in conn.execute('SELECT path FROM sources')]
+    posters = [r[0] for r in conn.execute('SELECT thumb FROM video_meta WHERE thumb IS NOT NULL')] \
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'video_meta'").fetchone() else []
+    conn.close()
+
+    def safe(p: str) -> bool:
+        real = os.path.realpath(p)
+        inside_data = real.startswith(data + os.sep)
+        in_source = any(real == r or real.startswith(r + os.sep) for r in roots)
+        return inside_data and not in_source and not os.path.islink(p)
+
+    removed = freed = 0
+    for f in [*(str(c) for c in (cache_files or [])), *posters]:
+        if f and os.path.isfile(f) and safe(f):
+            freed += os.path.getsize(f)
+            os.remove(f)
+            removed += 1
+    real_folder = os.path.realpath(folder)
+    if not safe(str(folder)) or not real_folder.startswith(os.path.realpath(collections_dir()) + os.sep):
+        raise ValueError('refused: album folder is not inside the app data folder')
+    for dirpath, _, files in os.walk(real_folder):
+        freed += sum(os.path.getsize(os.path.join(dirpath, f)) for f in files)
+    shutil.rmtree(real_folder)
+    return {'removed_cache_files': removed, 'freed_bytes': freed}
