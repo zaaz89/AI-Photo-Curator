@@ -626,6 +626,26 @@ def reveal_export():
     return jsonify({'ok': True})
 
 
+@bp.route('/api/suggest', methods=['POST'])
+def suggest_album():
+    """New Album wizard: who each folder belongs to, devices, dates, and a name for the album."""
+    from app.assistant import suggest
+    paths = (request.get_json() or {}).get('paths') or []
+    if not isinstance(paths, list) or len(paths) > 20:
+        return _err('paths must be a list of up to 20 folders')
+    return jsonify(suggest([str(p) for p in paths]))
+
+
+@bp.route('/api/collections/<cid>/overview')
+def album_overview(cid):
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.assistant import overview
+    job = _job if _job['collection'] == cid else None
+    return jsonify(overview(conn, job))
+
+
 @bp.route('/api/browse-folder', methods=['POST'])
 def browse_folder():
     """Native folder picker; returns the chosen path only (nothing is added)."""

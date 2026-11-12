@@ -183,12 +183,15 @@ def build_groups(conn, progress: Optional[Callable] = None,
             if cat == 'similar_scene':
                 keeper, reasons = None, ['different shots of the same scene: keep both']
             else:
-                keeper, reasons = _recommend(rows, feats, members, cat, choices.get(key), face_map, qual, kw)
+                info = {}
+                keeper, reasons = _recommend(rows, feats, members, cat, choices.get(key), face_map, qual, kw, info)
             pair_notes = sorted({e for a in members for b in members if a < b
                                  for e in evidence.get(frozenset((a, b)), [])})
             cur = conn.execute('INSERT INTO duplicate_groups (group_key, category, keeper_id, reasons_json) '
                                'VALUES (?, ?, ?, ?)',
-                               (key, cat, keeper, json.dumps({'keeper': reasons, 'evidence': pair_notes[:12]},
+                               (key, cat, keeper, json.dumps({'keeper': reasons, 'evidence': pair_notes[:12],
+                                                              'margin': info.get('margin')} if cat != 'similar_scene'
+                                                             else {'keeper': reasons, 'evidence': pair_notes[:12]},
                                                              ensure_ascii=False)))
             gid = cur.lastrowid
             for m in members:
@@ -205,18 +208,25 @@ def similarity_matrix_block(sigs: np.ndarray, start: int, stop: int) -> np.ndarr
     return agree / sigs.shape[1]
 
 
-def _recommend(rows, feats, members, cat, chosen_sha, faces=None, quality=None, weights=None):
+CLEAR_MARGIN = 0.12      # score lead of the best frame (share of the used weight) for an automatic decision
+
+
+def _recommend(rows, feats, members, cat, chosen_sha, faces=None, quality=None, weights=None, info=None):
     """Pick the keeper. Criteria (weights from settings 'keeper_weights'):
     faces  eyes open, looking at the camera, face sharp (Apple Vision)
     focus  region sharpness of the whole frame
     look   the overall-look score of the ranking
     resolution
-    A criterion that is missing for the whole group (e.g. no faces) is left out."""
+    A criterion that is missing for the whole group (e.g. no faces) is left out.
+    `info` (optional dict) receives 'margin': the best frame's lead over the second, 0-1."""
+    info = info if info is not None else {}
     if chosen_sha:
         for m in members:
             if rows[m]['sha256'] == chosen_sha:
+                info['margin'] = 1.0
                 return rows[m]['id'], ['chosen by you']
     if cat == 'exact':
+        info['margin'] = 1.0
         m = min(members, key=lambda m: (rows[m]['source_id'], rows[m]['rel_path']))
         return rows[m]['id'], ['identical files: any copy is the same; suggested the first source\'s copy']
     faces, quality = faces or {}, quality or {}
@@ -239,6 +249,8 @@ def _recommend(rows, feats, members, cat, chosen_sha, faces=None, quality=None, 
         for m in members:
             total[m] += w[name] * ((vals[m] or 0) / hi)
     best = max(members, key=lambda m: (total[m], -rows[m]['id']))
+    ranked = sorted((total[m] for m in members), reverse=True)
+    info['margin'] = round((ranked[0] - ranked[1]) / used, 3) if used and len(ranked) > 1 else 0.0
     reasons = []
     fb = faces.get(sha[best])
     others = [faces.get(sha[m]) for m in members if m != best and faces.get(sha[m])]

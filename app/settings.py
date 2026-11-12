@@ -19,6 +19,8 @@ DEFAULTS = {
     # Choosing the better of near-identical photos: faces (eyes open, looking at the camera,
     # face sharp), whole-frame focus, overall look, resolution.
     'keeper_weights': {'faces': 40, 'focus': 30, 'look': 20, 'resolution': 10},
+    # Which person a camera or phone belongs to, remembered between albums (only on this Mac).
+    'device_owners': {},
 }
 CHOICES = {'ai_gpu_share': (25, 30, 50, 100), 'ui_language': ('en', 'sl')}
 
@@ -49,6 +51,10 @@ def save(changes: dict) -> dict:
             if not isinstance(v, dict) or any(c not in DEFAULTS['keeper_weights'] for c in v):
                 raise ValueError('keeper_weights must map faces, focus, look, resolution to numbers')
             v = {c: max(0, min(100, int(v.get(c, 0)))) for c in DEFAULTS['keeper_weights']}
+        if k == 'device_owners':
+            if not isinstance(v, dict):
+                raise ValueError('device_owners must map device names to people')
+            v = {str(d)[:80]: str(o).strip()[:60] for d, o in v.items() if str(o).strip()}
         if k == 'rank_weights':
             if not isinstance(v, dict) or any(c not in DEFAULTS['rank_weights'] for c in v):
                 raise ValueError('rank_weights must map the five categories to numbers')
