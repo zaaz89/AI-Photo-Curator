@@ -74,6 +74,27 @@
   .pill.high{background:color-mix(in srgb,#16a34a 18%,transparent);color:#15803d}
   .pill.medium{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
   .pill.low,.pill.unknown{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+  .clock{padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .clock:last-child{border-bottom:none}
+  .clock .head{display:flex;align-items:center;gap:8px;font-weight:600}
+  .clock .head span:last-child{margin-left:auto;font-weight:400;color:var(--muted);font-size:12px}
+  .clock .note{color:var(--muted);font-size:12px;margin:3px 0 0 18px}
+  .clock .act{display:flex;gap:6px;margin:6px 0 0 18px;align-items:center}
+  .clock .act input{width:84px;padding:4px 6px}
+  .clock .act .btn{padding:4px 9px;font-size:12px}
+  .applied{color:var(--accent);font-weight:600}
+  .tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+  .tabs button{border:0;background:none;padding:8px 12px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+  .group{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .group h4{margin:0;font-size:14px}
+  .group .why{color:var(--muted);font-size:12px;margin:2px 0 10px}
+  .group .row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
+  .cand{flex:0 0 180px;border:2px solid transparent;border-radius:8px;background:var(--panel2);padding:0 0 6px;font-size:12px}
+  .cand.keep{border-color:#16a34a}
+  .cand img{width:100%;height:120px;object-fit:cover;border-radius:6px 6px 0 0;display:block}
+  .cand div{padding:4px 8px 0}
+  .cand .btn{margin:6px 8px 0;padding:4px 8px;font-size:12px}
   @media (max-width:860px){.layout{flex-direction:column} .side{width:auto;flex:none;position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}
     main{padding:14px 16px 60px} .hour{grid-template-columns:44px 1fr} .tile,.tile .img,.tile .vid{width:calc(50vw - 50px)}}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -107,6 +128,11 @@
       <div class="bar"><div id="fill"></div></div>
       <div class="status" id="status"></div>
     </section>
+    <section id="clockBox" hidden>
+      <h2>Device clocks</h2>
+      <div id="clocks"></div>
+      <p class="hint">A correction only changes the order and the shown time here. Files are never changed. Enter seconds to add to that device's clock, e.g. -45.</p>
+    </section>
   </aside>
   <main id="main"><div class="empty"><strong>No collection yet</strong>Create a collection, add a folder for each person or device, then index it.</div></main>
 </div>
@@ -114,7 +140,7 @@
 <script>
 const LANES=['#0d9488','#d97706','#7c3aed','#e11d48','#0284c7','#65a30d'];
 const CONF_TEXT={high:'Exact capture time',medium:'Time zone assumed',low:'Camera clock only, time zone unknown',unknown:'No capture time in the file'};
-let cid=null, data=null, sources=[], polling=null;
+let cid=null, data=null, sources=[], polling=null, view='timeline', dups=[];
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=(url,opt={})=>fetch(url,{headers:{'Content-Type':'application/json'},...opt}).then(r=>r.json());
@@ -132,7 +158,7 @@ async function loadCollections(select){
   $('#srcBox').hidden=$('#idxBox').hidden=!cid;
   if(cid){await loadSources();await loadTimeline();checkJob();}
 }
-$('#coll').onchange=()=>{cid=$('#coll').value;loadSources().then(loadTimeline);};
+$('#coll').onchange=()=>{cid=$('#coll').value;view='timeline';loadSources().then(loadTimeline);};
 $('#create').onclick=async()=>{const name=$('#newName').value.trim();if(!name){$('#newName').focus();return;}
   const d=await api('/api/collections',{method:'POST',body:JSON.stringify({name})});
   if(d.error){status(d.error,true);return;} $('#newName').value='';loadCollections(d.id);};
@@ -173,21 +199,79 @@ async function loadCollectionsQuiet(){const d=await api('/api/collections');cons
 
 function fmtOffset(m){if(m==null)return'';const s=m<0?'-':'+',a=Math.abs(m);return `${s}${String(a/60|0).padStart(2,'0')}:${String(a%60).padStart(2,'0')}`;}
 function localParts(it){
-  if(it.local_time){const [d,t]=it.local_time.split('T');return{day:d,time:t.slice(0,8),hour:t.slice(0,2)};}
-  if(it.utc_time){const [d,t]=it.utc_time.replace('Z','').split('T');return{day:d,time:t.slice(0,8),hour:t.slice(0,2)};}
+  const lt=it.corrected_local_time||it.local_time, ut=it.corrected_utc_time||it.utc_time;
+  if(lt){const [d,t]=lt.split('T');return{day:d,time:t.slice(0,8),hour:t.slice(0,2)};}
+  if(ut){const [d,t]=ut.replace('Z','').split('T');return{day:d,time:t.slice(0,8),hour:t.slice(0,2)};}
   return{day:'unknown',time:'?',hour:'--'};
+}
+const fmtSec=s=>(s>0?'+':'')+(Math.abs(s)>=90?(Math.round(s/6)/10)+' min':Math.round(s*10)/10+' s');
+
+async function loadClocks(){
+  const d=await api(`/api/collections/${cid}/clocks`);const cl=d.clocks||[];
+  $('#clockBox').hidden=cl.length<2;
+  $('#clocks').innerHTML=cl.map(c=>{
+    const e=c.evidence||{}, applied=c.applied_s?`<span class="applied">${esc(fmtSec(c.applied_s))} applied</span>`:'';
+    const sug=c.suggested_s!=null&&!['accepted','manual'].includes(c.status)
+      ?`<button class="btn" data-a="accept" data-c="${c.clock_id}">Apply ${esc(fmtSec(c.suggested_s))}</button>`:'';
+    const note=c.status==='reference'?'Reference: other devices are aligned to this clock.'
+      :(c.status==='rejected'?'Suggestion rejected.':(e.note||'Not analysed yet. Index photos first.'));
+    return `<div class="clock"><div class="head"><span class="swatch" style="background:${lane(c.source_id)}"></span>
+      <span>${esc(c.owner)}, ${esc(c.device)}</span><span>${c.photos} photos</span></div>
+      <div class="note">${esc(note)}${e.confidence&&c.suggested_s!=null?' Confidence: '+esc(e.confidence)+'.':''} ${applied}</div>
+      ${e.caveat&&c.suggested_s!=null?`<div class="note">${esc(e.caveat)}</div>`:''}
+      <div class="act">${sug}<input type="number" step="1" placeholder="seconds" aria-label="Manual correction in seconds" data-in="${c.clock_id}">
+        <button class="btn ghost" data-a="manual" data-c="${c.clock_id}">Set</button>
+        ${c.applied_s?`<button class="btn ghost" data-a="reset" data-c="${c.clock_id}">Undo</button>`:''}
+        ${sug?`<button class="btn ghost" data-a="reject" data-c="${c.clock_id}">Reject</button>`:''}</div></div>`;}).join('');
+  document.querySelectorAll('.clock [data-a]').forEach(b=>b.onclick=async()=>{
+    const body={action:b.dataset.a};
+    if(b.dataset.a==='manual'){const v=document.querySelector(`[data-in="${b.dataset.c}"]`).value;if(v===''){status('Enter the seconds to add first.',true);return;}body.seconds=+v;}
+    const r=await api(`/api/collections/${cid}/clocks/${b.dataset.c}`,{method:'POST',body:JSON.stringify(body)});
+    if(r.error){status(r.error,true);return;}
+    status(b.dataset.a==='reset'?'Clock correction undone.':'Clock correction applied.');loadClocks();loadTimeline();});
+}
+
+async function loadDuplicates(){
+  const d=await api(`/api/collections/${cid}/duplicates`);dups=d.groups||[];
+}
+function renderDuplicates(){
+  if(!dups.length)return '<div class="empty"><strong>No duplicate groups</strong>Index photos to look for duplicates.</div>';
+  const title={exact:'Identical files',near:'Near duplicates',similar_scene:'Similar scene, different shots'};
+  return dups.map(g=>`<div class="group"><h4>${esc(title[g.category]||g.category)}, ${g.members.length} photos</h4>
+    <div class="why">${esc((g.reasons.keeper||[]).map(r=>r.charAt(0).toUpperCase()+r.slice(1)).join('. '))}.</div>
+    <div class="row">${g.members.map(m=>`<div class="cand ${m.id===g.keeper_id?'keep':''}">
+      <img loading="lazy" alt="" src="/api/thumb?path=${encodeURIComponent(m.path)}&v=2">
+      <div><b>${m.id===g.keeper_id?'Keep ':''}</b>${esc(m.filename)}</div>
+      <div style="color:var(--muted)">${esc(m.owner)}, ${esc((m.local_time||'').slice(11,19))}, ${m.width&&m.height?esc(m.width+'×'+m.height):''}, sharpness ${m.sharpness!=null?m.sharpness.toFixed(1):'?'}</div>
+      ${g.category!=='similar_scene'&&m.id!==g.keeper_id?`<button class="btn ghost" data-g="${g.id}" data-k="${m.id}">Keep this one</button>`:''}
+    </div>`).join('')}</div>
+    ${g.category!=='similar_scene'&&(g.reasons.keeper||[])[0]==='chosen by you'?`<button class="btn ghost" style="margin-top:8px" data-g="${g.id}" data-k="">Use the recommendation</button>`:''}
+    </div>`).join('');
+}
+function bindDuplicates(){
+  document.querySelectorAll('[data-g]').forEach(b=>b.onclick=async()=>{
+    await api(`/api/collections/${cid}/duplicates/${b.dataset.g}/keeper`,{method:'POST',body:JSON.stringify({asset_id:b.dataset.k?+b.dataset.k:null})});
+    loadTimeline();});
 }
 function dayTitle(d){if(d==='unknown')return'No date';const dt=new Date(d+'T12:00:00');
   return dt.toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
 
+function tabs(){
+  const n=dups.filter(g=>g.category!=='similar_scene').length;
+  return `<div class="tabs" role="tablist"><button role="tab" aria-selected="${view==='timeline'}" data-view="timeline">Timeline</button>
+    <button role="tab" aria-selected="${view==='dups'}" data-view="dups">Duplicates (${n})</button></div>`;
+}
+function bindTabs(){document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{view=b.dataset.view;loadTimeline();});}
+
 async function loadTimeline(){
   if(!cid)return;
-  data=await api(`/api/collections/${cid}/timeline`);
+  [data]=await Promise.all([api(`/api/collections/${cid}/timeline`),loadDuplicates(),loadClocks()]);
   const items=data.items||[];
   if(!items.length){$('#main').innerHTML=`<div class="empty"><strong>Nothing indexed yet</strong>Add a source folder for each person or device, then choose Index photos.</div>`;return;}
+  if(view==='dups'){$('#main').innerHTML=tabs()+renderDuplicates();bindTabs();bindDuplicates();return;}
   const s=data.summary, byOwner={};
   items.forEach(i=>{(byOwner[i.source_id]??={owner:i.owner,n:0,devices:new Set()}).n++;byOwner[i.source_id].devices.add(i.device);});
-  let html=`<div class="summary"><span class="big">${items.length} photos and videos</span>
+  let html=tabs()+`<div class="summary"><span class="big">${items.length} photos and videos</span>
     <span class="legend">${Object.entries(byOwner).map(([id,o])=>`<span class="chip"><span class="swatch" style="background:${lane(+id)}"></span>${esc(o.owner)} · ${o.n}<span style="color:var(--muted)">${esc([...o.devices].join(', '))}</span></span>`).join('')}</span></div>
     <div class="conf">${['high','medium','low','unknown'].filter(c=>s.by_confidence[c]).map(c=>`<span class="pill ${c}">${s.by_confidence[c]} ${esc(CONF_TEXT[c].toLowerCase())}</span>`).join('')}
     ${Object.entries(s.relationships||{}).map(([k,n])=>`<span class="chip">${n} ${k==='live_photo'?'Live Photo pairs':k==='raw_jpeg'?'RAW+JPEG pairs':'possible Live Photo pairs'}</span>`).join('')}</div>`;
@@ -199,12 +283,14 @@ async function loadTimeline(){
       html+=`<section class="day"><h3>${esc(dayTitle(day))}<small>${n} items</small></h3><div>`;}
     if(p.hour!==hour){if(hour!==null)html+='</div></div>';hour=p.hour;html+=`<div class="hour"><div class="h">${esc(hour)}:00</div><div class="tiles">`;}
     const thumb=it.kind==='image'?`<img class="img" loading="lazy" alt="" src="/api/thumb?path=${encodeURIComponent(it.path)}&v=2">`:`<span class="vid">Video ${esc(it.ext)}</span>`;
-    const flag=it.exact_copies?'<span class="flag">exact copy</span>':(it.related.length?`<span class="flag">${it.related[0].kind==='raw_jpeg'?'RAW+JPEG':'Live'}</span>`:'');
+    const dp=it.duplicate&&it.duplicate.category!=='similar_scene'?it.duplicate:null;
+    const flag=dp&&dp.keeper===false?'<span class="flag">duplicate</span>'
+      :(it.exact_copies?'<span class="flag">exact copy</span>':(it.related.length?`<span class="flag">${it.related[0].kind==='raw_jpeg'?'RAW+JPEG':'Live'}</span>`:''));
     html+=`<button class="tile ${esc(it.confidence)}" data-i="${idx}" style="--lane:${lane(it.source_id)}" title="${esc(it.filename)}">${thumb}${flag}
       <span class="meta"><span class="t">${esc(p.time)}</span><span class="who">${esc(it.owner)}</span></span></button>`;
   });
   html+='</div></div></div></section>';
-  $('#main').innerHTML=html;
+  $('#main').innerHTML=html;bindTabs();
   document.querySelectorAll('.tile').forEach(t=>t.onclick=()=>showDetail(+t.dataset.i,t));
 }
 
@@ -216,7 +302,8 @@ function showDetail(i,el){
     ${it.kind==='image'?`<img alt="" src="/api/thumb?path=${encodeURIComponent(it.path)}&v=2">`:''}
     <dl>
       <dt>Capture time</dt><dd>${esc(p.day)} ${esc(p.time)} ${it.offset_minutes!=null?esc(fmtOffset(it.offset_minutes)):'(time zone unknown)'}</dd>
-      <dt>UTC</dt><dd>${esc(it.utc_time||'unknown')}</dd>
+      <dt>UTC</dt><dd>${esc(it.corrected_utc_time||it.utc_time||'unknown')}</dd>
+      ${it.clock_correction_s?`<dt>Clock fix</dt><dd>${esc(fmtSec(it.clock_correction_s))} applied to ${esc(it.device)}. The file says ${esc((it.local_time||'').replace('T',' ').slice(0,19))}.</dd>`:''}
       <dt>Confidence</dt><dd><span class="pill ${esc(it.confidence)}">${esc(it.confidence)}</span> ${esc(CONF_TEXT[it.confidence]||'')}</dd>
       <dt>Rule</dt><dd>${esc(it.rule||'')}</dd>
       <dt>Source</dt><dd>${esc(it.owner)}</dd>

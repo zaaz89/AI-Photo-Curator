@@ -1,25 +1,49 @@
-"""Unified chronological view across all sources of a collection."""
+"""Unified chronological view across all sources of a collection.
+
+Accepted or manual clock corrections (app/timeline/clock_sync.py) shift the
+order and the displayed time. The original resolved time stays available as
+local_time / utc_time; the corrected values are separate fields.
+"""
 from __future__ import annotations
 
 import json
 import os
 import sqlite3
 from collections import Counter
+from datetime import datetime, timedelta, timezone
+
+
+def _shift_iso(value, seconds, utc=False):
+    if not value or not seconds:
+        return value
+    dt = datetime.fromisoformat(value.replace('Z', '+00:00') if utc else value)
+    out = (dt + timedelta(seconds=seconds)).isoformat()
+    return out.replace('+00:00', 'Z') if utc else out
 
 
 def timeline(conn: sqlite3.Connection) -> dict:
     rows = conn.execute(
         'SELECT a.id, a.rel_path, a.filename, a.kind, a.ext, a.make, a.model, a.width, a.height, '
         'a.gps_lat, a.gps_lon, a.sha256, s.id AS source_id, s.owner, s.label, s.path AS source_path, '
-        'c.local_time, c.utc_time, c.offset_minutes, c.rule, c.confidence, c.notes_json, c.sort_key '
+        'c.local_time, c.utc_time, c.offset_minutes, c.rule, c.confidence, c.notes_json, c.sort_key, '
+        'k.id AS clock_id, COALESCE(cc.applied_s, 0) AS applied_s, cc.status AS clock_status '
         'FROM assets a JOIN sources s ON s.id = a.source_id '
         'LEFT JOIN capture_time c ON c.asset_id = a.id '
+        "LEFT JOIN clocks k ON k.source_id = a.source_id AND k.make = COALESCE(a.make, '') "
+        "  AND k.model = COALESCE(a.model, '') "
+        'LEFT JOIN clock_corrections cc ON cc.clock_id = k.id '
         "WHERE a.status = 'present' "
-        'ORDER BY c.sort_key IS NULL, c.sort_key, s.id, a.rel_path').fetchall()
+        'ORDER BY c.sort_key IS NULL, c.sort_key + COALESCE(cc.applied_s, 0), s.id, a.rel_path').fetchall()
     rel = {}
     for r in conn.execute('SELECT kind, asset_a, asset_b FROM relationships'):
         rel.setdefault(r['asset_a'], []).append({'kind': r['kind'], 'with': r['asset_b']})
         rel.setdefault(r['asset_b'], []).append({'kind': r['kind'], 'with': r['asset_a']})
+    dup = {}
+    for r in conn.execute('SELECT m.asset_id, g.id, g.category, g.keeper_id FROM duplicate_members m '
+                          'JOIN duplicate_groups g ON g.id = m.group_id'):
+        if r['category'] != 'similar_scene' or r['asset_id'] not in dup:
+            dup[r['asset_id']] = {'group': r['id'], 'category': r['category'],
+                                  'keeper': r['keeper_id'] == r['asset_id'] if r['keeper_id'] else None}
     sha_count = Counter(r['sha256'] for r in rows if r['sha256'])
 
     items = []
@@ -27,6 +51,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
         device = ' '.join(x for x in (r['make'], r['model']) if x)
         if r['make'] and r['model'] and r['model'].upper().startswith(r['make'].upper()):
             device = r['model']
+        shift = r['applied_s'] or 0
         items.append({
             'id': r['id'],
             'path': os.path.join(r['source_path'], r['rel_path']),
@@ -37,16 +62,21 @@ def timeline(conn: sqlite3.Connection) -> dict:
             'source_id': r['source_id'],
             'owner': r['owner'],
             'device': device or 'unknown device',
+            'clock_id': r['clock_id'],
             'width': r['width'], 'height': r['height'],
             'gps': [r['gps_lat'], r['gps_lon']] if r['gps_lat'] is not None else None,
             'local_time': r['local_time'],
             'utc_time': r['utc_time'],
+            'clock_correction_s': shift,
+            'corrected_local_time': _shift_iso(r['local_time'], shift),
+            'corrected_utc_time': _shift_iso(r['utc_time'], shift, utc=True),
             'offset_minutes': r['offset_minutes'],
             'rule': r['rule'],
             'confidence': r['confidence'] or 'unknown',
             'notes': json.loads(r['notes_json'] or '[]'),
             'related': rel.get(r['id'], []),
             'exact_copies': sha_count[r['sha256']] - 1 if r['sha256'] else 0,
+            'duplicate': dup.get(r['id']),
         })
     summary = {
         'assets': len(items),
@@ -54,5 +84,22 @@ def timeline(conn: sqlite3.Connection) -> dict:
         'by_source': dict(Counter(i['owner'] for i in items)),
         'by_device': dict(Counter(i['device'] for i in items)),
         'relationships': dict(Counter(r['kind'] for r in conn.execute('SELECT kind FROM relationships'))),
+        'duplicate_groups': dict(Counter(r['category'] for r in conn.execute('SELECT category FROM duplicate_groups'))),
+        'corrected_clocks': conn.execute("SELECT COUNT(*) FROM clock_corrections WHERE applied_s != 0").fetchone()[0],
     }
     return {'summary': summary, 'items': items}
+
+
+def duplicate_groups(conn: sqlite3.Connection) -> list:
+    groups = []
+    for g in conn.execute('SELECT * FROM duplicate_groups ORDER BY id'):
+        members = conn.execute(
+            "SELECT a.id, a.filename, a.rel_path, a.width, a.height, a.size, s.owner, s.path || '/' || a.rel_path AS path, "
+            "a.make, a.model, m.score AS sharpness, c.local_time FROM duplicate_members m "
+            'JOIN assets a ON a.id = m.asset_id JOIN sources s ON s.id = a.source_id '
+            'LEFT JOIN capture_time c ON c.asset_id = a.id WHERE m.group_id = ? ORDER BY c.sort_key, a.id',
+            (g['id'],)).fetchall()
+        groups.append({'id': g['id'], 'category': g['category'], 'keeper_id': g['keeper_id'],
+                       'reasons': json.loads(g['reasons_json']), 'members': [dict(m) for m in members]})
+    order = {'exact': 0, 'near': 1, 'similar_scene': 2}
+    return sorted(groups, key=lambda g: (order.get(g['category'], 9), g['id']))

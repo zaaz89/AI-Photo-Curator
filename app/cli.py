@@ -13,7 +13,7 @@ import json
 import sys
 
 from app import collections as col
-from app.importers.local_importer import index_collection
+from app.analysis import analyze_collection
 from app.timeline.timeline_engine import timeline
 
 
@@ -38,7 +38,7 @@ def main(argv=None):
         print(col.add_source(conn, args.folder, args.owner, args.label))
     elif args.cmd == 'index':
         conn = col.open_db(args.collection)
-        res = index_collection(conn, progress=lambda m, i, n: print(f'  {m} {i}/{n}' if n else f'  {m}',
+        res = analyze_collection(conn, progress=lambda m, i, n: print(f'  {m} {i}/{n}' if n else f'  {m}',
                                                                      file=sys.stderr))
         print(json.dumps(res, indent=2, ensure_ascii=False))
     elif args.cmd == 'timeline':
