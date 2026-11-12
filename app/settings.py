@@ -12,8 +12,12 @@ DEFAULTS = {
     'ai_gpu_share': 30,
     # Pause long AI jobs while the Mac runs on battery.
     'ai_pause_on_battery': False,
+    # Interface language: en (default, owner's choice 2026-11-12) or sl.
+    'ui_language': 'en',
+    # Best photos: weights of the five ranking categories (upstream defaults).
+    'rank_weights': {'aesthetic': 30, 'composition': 22, 'technical': 20, 'sharpness': 16, 'color': 12},
 }
-CHOICES = {'ai_gpu_share': (25, 30, 50, 100)}
+CHOICES = {'ai_gpu_share': (25, 30, 50, 100), 'ui_language': ('en', 'sl')}
 
 
 def _path():
@@ -38,6 +42,10 @@ def save(changes: dict) -> dict:
             raise ValueError(f'{k} must be one of {CHOICES[k]}')
         if isinstance(DEFAULTS[k], bool):
             v = bool(v)
+        if k == 'rank_weights':
+            if not isinstance(v, dict) or any(c not in DEFAULTS['rank_weights'] for c in v):
+                raise ValueError('rank_weights must map the five categories to numbers')
+            v = {c: max(0, min(100, int(v.get(c, 0)))) for c in DEFAULTS['rank_weights']}
         cur[k] = v
     _path().parent.mkdir(parents=True, exist_ok=True)
     _path().write_text(json.dumps(cur, indent=2))

@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 TEMPLATES = ('default', 'original', 'place', 'trip')
 FOLDERS = ('day', 'date', 'event', 'place', 'flat')
 DUPLICATES = ('skip', 'alternatives', 'include')
+SELECTIONS = ('all', 'no_blurry', 'best')
 INVALID = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
@@ -106,13 +107,25 @@ def _non_keepers(conn):
         "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")}
 
 
-def plan_export(conn, template: str = 'default', folders: str = 'day', duplicates: str = 'skip') -> dict:
+def plan_export(conn, template: str = 'default', folders: str = 'day', duplicates: str = 'skip',
+                selection: str = 'all', topn: int = 50, weights: dict | None = None) -> dict:
     if template not in TEMPLATES:
         raise ValueError(f'template must be one of {TEMPLATES}')
     if folders not in FOLDERS:
         raise ValueError(f'folders must be one of {FOLDERS}')
     if duplicates not in DUPLICATES:
         raise ValueError(f'duplicates must be one of {DUPLICATES}')
+    if selection not in SELECTIONS:
+        raise ValueError(f'selection must be one of {SELECTIONS}')
+    keep_only = None
+    if selection == 'no_blurry':
+        from app.quality.scoring import focus_tiers
+        blurry = {a for a, v in focus_tiers(conn).items() if v['tier'] == 'blurry'}
+    else:
+        blurry = set()
+    if selection == 'best':
+        from app.quality.scoring import best_photos
+        keep_only = {b['id'] for b in best_photos(conn, weights, topn)}
     trip = clean_part(conn.execute('SELECT name FROM collection WHERE id = 1').fetchone()[0]) or 'Collection'
     rows = _rows(conn)
     pairs = _pairs(conn)
@@ -125,6 +138,12 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                     and r['place_precision'] == 'in' and r['place_name'])
         day_place[d] = c.most_common(1)[0][0] if c else ''
 
+    excluded_by_selection = 0
+    if keep_only is not None or blurry:
+        before = len(rows)
+        rows = [r for r in rows if r['id'] not in blurry and (keep_only is None or r['id'] in keep_only
+                                                               or pairs.get(r['id']) in keep_only)]
+        excluded_by_selection = before - len(rows)
     primary_rows = [r for r in rows if r['id'] not in pairs]
     by_id = {r['id']: r for r in rows}
     seq = defaultdict(int)
@@ -190,9 +209,11 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
         entries.append(_entry(r, folder, stem, False, paired_with=pri))
         warnings['paired files kept together'] += 1
 
+    if excluded_by_selection:
+        warnings[f'left out by selection ({selection})'] = excluded_by_selection
     entries.sort(key=lambda e: (e['dest'].lower()))
     total = sum(e['size'] for e in entries)
-    return {'trip': trip, 'template': template, 'folders': folders, 'duplicates': duplicates,
+    return {'trip': trip, 'template': template, 'folders': folders, 'duplicates': duplicates, 'selection': selection,
             'files': len(entries), 'bytes': total, 'folders_count': len({os.path.dirname(e['dest']) for e in entries}),
             'warnings': dict(warnings), 'entries': entries}
 
@@ -209,5 +230,5 @@ def run_export(conn, dest_root: str, plan: dict, resume_dir: str | None = None, 
     items = [ExportItem(source=e['source'], dest_name=e['dest']) for e in plan['entries']]
     roots = sorted({r[0] for r in conn.execute('SELECT path FROM sources')})
     return export_copies(items, dest_root, roots, plan['trip'], resume_dir=resume_dir, progress=progress,
-                         extra={'plan': {k: plan[k] for k in ('template', 'folders', 'duplicates', 'files', 'bytes')},
+                         extra={'plan': {k: plan[k] for k in ('template', 'folders', 'duplicates', 'selection', 'files', 'bytes')},
                                 'original_names': {e['dest']: e['original_name'] for e in plan['entries']}})

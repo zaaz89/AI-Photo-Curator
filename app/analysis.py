@@ -22,6 +22,8 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
         progress('Visual signatures', 0, 0)
     res['features_computed'] = compute_features(conn, progress, cancelled)
     res['duplicate_groups'] = build_groups(conn, progress, cancelled)
+    from app.quality.scoring import compute_quality
+    res['quality'] = compute_quality(conn, progress, cancelled)
     # Search index (M3). Optional: without the local model the rest still works.
     from app.ai.embeddings import ModelUnavailable, compute_embeddings
     try:

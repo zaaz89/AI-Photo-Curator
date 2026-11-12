@@ -18,21 +18,12 @@ def test_exif_panel_labels_modified_time_fallback(pc, client, H, tmp_path):
     assert 'not capture time' in d['time']
 
 
-def test_dedup_reads_date_time_original(tmp_path):
-    from photo_dedup_batch import FastBatchDeduplicator
-    import time
-    p = make_photo(tmp_path / 'IMG_3.JPG', seed=3, dto='2026:10:23 18:14:32',
-                   datetime_ifd0='2026:10:23 20:00:00')
-    t = FastBatchDeduplicator(threshold=0.8)._capture_time(str(p))
-    assert time.strftime('%H:%M:%S', time.localtime(t)) == '18:14:32'
-
-
 def test_rejects_foreign_host(client):
     assert client.get('/api/shortcuts', headers={'Host': 'evil.example'}).status_code == 403
 
 
 def test_rejects_cross_origin(client, H):
-    r = client.post('/api/restore', json={'all': True},
+    r = client.post('/api/settings', json={'ui_language': 'en'},
                     headers={**H, 'Origin': 'https://evil.example'})
     assert r.status_code == 403
 

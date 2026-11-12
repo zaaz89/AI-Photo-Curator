@@ -1,7 +1,7 @@
 """Visual features computed from a reduced decode of each file (read-only).
 
 - 192-bit perceptual signature: average hash 8x8 + horizontal and vertical
-  difference hashes. Same algorithm as upstream photo_dedup_batch.py, with
+  difference hashes. Same algorithm as the upstream photo_dedup_batch.py (removed in M6), with
   EXIF orientation applied so rotated copies still match.
 - Sharpness: Laplacian variance normalised by image variance (as upstream).
 - ORB keypoints for scene matching, computed on demand and kept in memory.

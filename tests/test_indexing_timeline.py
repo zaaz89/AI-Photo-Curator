@@ -145,5 +145,5 @@ def test_timeline_api_and_thumbnails(pc, client, H, two_phones):
     pc._coll_roots_cache['t'] = 0           # pick up the new sources now
     first = tl['items'][0]['path']
     assert client.get('/api/thumb', query_string={'path': first}, headers=H).status_code == 200
-    assert client.get('/timeline', headers=H).status_code == 200
+    assert client.get('/', headers=H).status_code == 200                # the app page (the old /timeline redirects here)
     assert (snapshot(a), snapshot(b)) == before
