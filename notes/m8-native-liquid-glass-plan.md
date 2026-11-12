@@ -1,6 +1,6 @@
 # M8 plan: native Mac app with Liquid Glass and a smart trip assistant
 
-Status: **proposal, waiting for the owner's OK** (2026-11-12, Claude). Nothing is built yet.
+Status: approved 2026-11-12 after the spike. Phase 1 built (branch `claude/m8-native-glass`); phases 2–4 open.
 
 ## Why
 

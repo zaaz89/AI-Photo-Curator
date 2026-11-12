@@ -74,3 +74,9 @@ Branch `claude/m7-trip-workflow`. Owner asked to finish the program around the r
 Tests: 86 pass (13 new). test-10: 13 of 19 photos with faces; Google Photos export 18 of 18 copies written and verified, sources unchanged. UI checked in both languages and both themes; the Mac window checked on screen.
 Not verified: eye thresholds on real closed-eye photos; Google Photos reading the description; VoiceOver.
 Next: owner tries the app on the next trip folder; Google Photos connection later (owner asked to wait).
+
+### 2026-11-12 — PR #10 merged; M8 phase 1: native app with Liquid Glass (Claude)
+PR #10 (M7) merged on the owner's request. Owner: design and UX not at Apple's level; wants Liquid Glass, a smart assistant, and dynamic "AI" feedback whenever the app works. Plan `notes/m8-native-liquid-glass-plan.md` (native SwiftUI interface, Python engine kept) approved after a throwaway spike window. Phase 1 on branch `claude/m8-native-glass` (plan `notes/m8-phase1-plan.md`): Swift package `mac/` (CuratorCore + app), engine start/stop, sidebar with trips, library and days, grid by day and event with keyboard, Quick Look on the originals, inspector, favourite / leave out / focus / wallpaper with system undo and redo, floating glass selection bar, move to event, search, settings window, EN/SL, live activity (gradient ring with phase and percentage in the toolbar, AI glow on the window edge, shimmer on photos being analysed). The M7 trip steps stay in a Classic View window until phases 2–3.
+Tests: 14 Swift + 86 Python pass. Checked on test-10 by keystrokes (favourite, undo, redo, multi-select) and screenshots in English and Slovenian; 9 photos of test-10 described during the activity check.
+Not verified: light appearance and Reduce Motion in the native window; VoiceOver; Quick Look and lasso by mouse.
+Next: owner tries the app; phase 2 (assistant: drop folders, suggestions, overview cards, compare flow).
