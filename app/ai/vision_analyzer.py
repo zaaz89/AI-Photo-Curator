@@ -130,7 +130,8 @@ def describe(path: str) -> dict:
         raise ValueError('image could not be decoded')
     r = _post('/api/generate', {'model': VLM_MODEL, 'prompt': PROMPT, 'images': [img], 'format': SCHEMA,
                                 'stream': False, 'think': False, 'keep_alive': '10m',
-                                'options': {'temperature': 0}})
+                                # Cap the answer: the model sometimes keeps listing tags for 1,000+ tokens.
+                                'options': {'temperature': 0, 'num_predict': 320}})
     return clean(json.loads(r.get('response') or '{}'))
 
 
