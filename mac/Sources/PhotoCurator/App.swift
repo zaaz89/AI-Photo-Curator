@@ -41,6 +41,7 @@ struct PhotoCuratorApp: App {
                 .frame(minWidth: 900, minHeight: 600)
         }
         .defaultSize(width: 1300, height: 860)
+        .keyboardShortcut("k", modifiers: [.command, .shift])     // the system lists the window in the Window menu
 
         Settings { SettingsView().environmentObject(library) }
     }
@@ -66,10 +67,6 @@ struct AppCommands: Commands {
         }
         CommandGroup(after: .textEditing) {
             Button(library.tr("find")) { library.searchFocusRequest += 1 }.keyboardShortcut("f")
-        }
-        CommandGroup(after: .windowArrangement) {
-            Divider()
-            Button(library.tr("classicView")) { openWindow(id: "classic") }.keyboardShortcut("k", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .help) {
             Button(library.tr("showLog")) { engine.openLog() }
