@@ -24,7 +24,7 @@ struct PhotoGrid: View {
                                               spacing: spacing) {
                                         ForEach(section.photos) { photo in
                                             PhotoTile(photo: photo, selected: library.selection.contains(photo.id),
-                                                      isCursor: library.flat.indices.contains(library.cursor) && library.flat[library.cursor].id == photo.id,
+                                                      isCursor: library.cursorId == photo.id,
                                                       side: library.tileSize)
                                                 .frame(height: library.tileSize)
                                                 .id(photo.id)
@@ -42,11 +42,10 @@ struct PhotoGrid: View {
                         .padding(.bottom, 90)
                     }
                 }
-                .onChange(of: library.cursor) { _, i in
-                    let list = library.flat
-                    guard list.indices.contains(i) else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(list[i].id) }
-                    QuickLook.shared.follow(i)
+                .onChange(of: library.cursor) { _, _ in
+                    guard let id = library.cursorId else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(id) }
+                    library.quickLookFollowCursor()
                 }
             }
             .onAppear { columns = columnCount(geo.size.width) }
@@ -72,8 +71,19 @@ struct PhotoGrid: View {
             library.moveCursor(dir, columns: columns, extend: press.modifiers.contains(.shift))
             return .handled
         }
-        .onKeyPress(.space) {
-            QuickLook.shared.toggle(library.flat, at: max(library.cursor, 0))
+        .onKeyPress(.space) { library.toggleQuickLook(); return .handled }
+        // Photo keys live here, not as menu shortcuts: menu shortcuts would also fire while
+        // typing in the search field or a sheet.
+        .onKeyPress(phases: .down) { press in
+            let key = press.characters.lowercased()
+            if press.modifiers == .command && key == "a" { library.selectAll(); return .handled }
+            guard press.modifiers.isEmpty || press.modifiers == .shift else { return .ignored }
+            switch key {
+            case "f": library.toggleFavourite()
+            case "x": library.toggleLeaveOut()
+            case "b": library.toggleWallpaper()
+            default: return .ignored
+            }
             return .handled
         }
         .onKeyPress(.escape) { library.clearSelection(); return .handled }
@@ -91,9 +101,7 @@ struct PhotoGrid: View {
     func tap(_ photo: Photo) {
         focused = true
         library.click(photo, modifiers: NSEvent.modifierFlags)
-        if NSApp.currentEvent?.clickCount == 2 {
-            QuickLook.shared.toggle(library.flat, at: library.cursor)
-        }
+        if NSApp.currentEvent?.clickCount == 2 { library.toggleQuickLook() }
     }
 
     @ViewBuilder var emptyState: some View {
@@ -241,7 +249,7 @@ struct TileMenu: View {
         Button(library.tr(photo.favorite ? "unfavourite" : "favourite")) { ensure(); library.toggleFavourite() }
         Button(library.tr(photo.rejected ? "keep" : "leaveOut")) { ensure(); library.toggleLeaveOut() }
         Divider()
-        Button(library.tr("quickLook")) { ensure(); QuickLook.shared.toggle(library.flat, at: library.cursor) }
+        Button(library.tr("quickLook")) { ensure(); library.toggleQuickLook() }
         Button(library.tr("showInFinder")) { NSWorkspace.shared.activateFileViewerSelecting([photo.fileURL]) }
     }
     /// A right-click on a photo outside the selection acts on that photo only.

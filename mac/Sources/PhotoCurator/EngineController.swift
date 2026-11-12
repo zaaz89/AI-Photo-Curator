@@ -10,9 +10,14 @@ import Foundation
     @Published private(set) var state: State = .starting
     @Published private(set) var startedAt = Date()
     private var process: Process?
+    private let launcher: (@MainActor () throws -> Process)?
     let api: APIClient
 
-    init(api: APIClient) { self.api = api }
+    /// `launcher` replaces starting Python (tests).
+    init(api: APIClient, launcher: (@MainActor () throws -> Process)? = nil) {
+        self.api = api
+        self.launcher = launcher
+    }
 
     var projectPath: String? {
         let p = Bundle.main.object(forInfoDictionaryKey: "PCProjectPath") as? String
@@ -21,12 +26,20 @@ import Foundation
         return p
     }
 
+    private var startTask: Task<Void, Never>?
+
+    /// Starts once: a second call while starting (another window, a double click) does nothing,
+    /// and a retry first stops the process the previous attempt left behind.
     func start() {
+        if startTask != nil { return }
+        if let p = process, p.isRunning { stopIfOwned() }
         startedAt = Date()
         state = .starting
-        Task {
+        startTask = Task {
+            defer { startTask = nil }
             if await api.ping() { state = .ready; return }
-            do { try launch() } catch { state = .failed(error.localizedDescription); return }
+            do { if let launcher { process = try launcher() } else { try launch() } }
+            catch { state = .failed(error.localizedDescription); return }
             for _ in 0..<180 {                                    // up to 90 s (cold start is ~25 s)
                 if await api.ping() { state = .ready; return }
                 if let p = process, !p.isRunning { break }

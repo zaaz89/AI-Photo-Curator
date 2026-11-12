@@ -15,16 +15,23 @@ enum Destination: Hashable {
 
     @Published var trips: [Trip] = []
     @Published var tripId: String? { didSet { if tripId != oldValue { tripChanged() } } }
-    @Published private(set) var photos: [Photo] = []
-    @Published private(set) var events: [TripEvent] = []
+    @Published private(set) var photos: [Photo] = [] { didSet { recompute() } }
+    @Published private(set) var events: [TripEvent] = [] { didSet { recompute() } }
+    /// The trip `photos` belong to. Marks and moves are refused while it differs from `tripId`:
+    /// photo ids are per trip, so an old id would hit another photo in the new trip.
+    @Published private(set) var loadedTripId: String?
+    /// What the grid shows, rebuilt only when photos, events, the view or the order change.
+    @Published private(set) var visibleSections: [PhotoSection] = []
+    @Published private(set) var flat: [Photo] = []
     @Published private(set) var sources: [SourceInfo] = []
-    @Published var destination: Destination = .all { didSet { if destination != oldValue { clearSelection() } } }
-    @Published var sort: PhotoSort = .time
+    @Published var destination: Destination = .all { didSet { if destination != oldValue { clearSelection(); recompute() } } }
+    @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
     @Published var cursor: Int = -1                     // flat index into `flat`
     @Published var tileSize: Double = 190
     @Published var searchText = ""
-    @Published private(set) var searchResult: SearchResult?
+    @Published var searchFocusRequest = 0               // ⌘F: the window moves focus to the search field
+    @Published private(set) var searchResult: SearchResult? { didSet { recompute() } }
     @Published private(set) var searching = false
     @Published var settings: EngineSettings?
     @Published var message: String?                     // transient error or info for the user
@@ -33,6 +40,9 @@ enum Destination: Hashable {
 
     weak var undoManager: UndoManager?
     private var pollTask: Task<Void, Never>?
+    /// Writes go to the engine one after another, in the order the owner made them.
+    private var writeQueue: Task<Void, Never>?
+    private var pendingWrites = 0
 
     init(api: APIClient) { self.api = api }
 
@@ -59,6 +69,9 @@ enum Destination: Hashable {
 
     private func tripChanged() {
         undoManager?.removeAllActions()            // undo must never write into another trip
+        photos = []                                // never show or act on the previous trip's photos
+        events = []
+        loadedTripId = nil
         clearSelection()
         searchResult = nil
         searchText = ""
@@ -79,7 +92,8 @@ enum Destination: Hashable {
             photos = timeline.items
             events = timeline.events
             sources = src
-            if cursor >= flat.count { cursor = flat.count - 1 }
+            loadedTripId = tripId
+            trimSelection()
         } catch { message = describe(error) }
     }
 
@@ -95,11 +109,14 @@ enum Destination: Hashable {
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
     }
-    var visibleSections: [PhotoSection] { sections(photos, events: events, filter: filter, sort: destination == .search ? .time : sort) }
-    var flat: [Photo] { visibleSections.flatMap(\.photos) }
+    private func recompute() {
+        visibleSections = sections(photos, events: events, filter: filter, sort: destination == .search ? .time : sort)
+        flat = visibleSections.flatMap(\.photos)
+    }
     var days: [String] { Array(Set(photos.filter { !$0.rejected }.map(\.day))).sorted() }
     var selectedPhotos: [Photo] { flat.filter { selection.contains($0.id) } }
-    var single: Photo? { selection.count == 1 ? photos.first { selection.contains($0.id) } : nil }
+    var single: Photo? { selection.count == 1 ? flat.first { selection.contains($0.id) } : nil }
+    var cursorId: Int? { flat.indices.contains(cursor) ? flat[cursor].id : nil }
     func count(_ d: Destination) -> Int {
         switch d {
         case .all: return photos.filter { !$0.rejected }.count
@@ -116,6 +133,20 @@ enum Destination: Hashable {
     // MARK: selection
 
     func clearSelection() { selection = []; cursor = -1 }
+
+    /// After photos leave the view (left out, moved, reloaded): keep only visible ids in the
+    /// selection; if nothing visible is left selected, select the photo that took the cursor's
+    /// place, so the inspector and the next key press act on the same, highlighted photo.
+    private func trimSelection() {
+        let visible = Set(flat.map(\.id))
+        let had = !selection.isEmpty
+        selection.formIntersection(visible)
+        if flat.isEmpty { cursor = -1; return }
+        if cursor >= flat.count { cursor = flat.count - 1 }
+        if had && selection.isEmpty && cursor >= 0 { selection = [flat[cursor].id] }
+        if let c = cursorId, !selection.isEmpty, !selection.contains(c),
+           let i = flat.firstIndex(where: { selection.contains($0.id) }) { cursor = i }
+    }
 
     func click(_ photo: Photo, modifiers: NSEvent.ModifierFlags) {
         let list = flat
@@ -136,6 +167,31 @@ enum Destination: Hashable {
         guard next >= 0, next < list.count else { return }
         if extend { selection.formUnion(rangeSelect(from: max(cursor, 0), to: next, in: list.map(\.id))) } else { selection = [list[next].id] }
         cursor = next
+    }
+
+    // MARK: Quick Look (system panel on the original files)
+
+    @Published var quickLookURL: URL? { didSet { quickLookMovedCursor() } }
+    @Published private(set) var quickLookItems: [URL] = []
+
+    func toggleQuickLook() {
+        if quickLookURL != nil { quickLookURL = nil; return }
+        guard !flat.isEmpty else { return }
+        if cursor < 0 { cursor = 0; selection = [flat[0].id] }
+        quickLookItems = flat.map(\.fileURL)
+        quickLookURL = flat[cursor].fileURL
+    }
+    /// Arrow keys in the grid move the panel too.
+    func quickLookFollowCursor() {
+        guard quickLookURL != nil, flat.indices.contains(cursor) else { return }
+        if quickLookItems != flat.map(\.fileURL) { quickLookItems = flat.map(\.fileURL) }
+        if quickLookURL != flat[cursor].fileURL { quickLookURL = flat[cursor].fileURL }
+    }
+    /// Arrow keys in the panel move the grid's cursor and selection.
+    private func quickLookMovedCursor() {
+        guard let url = quickLookURL, let i = flat.firstIndex(where: { $0.fileURL == url }), i != cursor else { return }
+        cursor = i
+        selection = [flat[i].id]
     }
 
     func selectAll() { selection = Set(flat.map(\.id)); if cursor < 0 { cursor = 0 } }
@@ -168,33 +224,41 @@ enum Destination: Hashable {
 
     /// Applies marks to photos, registers undo with each photo's previous values.
     func mark(_ items: [Photo], _ fields: [String: MarkValue], name: String) {
-        guard let tripId, !items.isEmpty else { return }
+        guard let tripId, tripId == loadedTripId, !items.isEmpty else { return }
         let previous = items.map { p in (p.id, Dictionary(uniqueKeysWithValues: fields.keys.map { ($0, current(p, $0)) })) }
         let ids = items.map(\.id)
         apply(ids: ids, fields)                                  // the grid reacts at once
-        Task {
-            do {
-                try await api.setMarks(trip: tripId, ids: ids, fields)
-                registerUndo(name: name, trip: tripId) { model in
-                    for (id, f) in previous { model.apply(ids: [id], f) }
-                    for (id, f) in previous { try await model.api.setMark(trip: tripId, id: id, f) }
-                } redo: { model in
-                    model.apply(ids: ids, fields)
-                    try await model.api.setMarks(trip: tripId, ids: ids, fields)
-                }
-                await reload()
-            } catch { message = describe(error); await reload() }
+        registerUndo(name: name, trip: tripId) { model in
+            for (id, f) in previous { model.apply(ids: [id], f) }
+            model.enqueue { api in for (id, f) in previous { try await api.setMark(trip: tripId, id: id, f) } }
+        } redo: { model in
+            model.apply(ids: ids, fields)
+            model.enqueue { api in try await api.setMarks(trip: tripId, ids: ids, fields) }
+        }
+        enqueue { api in try await api.setMarks(trip: tripId, ids: ids, fields) }
+    }
+
+    /// Runs engine writes one at a time in order; reloads once when the queue is empty.
+    private func enqueue(_ write: @escaping @Sendable (APIClient) async throws -> Void) {
+        let previous = writeQueue, api = self.api
+        pendingWrites += 1
+        writeQueue = Task { [weak self] in
+            await previous?.value
+            do { try await write(api) } catch { self?.message = self?.describe(error) }
+            guard let self else { return }
+            self.pendingWrites -= 1
+            if self.pendingWrites == 0 { await self.reload() }
         }
     }
 
     private func registerUndo(name: String, trip: String,
-                              undo: @escaping @MainActor (LibraryModel) async throws -> Void,
-                              redo: @escaping @MainActor (LibraryModel) async throws -> Void) {
+                              undo: @escaping @MainActor (LibraryModel) -> Void,
+                              redo: @escaping @MainActor (LibraryModel) -> Void) {
         guard let um = undoManager else { return }
         um.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated {
-                guard model.tripId == trip else { return }
-                Task { do { try await undo(model) } catch { model.message = model.describe(error) }; await model.reload() }
+                guard model.tripId == trip, model.loadedTripId == trip else { return }
+                undo(model)
                 model.registerUndo(name: name, trip: trip, undo: redo, redo: undo)
             }
         }
@@ -204,22 +268,25 @@ enum Destination: Hashable {
     /// Local, optimistic copy of the marks so the grid updates without waiting for the engine.
     private func apply(ids: [Int], _ fields: [String: MarkValue]) {
         let set = Set(ids)
-        for i in photos.indices where set.contains(photos[i].id) {
+        var copy = photos                                        // one change, one grid rebuild
+        for i in copy.indices where set.contains(copy[i].id) {
             for (k, v) in fields {
                 switch (k, v) {
-                case ("favorite", .bool(let b)): photos[i].favorite = b
-                case ("rejected", .bool(let b)): photos[i].rejected = b
-                case ("wallpaper", .bool(let b)): photos[i].wallpaper = b
+                case ("favorite", .bool(let b)): copy[i].favorite = b
+                case ("rejected", .bool(let b)): copy[i].rejected = b
+                case ("wallpaper", .bool(let b)): copy[i].wallpaper = b
                 default: break
                 }
             }
         }
+        photos = copy
+        trimSelection()
     }
 
     // MARK: events
 
     func move(toEvent event: Int?, newName: String? = nil) {
-        guard let tripId else { return }
+        guard let tripId, tripId == loadedTripId else { return }
         let ids = targets.map(\.id)
         guard !ids.isEmpty else { return }
         Task {

@@ -21,7 +21,8 @@ struct PhotoCuratorApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Photo Curator", id: "main") {
+        // One main window: the engine and the model belong to it.
+        Window("Photo Curator", id: "main") {
             RootView()
                 .environmentObject(engine)
                 .environmentObject(library)
@@ -52,18 +53,19 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         CommandMenu(library.tr("photoMenu")) {
-            Button(library.tr("favourite")) { library.toggleFavourite() }.keyboardShortcut("f", modifiers: [])
-            Button(library.tr("leaveOut")) { library.toggleLeaveOut() }.keyboardShortcut("x", modifiers: [])
-            Button(library.tr("wallpaper")) { library.toggleWallpaper() }.keyboardShortcut("b", modifiers: [])
+            // F, X and B work in the photo grid (see PhotoGrid); here they are listed for the menu.
+            Button(library.tr("favourite") + "  (F)") { library.toggleFavourite() }
+            Button(library.tr("leaveOut") + "  (X)") { library.toggleLeaveOut() }
+            Button(library.tr("wallpaper") + "  (B)") { library.toggleWallpaper() }
             Divider()
-            Button(library.tr("quickLook")) { QuickLook.shared.toggle(library.flat, at: library.cursor) }
+            Button(library.tr("quickLook")) { library.toggleQuickLook() }
                 .keyboardShortcut("y", modifiers: .command)
             Divider()
             Button(library.tr("analyseAgain")) { library.analyse() }.disabled(library.job.running)
             Button(library.tr("stop")) { library.stopJob() }.disabled(!library.job.running)
         }
-        CommandGroup(replacing: .textEditing) {
-            Button(library.tr("selectAll")) { library.selectAll() }.keyboardShortcut("a")
+        CommandGroup(after: .textEditing) {
+            Button(library.tr("find")) { library.searchFocusRequest += 1 }.keyboardShortcut("f")
         }
         CommandGroup(after: .windowArrangement) {
             Divider()

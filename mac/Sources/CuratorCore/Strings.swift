@@ -45,6 +45,7 @@ public enum Strings {
         "notRated": ("Not rated", "Brez ocene"),
         "unknown": ("Unknown", "Neznano"),
         // toolbar
+        "find": ("Find Photos", "Išči fotografije"),
         "searchPrompt": ("Sunset, ring, Florence", "Sončni zahod, prstan, Firence"),
         "alsoAs": ("also searched as", "iskano tudi kot"),
         "viewOptions": ("View Options", "Možnosti pogleda"),

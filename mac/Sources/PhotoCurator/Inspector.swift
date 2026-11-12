@@ -9,7 +9,7 @@ struct InspectorView: View {
         if let p = library.single {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Button { QuickLook.shared.toggle(library.flat, at: library.cursor) } label: {
+                    Button { library.toggleQuickLook() } label: {
                         Thumbnail(url: p.fileURL, side: 520, fill: false)
                             .aspectRatio(CGFloat(p.width ?? 3) / CGFloat(max(p.height ?? 2, 1)), contentMode: .fit)
                             .frame(maxHeight: 280)

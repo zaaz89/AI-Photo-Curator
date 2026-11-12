@@ -12,5 +12,7 @@ let package = Package(
         // The SwiftUI app.
         .executableTarget(name: "PhotoCurator", dependencies: ["CuratorCore"]),
         .testTarget(name: "CuratorCoreTests", dependencies: ["CuratorCore"], resources: [.copy("Fixtures")]),
+        // The app's model (selection, marks, undo, engine start) against a stubbed engine.
+        .testTarget(name: "PhotoCuratorTests", dependencies: ["PhotoCurator", "CuratorCore"], resources: [.copy("Fixtures")]),
     ]
 )

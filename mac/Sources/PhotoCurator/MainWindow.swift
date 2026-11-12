@@ -1,4 +1,5 @@
 import CuratorCore
+import QuickLook
 import SwiftUI
 
 struct MainWindow: View {
@@ -6,6 +7,7 @@ struct MainWindow: View {
     @Environment(\.openWindow) private var openWindow
     @State private var showInspector = true
     @State private var newEvent = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -17,7 +19,9 @@ struct MainWindow: View {
                 .navigationSubtitle(subtitle)
                 .toolbar { toolbar }
                 .searchable(text: $library.searchText, placement: .toolbar, prompt: library.tr("searchPrompt"))
+                .searchFocused($searchFocused)
                 .onSubmit(of: .search) { library.runSearch() }
+                .onChange(of: library.searchFocusRequest) { _, _ in searchFocused = true }
                 .inspector(isPresented: $showInspector) {
                     InspectorView().inspectorColumnWidth(min: 260, ideal: 300, max: 380)
                 }
@@ -31,6 +35,7 @@ struct MainWindow: View {
                 .overlay(alignment: .top) { MessageBanner() }
                 .animation(.spring(duration: 0.35), value: library.selection.count > 1)
                 .sheet(isPresented: $newEvent) { NewEventSheet() }
+                .quickLookPreview($library.quickLookURL, in: library.quickLookItems)
         }
         .overlay { AIGlow(active: library.job.running && library.job.phase.isAI) }
     }
