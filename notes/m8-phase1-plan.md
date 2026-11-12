@@ -66,6 +66,18 @@
 
 - [ ] Run on test-10: 19 photos in 8 events, screenshot light and dark.
 
+### Task 4b: live activity (owner's request 2026-11-12: "dynamic, futuristic, modern, AI")
+
+**Files:** `ActivityView.swift`, `ActivityModel.swift` (polls `GET /api/collections/<cid>/index` every 0.7 s while a job runs, 5 s when idle); `CuratorCore/Activity.swift` with `struct JobStatus { running, progress, status, error }` and `func phase(of status: String) -> ActivityPhase` (indexing, clocks, places, faces, duplicates, search index, describing, exporting, idle) + tests.
+
+- Toolbar: a glass capsule with an animated angular-gradient ring (blue → purple → pink → orange, rotating) around an SF Symbol for the phase, the phase in words and a live percentage; click opens a popover with all phases ticked off as they finish and a Stop button.
+- While local AI runs (faces, descriptions, search index) a soft animated gradient glow runs along the window edge, like the system's AI glow; it fades out when the job ends.
+- Photos not analysed yet show a light shimmer over the thumbnail; the counters in the sidebar count up as results arrive.
+- Reduce Motion: no rotation or glow movement, a static gradient and the percentage only. Animations use TimelineView so nothing animates when no job runs (no idle CPU use).
+
+- [ ] Tests: `phase(of:)` maps the engine's status texts ("Faces (Apple Vision)", "Describing…", "Export done…") to phases; an error status maps to `.failed`.
+- [ ] Run "Analyse again" on test-10 and screenshot the window mid-job.
+
 ### Task 5: inspector, marks, undo, selection bar, move
 
 **Files:** `Inspector.swift`, `SelectionBar.swift`, `LibraryModel.swift` (the `@MainActor` store).

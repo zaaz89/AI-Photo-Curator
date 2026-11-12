@@ -44,6 +44,8 @@ Checked on this Mac: macOS 27.2, Xcode 27.2, the SDK has SwiftUI `glassEffect` /
 5. **Compare flow.** One moment at a time, frames side by side at large size, the recommendation marked with the reason in plain words ("eyes closed in the other two"). Glass controls: previous / keep this / next. Keys: ← → to look, Return to accept, K to keep the selected frame, "Accept all recommendations" at the end.
 6. **Export.** One screen with the summary and one button. When done: verified count, "Show in Finder".
 
+**Live activity (owner, 2026-11-12: "dynamic, futuristic, modern, AI").** Whenever the app works, it shows it: a glass capsule in the toolbar with an animated gradient ring, the current phase in words and a live percentage; a soft animated glow along the window edge while local AI runs; a shimmer over photos not analysed yet; counters that count up. Reduce Motion gives a calm static version.
+
 **Library.** Large, fast grid with smooth zoom (pinch and slider), sections per day and event with sticky headers, multi-select with mouse, keyboard and lasso, floating glass selection bar (Favourite, Leave out, Move to event, Share to wallpaper), drag photos between events (macOS 27 reorder APIs), undo and redo through the system Undo menu.
 
 ## Engine changes (Python) the native app needs

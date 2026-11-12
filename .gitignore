@@ -27,3 +27,4 @@ dist/
 # Throwaway spikes (screenshots contain the owner's photos)
 spikes/
 .superpowers/
+mac/.build/
