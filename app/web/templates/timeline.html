@@ -74,6 +74,8 @@
   .pill.high{background:color-mix(in srgb,#16a34a 18%,transparent);color:#15803d}
   .pill.medium{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
   .pill.low,.pill.unknown{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+  .search{display:flex;gap:8px;margin-bottom:12px}
+  .search input{flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
   .clock{padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
   .clock:last-child{border-bottom:none}
   .clock .head{display:flex;align-items:center;gap:8px;font-weight:600}
@@ -127,6 +129,17 @@
       <button class="btn" id="index" style="width:100%">Index photos</button>
       <div class="bar"><div id="fill"></div></div>
       <div class="status" id="status"></div>
+      <button class="btn ghost" id="describe" style="width:100%;margin-top:10px">Describe photos with local AI</button>
+      <p class="hint" id="aiState">Runs on this Mac. Skips photos marked as duplicates.</p>
+      <label class="hint" for="gpuShare" style="display:block;margin-top:8px">How hard local AI may work</label>
+      <select id="gpuShare" style="margin-top:4px">
+        <option value="25">Gentle: GPU busy about 25 % of the time</option>
+        <option value="30">Default: about 30 %</option>
+        <option value="50">Faster: about 50 %</option>
+        <option value="100">No limit (the Mac gets warm)</option>
+      </select>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px">
+        <input type="checkbox" id="pauseBattery"> Pause while on battery</label>
     </section>
     <section id="clockBox" hidden>
       <h2>Device clocks</h2>
@@ -186,12 +199,29 @@ $('#add').onclick=()=>addSource(false);
 function status(msg,bad){$('#status').textContent=msg;$('#status').style.color=bad?'var(--bad)':'';}
 $('#index').onclick=async()=>{const d=await api(`/api/collections/${cid}/index`,{method:'POST'});
   if(d.error){status(d.error,true);return;} checkJob();};
+async function loadSettings(){
+  const d=await api('/api/settings');const s=d.settings||{};
+  $('#gpuShare').value=String(s.ai_gpu_share??30);$('#pauseBattery').checked=!!s.ai_pause_on_battery;
+}
+async function saveSettings(){
+  const r=await api('/api/settings',{method:'POST',body:JSON.stringify({ai_gpu_share:+$('#gpuShare').value,ai_pause_on_battery:$('#pauseBattery').checked})});
+  status(r.error||'Saved. A running job uses the new setting from the next photo.',!!r.error);
+}
+$('#gpuShare').onchange=saveSettings;$('#pauseBattery').onchange=saveSettings;loadSettings();
+$('#describe').onclick=async()=>{
+  if($('#describe').dataset.running){await api(`/api/collections/${cid}/index`,{method:'DELETE'});return;}
+  const d=await api(`/api/collections/${cid}/describe`,{method:'POST',body:'{}'});
+  if(d.error){status(d.error,true);return;} checkJob();};
 async function checkJob(){
   clearTimeout(polling);
   const j=await api(`/api/collections/${cid}/index`);
   if(j.collection!==cid&&!j.running){status('');$('#fill').style.width='0';return;}
   $('#fill').style.width=(j.progress||0)+'%';status(j.status||'',!!j.error);
   $('#index').disabled=j.running;
+  const desc=j.running&&/describ|local AI/i.test(j.status||'');
+  $('#describe').textContent=desc?'Stop describing':'Describe photos with local AI';
+  if(desc)$('#describe').dataset.running='1';else delete $('#describe').dataset.running;
+  $('#describe').disabled=j.running&&!desc;
   if(j.running){polling=setTimeout(checkJob,400);} else if(j.result){loadSources();loadTimeline();loadCollectionsQuiet();}
 }
 async function loadCollectionsQuiet(){const d=await api('/api/collections');const cur=cid;
@@ -256,12 +286,32 @@ function bindDuplicates(){
 function dayTitle(d){if(d==='unknown')return'No date';const dt=new Date(d+'T12:00:00');
   return dt.toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
 
+let query='', searchRes=null;
 function tabs(){
   const n=dups.filter(g=>g.category!=='similar_scene').length;
-  return `<div class="tabs" role="tablist"><button role="tab" aria-selected="${view==='timeline'}" data-view="timeline">Timeline</button>
-    <button role="tab" aria-selected="${view==='dups'}" data-view="dups">Duplicates (${n})</button></div>`;
+  return `<form class="search" id="searchForm" role="search"><input type="search" id="q" value="${esc(query)}"
+      placeholder="Search photos, e.g. sunset, ring close-up, zvonik" aria-label="Search photos">
+      <button class="btn">Search</button></form>
+    <div class="tabs" role="tablist"><button role="tab" aria-selected="${view==='timeline'}" data-view="timeline">Timeline</button>
+    <button role="tab" aria-selected="${view==='dups'}" data-view="dups">Duplicates (${n})</button>
+    ${searchRes?`<button role="tab" aria-selected="${view==='search'}" data-view="search">Search results</button>`:''}</div>`;
 }
-function bindTabs(){document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{view=b.dataset.view;loadTimeline();});}
+function bindTabs(){
+  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{view=b.dataset.view;loadTimeline();});
+  $('#searchForm').onsubmit=async e=>{e.preventDefault();query=$('#q').value.trim();if(!query)return;
+    status('Searching…');searchRes=await api(`/api/collections/${cid}/search?q=${encodeURIComponent(query)}`);
+    status(searchRes.error||'');view='search';loadTimeline();};
+}
+function renderSearch(){
+  const r=searchRes||{};if(r.error)return `<div class="empty"><strong>Search is not available</strong>${esc(r.error)}</div>`;
+  const res=r.results||[];
+  const head=`<p class="hint" style="margin:0 0 12px">${res.length} best matches for “${esc(r.query)}”${r.english?`, also searched as “${esc(r.english)}”`:''}${/skipped|failed/.test(r.translation||'')?` (${esc(r.translation)})`:''}. Ranked by ${esc(r.model||'')}; the order is a similarity guess, not a verified label.</p>`;
+  return head+`<div class="tiles">${res.map((x,k)=>{const idx=data.items.findIndex(i=>i.id===x.id);
+    return `<button class="tile" data-i="${idx}" title="${esc(x.filename)}">
+      <img class="img" loading="lazy" alt="" src="/api/thumb?path=${encodeURIComponent(x.path)}&v=2">
+      ${x.tag_match?'<span class="flag">tag match</span>':''}
+      <span class="meta"><span class="t">${k+1}.</span><span class="who">${esc((x.local_time||'').slice(11,19))} ${esc(x.owner)}</span></span></button>`;}).join('')}</div>`;
+}
 
 async function loadTimeline(){
   if(!cid)return;
@@ -269,6 +319,8 @@ async function loadTimeline(){
   const items=data.items||[];
   if(!items.length){$('#main').innerHTML=`<div class="empty"><strong>Nothing indexed yet</strong>Add a source folder for each person or device, then choose Index photos.</div>`;return;}
   if(view==='dups'){$('#main').innerHTML=tabs()+renderDuplicates();bindTabs();bindDuplicates();return;}
+  if(view==='search'&&searchRes){$('#main').innerHTML=tabs()+renderSearch();bindTabs();
+    document.querySelectorAll('.tile').forEach(t=>t.onclick=()=>+t.dataset.i>=0&&showDetail(+t.dataset.i,t));return;}
   const s=data.summary, byOwner={};
   items.forEach(i=>{(byOwner[i.source_id]??={owner:i.owner,n:0,devices:new Set()}).n++;byOwner[i.source_id].devices.add(i.device);});
   let html=tabs()+`<div class="summary"><span class="big">${items.length} photos and videos</span>
@@ -314,7 +366,11 @@ function showDetail(i,el){
       ${it.exact_copies?`<dt>Exact copies</dt><dd>${it.exact_copies} other file(s) with identical bytes</dd>`:''}
       ${it.related.length?`<dt>Paired with</dt><dd>${it.related.map(r=>esc(r.kind)+' #'+r.with).join(', ')}</dd>`:''}
     </dl>
-    ${it.notes.length?`<div style="font-size:13px;color:var(--muted)">How this time was decided</div><ul>${it.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}`;
+    ${it.notes.length?`<div style="font-size:13px;color:var(--muted)">How this time was decided</div><ul>${it.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
+    ${it.ai?`<div style="font-size:13px;color:var(--muted);margin-top:14px">AI description, not verified (${esc(it.ai.model)})</div>
+      <p style="font-size:13px;margin:4px 0">${esc(it.ai.description||'')}</p>
+      <div class="legend">${(it.ai.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>
+      ${it.ai.text_visible?`<p class="hint">Text in the photo: ${esc(it.ai.text_visible)}</p>`:''}`:''}`;
   $('#detail').classList.add('open');$('#close').onclick=()=>{$('#detail').classList.remove('open');el.classList.remove('sel');el.focus();};
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#detail').classList.contains('open'))$('#close').click();});

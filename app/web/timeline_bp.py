@@ -17,6 +17,7 @@ from app.collections import now_iso
 from app.duplicates.groups import build_groups
 from app.timeline.clock_sync import list_clocks, set_correction
 from app.timeline.timeline_engine import duplicate_groups, timeline
+from app.ai import vision_analyzer as vlm
 
 bp = Blueprint('timeline', __name__, template_folder='templates')
 
@@ -215,3 +216,75 @@ def choose_keeper(cid, gid):
                          'decided_at = excluded.decided_at', (g['group_key'], row['sha256'], now_iso()))
     build_groups(conn)
     return jsonify({'ok': True})
+
+
+
+@bp.route('/api/ai/status')
+def ai_status():
+    from app.ai.models import EMBED_MODEL, models_dir
+    return jsonify({'search_model': EMBED_MODEL,
+                    'search_ready': (models_dir() / 'huggingface').exists(),
+                    'vlm': vlm.status()})
+
+
+@bp.route('/api/collections/<cid>/search')
+def search_photos(cid):
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.ai.embeddings import ModelUnavailable
+    from app.ai.search import search
+    try:
+        return jsonify(search(conn, request.args.get('q', ''), translate=request.args.get('translate') != '0'))
+    except ModelUnavailable as e:
+        return _err(str(e), 503)
+
+
+def _run_describe(cid, limit):
+    def progress(msg, i, n):
+        _job['status'] = msg if not n else f'{msg} ({i}/{n})'
+        _job['progress'] = int(i / n * 100) if n else _job['progress']
+    try:
+        conn = col.open_db(cid)
+        _job['result'] = vlm.describe_collection(conn, progress, cancelled=lambda: _job['cancel'], limit=limit)
+        r = _job['result']
+        _job['status'] = ('Cancelled' if _job['cancel'] else 'Done') + \
+            f": {r['described']} described, {r['failed']} failed, {r['remaining']} left"
+        _job['progress'] = 100
+    except Exception as e:
+        _job['error'] = str(e)
+        _job['status'] = f'Error: {e}'
+    finally:
+        _job['running'] = False
+
+
+@bp.route('/api/collections/<cid>/describe', methods=['POST'])
+def start_describe(cid):
+    """Describe photos with the local VLM in the background (same job slot as indexing)."""
+    try:
+        col.db_path(cid)
+    except ValueError as e:
+        return _err(str(e), 404)
+    limit = (request.get_json() or {}).get('limit')
+    with _job_lock:
+        if _job['running']:
+            return _err(f"a job for {_job['collection']} is still running", 409)
+        _job.update(running=True, collection=cid, status='Starting local AI…', progress=0,
+                    result=None, error=None, cancel=False, started=time.time())
+    threading.Thread(target=_run_describe, args=(cid, int(limit) if limit else None), daemon=True).start()
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/settings', methods=['GET'])
+def get_settings():
+    from app import settings
+    return jsonify({'settings': settings.load(), 'choices': settings.CHOICES})
+
+
+@bp.route('/api/settings', methods=['POST'])
+def change_settings():
+    from app import settings
+    try:
+        return jsonify({'ok': True, 'settings': settings.save(request.get_json() or {})})
+    except ValueError as e:
+        return _err(str(e))

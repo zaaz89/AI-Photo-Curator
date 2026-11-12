@@ -12,6 +12,8 @@ import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from app.ai.vision_analyzer import tidy_description
+
 
 def _shift_iso(value, seconds, utc=False):
     if not value or not seconds:
@@ -45,6 +47,12 @@ def timeline(conn: sqlite3.Connection) -> dict:
             dup[r['asset_id']] = {'group': r['id'], 'category': r['category'],
                                   'keeper': r['keeper_id'] == r['asset_id'] if r['keeper_id'] else None}
     sha_count = Counter(r['sha256'] for r in rows if r['sha256'])
+    ai = {}
+    for r in conn.execute('SELECT sha256, model, description, tags_json, people, text_visible FROM ai_annotations '
+                          'WHERE error IS NULL ORDER BY created_at'):
+        ai[r['sha256']] = {'model': r['model'], 'description': tidy_description(r['description']),
+                           'tags': json.loads(r['tags_json'] or '[]'), 'people': r['people'],
+                           'text_visible': r['text_visible']}
 
     items = []
     for r in rows:
@@ -77,6 +85,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
             'related': rel.get(r['id'], []),
             'exact_copies': sha_count[r['sha256']] - 1 if r['sha256'] else 0,
             'duplicate': dup.get(r['id']),
+            'ai': ai.get(r['sha256']),
         })
     summary = {
         'assets': len(items),
@@ -85,6 +94,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
         'by_device': dict(Counter(i['device'] for i in items)),
         'relationships': dict(Counter(r['kind'] for r in conn.execute('SELECT kind FROM relationships'))),
         'duplicate_groups': dict(Counter(r['category'] for r in conn.execute('SELECT category FROM duplicate_groups'))),
+        'described': sum(1 for i in items if i['ai']),
         'corrected_clocks': conn.execute("SELECT COUNT(*) FROM clock_corrections WHERE applied_s != 0").fetchone()[0],
     }
     return {'summary': summary, 'items': items}
