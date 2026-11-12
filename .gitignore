@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets
+.env
+.env.*
+
+# Local data: personal photos, databases, caches, exports
+local-data/
+*.sqlite
+*.sqlite3
+*.db
