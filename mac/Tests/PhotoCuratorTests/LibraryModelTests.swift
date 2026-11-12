@@ -23,6 +23,11 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
             answer = try! Data(contentsOf: Bundle.module.url(forResource: "timeline", withExtension: "json", subdirectory: "Fixtures")!)
         } else if path.hasSuffix("/sources") {
             answer = Data(#"{"sources": []}"#.utf8)
+        } else if path.hasSuffix("/workflow") {
+            answer = Data(#"{"steps": [{"step": "import", "done": true}, {"step": "export", "done": false}]}"#.utf8)
+        } else if request.httpMethod == "DELETE" {
+            Self.writes.append("DELETE " + path)
+            answer = Data(#"{"ok": true, "removed_cache_files": 3, "freed_bytes": 52428800}"#.utf8)
         } else {
             answer = Data(#"{"ok": true}"#.utf8)
         }
@@ -103,6 +108,18 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
         #expect(FakeEngine.writes.count == 2)
         #expect(FakeEngine.writes[0].contains("\"favorite\":true"))
         #expect(FakeEngine.writes[1].contains("\"favorite\":false"))
+    }
+}
+
+extension LibraryModelTests {
+    @Test func finishingAnAlbumRemovesItAndOpensTheNext() async {
+        let m = await model()
+        #expect(m.steps["import"] == true && m.exported == false)
+        await m.finishAlbum()
+        #expect(FakeEngine.writes == ["DELETE /api/collections/a"])
+        #expect(m.trips.map(\.id) == ["b"])
+        #expect(m.tripId == "b")
+        #expect(m.message?.contains("50") == true)              // "50 MB freed"
     }
 }
 

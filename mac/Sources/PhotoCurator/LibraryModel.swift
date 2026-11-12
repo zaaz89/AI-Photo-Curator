@@ -24,6 +24,11 @@ enum Destination: Hashable {
     @Published private(set) var visibleSections: [PhotoSection] = []
     @Published private(set) var flat: [Photo] = []
     @Published private(set) var sources: [SourceInfo] = []
+    /// The album checklist from the engine (import … export).
+    @Published private(set) var steps: [String: Bool] = [:]
+    var exported: Bool { steps["export"] == true }
+    static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "descriptions", "export"]
+    var stepsDone: Int { Self.stepOrder.filter { steps[$0] == true }.count }
     @Published var destination: Destination = .all { didSet { if destination != oldValue { clearSelection(); recompute() } } }
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
@@ -70,6 +75,7 @@ enum Destination: Hashable {
     private func tripChanged() {
         undoManager?.removeAllActions()            // undo must never write into another trip
         photos = []                                // never show or act on the previous trip's photos
+        steps = [:]
         events = []
         loadedTripId = nil
         clearSelection()
@@ -87,8 +93,11 @@ enum Destination: Hashable {
         do {
             async let t = api.timeline(trip: tripId)
             async let s = api.sources(trip: tripId)
+            async let w = api.workflow(trip: tripId)
             let (timeline, src) = try await (t, s)
+            let wf = (try? await w) ?? [:]
             guard tripId == self.tripId else { return }
+            steps = wf
             photos = timeline.items
             events = timeline.events
             sources = src
@@ -296,6 +305,22 @@ enum Destination: Hashable {
                 await reload()
             } catch { message = describe(error) }
         }
+    }
+
+    // MARK: finish album
+
+    /// Deletes the app's working data for the current album (after the owner confirmed) and
+    /// opens the next album. The photo folders are not touched.
+    func finishAlbum() async {
+        guard let id = tripId, !(job.running && job.collection == id) else { return }
+        do {
+            let r = try await api.finishAlbum(trip: id)
+            let name = trips.first { $0.id == id }?.name ?? id
+            trips.removeAll { $0.id == id }
+            tripId = trips.first?.id
+            let mb = max(1, Int((Double(r.freedBytes) / 1_048_576).rounded()))
+            message = String(format: tr("albumFinished"), name, mb)
+        } catch { message = describe(error) }
     }
 
     // MARK: search

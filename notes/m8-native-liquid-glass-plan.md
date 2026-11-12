@@ -17,6 +17,10 @@ Checked on this Mac: macOS 27.2, Xcode 27.2, the SDK has SwiftUI `glassEffect` /
 - **No CSS glass imitation.** The web page stays working during the change but gets no new features; it is removed once the native app covers everything.
 - Built from the command line with Swift Package Manager and the Xcode 27 toolchain (`DEVELOPER_DIR=/Applications/Xcode.app/...`), so Codex and Claude can both build it without opening Xcode.
 
+## What the app is (owner, 2026-11-12)
+
+An album workbench, not a photo library. One album is one trip or one event (a wedding, a birthday). The owner imports everyone's photos, edits the whole collection as one album, exports it to Google Photos, and is done. Photos are never kept in the app long term. Consequences: the window is centred on the current album and its progress to the export; other albums are only a list of recent projects; after the export the owner finishes the album, which removes the app's working data for it (analysis, descriptions, marks, thumbnails) after a confirmation, while the photo folders and the exported folder stay untouched. No cross-album library features (search across albums, permanent favourites lists, long-term storage).
+
 ## Liquid Glass rules we follow
 
 - Glass only on the navigation layer: sidebar, toolbar, inspector, floating controls (selection bar, compare controls, zoom). Never on photos or list rows. No glass on glass.

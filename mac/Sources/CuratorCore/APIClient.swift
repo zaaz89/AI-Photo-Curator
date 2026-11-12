@@ -127,6 +127,23 @@ public final class APIClient: Sendable {
         return res.settings
     }
 
+    /// The album checklist: step name -> done (import, times, duplicates, blurry, events, descriptions, export).
+    public func workflow(trip: String) async throws -> [String: Bool] {
+        struct Step: Decodable { let step: String; let done: Bool }
+        struct R: Decodable { let steps: [Step] }
+        let r: R = try await get("api/collections/\(trip)/workflow")
+        return Dictionary(r.steps.map { ($0.step, $0.done) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// "Finish album": the engine deletes its working data for the album; photo folders are untouched.
+    public func finishAlbum(trip: String) async throws -> (removedCacheFiles: Int, freedBytes: Int) {
+        struct R: Decodable { let removed_cache_files: Int; let freed_bytes: Int }
+        var r = URLRequest(url: url("api/collections/\(trip)"))
+        r.httpMethod = "DELETE"
+        let res: R = try await send(r)
+        return (res.removed_cache_files, res.freed_bytes)
+    }
+
     public func jobStatus(trip: String) async throws -> JobStatus {
         try await get("api/collections/\(trip)/index")
     }

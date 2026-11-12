@@ -44,6 +44,14 @@ struct MainWindow: View {
         ToolbarItem(placement: .navigation) { ActivityPill() }
         ToolbarItem {
             Menu {
+                Picker(library.tr("show"), selection: Binding(
+                    get: { [.favourites, .videos].contains(library.destination) ? library.destination : .all },
+                    set: { library.destination = $0 })) {
+                    Text(library.tr("allPhotos")).tag(Destination.all)
+                    Text(library.tr("favourites")).tag(Destination.favourites)
+                    Text(library.tr("videos")).tag(Destination.videos)
+                }
+                .pickerStyle(.inline)
                 Picker(library.tr("sort"), selection: $library.sort) {
                     ForEach(PhotoSort.allCases, id: \.self) { Text(library.tr("sort_" + $0.rawValue)).tag($0) }
                 }
@@ -95,10 +103,8 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: Binding(get: { library.destination }, set: { if let d = $0 { library.destination = d } })) {
-            Section(library.tr("library")) {
+            Section(library.tr("album")) {
                 row(.all, "photo.on.rectangle", library.tr("allPhotos"))
-                row(.favourites, "heart", library.tr("favourites"))
-                row(.videos, "play.rectangle", library.tr("videos"))
                 row(.leftOut, "eye.slash", library.tr("leftOut"))
                 if library.searchResult != nil { row(.search, "magnifyingglass", library.tr("searchResults")) }
             }
@@ -109,21 +115,64 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .top) { TripPicker().padding(.horizontal, 10).padding(.bottom, 6) }
-        .safeAreaInset(edge: .bottom) {
-            Button { openWindow(id: "classic") } label: {
-                Label(library.tr("tripSteps"), systemImage: "checklist").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .padding(10)
-            .help(library.tr("tripStepsHelp"))
-        }
+        .safeAreaInset(edge: .bottom) { AlbumProgress().padding(10) }
     }
 
     func row(_ d: Destination, _ icon: String, _ title: String) -> some View {
         Label(title, systemImage: icon)
             .badge(library.count(d))
             .tag(d)
+    }
+}
+
+/// Bottom of the sidebar: how far the album is, the export, and finishing the album.
+/// The album is a work in progress that ends in Google Photos, not a place to keep photos.
+struct AlbumProgress: View {
+    @EnvironmentObject var library: LibraryModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var confirmFinish = false
+
+    var body: some View {
+        let done = library.stepsDone
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Gauge(value: Double(done), in: 0...7) { EmptyView() }
+                    .gaugeStyle(.accessoryCircularCapacity)
+                    .scaleEffect(0.55).frame(width: 26, height: 26)
+                    .tint(library.exported ? .green : .accentColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(String(format: library.tr("stepsProgress"), done)).font(.callout.weight(.medium))
+                    if library.exported {
+                        Label(library.tr("exported"), systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                    }
+                }
+            }
+            Button { openWindow(id: "classic") } label: {
+                Label(library.tr("tripSteps"), systemImage: "checklist").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .help(library.tr("tripStepsHelp"))
+            Button { openWindow(id: "classic") } label: {
+                Label(library.tr("exportGP"), systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .help(library.tr("exportHelp"))
+            Button(library.tr("finishAlbum"), role: .destructive) { confirmFinish = true }
+                .buttonStyle(.link)
+                .font(.callout)
+                .disabled(library.tripId == nil || (library.job.running && library.job.collection == library.tripId))
+                .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .padding(12)
+        .background(.fill.quaternary, in: .rect(cornerRadius: 14))     // inside the glass sidebar: no glass on glass
+        .confirmationDialog(String(format: library.tr("finishTitle"), library.trips.first { $0.id == library.tripId }?.name ?? ""),
+                            isPresented: $confirmFinish, titleVisibility: .visible) {
+            Button(library.tr("finishConfirm"), role: .destructive) { Task { await library.finishAlbum() } }
+            Button(library.tr("cancel"), role: .cancel) {}
+        } message: {
+            Text(library.exported ? library.tr("finishText") : library.tr("finishNotExported") + "\n\n" + library.tr("finishText"))
+        }
     }
 }
 

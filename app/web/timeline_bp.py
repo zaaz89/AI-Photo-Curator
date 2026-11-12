@@ -29,6 +29,8 @@ _job = {'running': False, 'collection': None, 'status': 'Idle', 'progress': 0,
 # Set by photo_curator.py so this module can open the native folder dialog
 # without importing the big app module (avoids a circular import).
 folder_dialog = None
+# Set by photo_curator.py: image path -> its cached thumbnail / preview files.
+cache_files_for = None
 
 
 def _err(msg, code=400):
@@ -48,6 +50,29 @@ def create_collection():
     except ValueError as e:
         return _err(str(e))
     return jsonify({'ok': True, 'id': slug})
+
+
+@bp.route('/api/collections/<cid>', methods=['DELETE'])
+def finish_album(cid):
+    """"Finish album": remove the app's working data for this album. Photo folders are never touched."""
+    if _job['running'] and _job['collection'] == cid:
+        return _err('the album is still being worked on; stop or wait first', 409)
+    try:
+        conn = col.open_db(cid)
+    except (FileNotFoundError, ValueError) as e:
+        return _err(str(e), 404)
+    rows = conn.execute("SELECT s.path || '/' || a.rel_path FROM assets a JOIN sources s ON s.id = a.source_id").fetchall()
+    conn.close()
+    files = []
+    if cache_files_for:
+        for (path,) in rows:
+            for p in {path, os.path.realpath(path)}:
+                files.extend(cache_files_for(p))
+    try:
+        res = col.remove_album(cid, files)
+    except (FileNotFoundError, ValueError) as e:
+        return _err(str(e), 404)
+    return jsonify({'ok': True, **res})
 
 
 @bp.route('/api/collections/<cid>/sources', methods=['GET'])
