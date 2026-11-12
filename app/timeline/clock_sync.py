@@ -34,6 +34,7 @@ TOL_S = 10.0
 MIN_INDEPENDENT = 3
 MIN_INLIERS = 40
 MAX_CANDIDATES = 40
+AGREE_S = 2.0          # smaller differences are GPS/shutter noise, not a wrong clock
 CAVEAT = ('Scene matches show the same place from both devices; the two people may not have '
           'pressed the shutter at the same moment, so a small remaining difference is normal.')
 
@@ -86,6 +87,9 @@ def _gps_evidence(photos) -> Optional[dict]:
     if mad > 30:
         return {'status': 'conflicting', 'method': 'gps', 'n': len(res),
                 'note': f'GPS times disagree (spread {mad:.0f} s)'}
+    if abs(med) <= AGREE_S:
+        return {'status': 'agrees', 'method': 'gps', 'n': len(res),
+                'note': f'clock matches GPS time within {abs(med):.1f} s over {len(res)} photos; no correction needed'}
     return {'status': 'suggested', 'method': 'gps', 'suggested_s': round(med, 1), 'n': len(res),
             'confidence': 'high' if len(res) >= 5 and mad <= 5 else 'medium',
             'note': f'median difference between camera clock and GPS time over {len(res)} photos '
@@ -155,6 +159,10 @@ def _scene_evidence(ref_photos, photos, progress=None, cancelled=lambda: False) 
                   note=f'matches disagree: {top["support"]} point to {top["median_s"]:+.0f} s, '
                        f'{second} point to {clusters[1]["median_s"]:+.0f} s')
         return ev
+    if abs(top['median_s']) <= AGREE_S:
+        ev.update(status='agrees', note=f'{top["support"]} independent scene matches agree the clocks are within '
+                                         f'{abs(top["median_s"]):.0f} s; no correction needed')
+        return ev
     conf = 'high' if top['support'] >= 5 and second <= top['support'] / 3 else 'medium'
     ev.update(status='suggested', suggested_s=top['median_s'], confidence=conf,
               note=f'{top["support"]} independent scene matches agree on {top["median_s"]:+.0f} s')
@@ -175,7 +183,7 @@ def sync_clocks(conn, progress: Optional[Callable] = None,
         if cid == ref_id and not (ev and ev['status'] == 'suggested'):
             ev = {'status': 'reference', 'note': f'reference clock ({len(photos)} dated photos); '
                                                  'other devices are aligned to it'}
-        elif ev is None or ev['status'] != 'suggested':
+        elif ev is None or ev['status'] not in ('suggested', 'agrees'):
             ev = _scene_evidence(per[ref_id], photos, progress, cancelled) if photos else \
                 {'status': 'none', 'note': 'no photos with a known time zone'}
         results[cid] = ev

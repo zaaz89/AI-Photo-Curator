@@ -4,7 +4,8 @@ Score = SigLIP 2 similarity between the query and each photo. Non-English
 queries are also translated to English by the local VLM (cached), because the
 model ranks English text more reliably (measured on the owner's photos); the
 better of the two scores counts. A word that appears in the photo's AI tags
-or description adds a small, labelled boost.
+or description adds a small, labelled boost; a word that matches the GPS place
+(e.g. "Florence", "Tuscany") adds a larger one.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from app.ai.embeddings import get_embedder, load_matrix
 from app.ai.models import VLM_MODEL
 
 TAG_BOOST = 0.02
+PLACE_BOOST = 0.10
 
 
 def _english_variant(conn, query: str) -> tuple[str | None, str]:
@@ -57,13 +59,23 @@ def search(conn, query: str, limit: int = 60, translate: bool = True) -> dict:
     words = {w for v in variants for w in re.findall(r'\w{3,}', v.lower())}
     ann = {r['sha256']: r for r in conn.execute(
         'SELECT sha256, description, tags_json FROM ai_annotations WHERE error IS NULL')}
+    place_text = {}
+    for r in conn.execute("SELECT a.sha256, p.label, p.region, p.country, p.aliases FROM places p "
+                          "JOIN assets a ON a.id = p.asset_id WHERE a.status = 'present'"):
+        place_text[r['sha256']] = ' '.join(x for x in (r['label'], r['region'], r['country'], r['aliases']) if x).lower()
     boosted = np.zeros(len(shas), np.float32)
+    place_hit = np.zeros(len(shas), bool)
     for i, s in enumerate(shas):
+        if not words:
+            break
         a = ann.get(s)
-        if a and words:
+        if a:
             text = (a['description'] or '').lower() + ' ' + ' '.join(json.loads(a['tags_json'] or '[]'))
             if any(w in text for w in words):
-                boosted[i] = TAG_BOOST
+                boosted[i] += TAG_BOOST
+        if any(w in place_text.get(s, '') for w in words):
+            boosted[i] += PLACE_BOOST            # GPS place name: a fact, so a larger boost
+            place_hit[i] = True
     final = scores + boosted
     order = np.argsort(-final)[:limit]
 
@@ -80,5 +92,5 @@ def search(conn, query: str, limit: int = 60, translate: bool = True) -> dict:
             continue
         results.append({'id': r['id'], 'filename': r['filename'], 'owner': r['owner'], 'path': r['path'],
                         'local_time': r['local_time'], 'score': round(float(final[i]), 4),
-                        'tag_match': bool(boosted[i])})
+                        'tag_match': bool(boosted[i]) and not place_hit[i], 'place_match': bool(place_hit[i])})
     return {'query': query, 'english': english, 'translation': tnote, 'model': emb.name, 'results': results}

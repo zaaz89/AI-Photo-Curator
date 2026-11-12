@@ -14,6 +14,10 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
     if cancelled():
         return res
     res['clocks'] = sync_clocks(conn, progress, cancelled)
+    from app.places.places import assign_places
+    from app.timeline.event_detector import detect_events
+    res['places'] = assign_places(conn)
+    res['events'] = detect_events(conn)
     if progress:
         progress('Visual signatures', 0, 0)
     res['features_computed'] = compute_features(conn, progress, cancelled)

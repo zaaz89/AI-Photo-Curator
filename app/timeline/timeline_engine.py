@@ -28,8 +28,11 @@ def timeline(conn: sqlite3.Connection) -> dict:
         'SELECT a.id, a.rel_path, a.filename, a.kind, a.ext, a.make, a.model, a.width, a.height, '
         'a.gps_lat, a.gps_lon, a.sha256, s.id AS source_id, s.owner, s.label, s.path AS source_path, '
         'c.local_time, c.utc_time, c.offset_minutes, c.rule, c.confidence, c.notes_json, c.sort_key, '
-        'k.id AS clock_id, COALESCE(cc.applied_s, 0) AS applied_s, cc.status AS clock_status '
+        'k.id AS clock_id, COALESCE(cc.applied_s, 0) AS applied_s, cc.status AS clock_status, '
+        'p.label AS place_label, p.precision AS place_precision, p.distance_km, p.region, p.country, '
+        'em.event_id '
         'FROM assets a JOIN sources s ON s.id = a.source_id '
+        'LEFT JOIN places p ON p.asset_id = a.id LEFT JOIN event_members em ON em.asset_id = a.id '
         'LEFT JOIN capture_time c ON c.asset_id = a.id '
         "LEFT JOIN clocks k ON k.source_id = a.source_id AND k.make = COALESCE(a.make, '') "
         "  AND k.model = COALESCE(a.model, '') "
@@ -86,6 +89,10 @@ def timeline(conn: sqlite3.Connection) -> dict:
             'exact_copies': sha_count[r['sha256']] - 1 if r['sha256'] else 0,
             'duplicate': dup.get(r['id']),
             'ai': ai.get(r['sha256']),
+            'place': ({'label': r['place_label'], 'precision': r['place_precision'],
+                       'distance_km': r['distance_km'], 'region': r['region'], 'country': r['country']}
+                      if r['place_label'] else None),
+            'event_id': r['event_id'],
         })
     summary = {
         'assets': len(items),
@@ -97,7 +104,13 @@ def timeline(conn: sqlite3.Connection) -> dict:
         'described': sum(1 for i in items if i['ai']),
         'corrected_clocks': conn.execute("SELECT COUNT(*) FROM clock_corrections WHERE applied_s != 0").fetchone()[0],
     }
-    return {'summary': summary, 'items': items}
+    counts = Counter(i['event_id'] for i in items if i['event_id'])
+    events = [{'id': e['id'], 'day': e['day'], 'name': e['name'], 'name_source': e['name_source'],
+               'place_label': e['place_label'], 'locked': bool(e['locked']), 'count': counts.get(e['id'], 0)}
+              for e in conn.execute('SELECT * FROM events ORDER BY day, start_key')]
+    summary['events'] = len(events)
+    summary['with_place'] = sum(1 for i in items if i['place'])
+    return {'summary': summary, 'items': items, 'events': events}
 
 
 def duplicate_groups(conn: sqlite3.Connection) -> list:

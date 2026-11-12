@@ -148,6 +148,37 @@ MIGRATIONS = [
         model       TEXT NOT NULL
     );
     """,
+    # 4: places from GPS and events (M4)
+    """
+    CREATE TABLE places (
+        asset_id    INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+        name        TEXT,                     -- NULL when only the region is known
+        label       TEXT NOT NULL,            -- what the UI shows, e.g. "near Pienza"
+        precision   TEXT NOT NULL,            -- in | near | region
+        distance_km REAL NOT NULL,
+        region      TEXT,
+        country     TEXT,
+        source      TEXT NOT NULL             -- e.g. "gps + geonames cities500"
+    );
+    CREATE TABLE events (
+        id          INTEGER PRIMARY KEY,
+        day         TEXT NOT NULL,            -- local date YYYY-MM-DD
+        start_key   REAL NOT NULL,            -- sort key of the first photo
+        end_key     REAL NOT NULL,
+        name        TEXT NOT NULL,
+        name_source TEXT NOT NULL,            -- auto | user
+        place_label TEXT,
+        locked      INTEGER NOT NULL DEFAULT 0  -- 1 = the owner edited this day; keep it on re-analysis
+    );
+    CREATE INDEX events_day ON events(day);
+    CREATE TABLE event_members (
+        event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        PRIMARY KEY (asset_id)
+    );
+    """,
+    # 5: other names of a place (e.g. Firence, Firenze) so search works in any language
+    "ALTER TABLE places ADD COLUMN aliases TEXT;",
 ]
 
 
