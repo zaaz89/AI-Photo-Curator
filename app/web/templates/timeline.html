@@ -74,6 +74,11 @@
   .pill.high{background:color-mix(in srgb,#16a34a 18%,transparent);color:#15803d}
   .pill.medium{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
   .pill.low,.pill.unknown{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+  .evhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+  .evname{font-weight:650;font-size:15px}
+  .evhead small{color:var(--muted)}
+  .linkbtn{border:0;background:none;color:var(--accent);cursor:pointer;padding:0;font-size:12px}
+  .day h3 .linkbtn{margin-left:12px;font-weight:400}
   .search{display:flex;gap:8px;margin-bottom:12px}
   .search input{flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
   .clock{padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
@@ -309,7 +314,7 @@ function renderSearch(){
   return head+`<div class="tiles">${res.map((x,k)=>{const idx=data.items.findIndex(i=>i.id===x.id);
     return `<button class="tile" data-i="${idx}" title="${esc(x.filename)}">
       <img class="img" loading="lazy" alt="" src="/api/thumb?path=${encodeURIComponent(x.path)}&v=2">
-      ${x.tag_match?'<span class="flag">tag match</span>':''}
+      ${x.place_match?'<span class="flag">place match</span>':(x.tag_match?'<span class="flag">tag match</span>':'')}
       <span class="meta"><span class="t">${k+1}.</span><span class="who">${esc((x.local_time||'').slice(11,19))} ${esc(x.owner)}</span></span></button>`;}).join('')}</div>`;
 }
 
@@ -327,13 +332,20 @@ async function loadTimeline(){
     <span class="legend">${Object.entries(byOwner).map(([id,o])=>`<span class="chip"><span class="swatch" style="background:${lane(+id)}"></span>${esc(o.owner)} · ${o.n}<span style="color:var(--muted)">${esc([...o.devices].join(', '))}</span></span>`).join('')}</span></div>
     <div class="conf">${['high','medium','low','unknown'].filter(c=>s.by_confidence[c]).map(c=>`<span class="pill ${c}">${s.by_confidence[c]} ${esc(CONF_TEXT[c].toLowerCase())}</span>`).join('')}
     ${Object.entries(s.relationships||{}).map(([k,n])=>`<span class="chip">${n} ${k==='live_photo'?'Live Photo pairs':k==='raw_jpeg'?'RAW+JPEG pairs':'possible Live Photo pairs'}</span>`).join('')}</div>`;
-  let day=null,hour=null;
+  const evMap={};(data.events||[]).forEach(e=>evMap[e.id]=e);
+  let day=null,ev=undefined,firstEv=true;
   items.forEach((it,idx)=>{
     const p=localParts(it);
-    if(p.day!==day){if(day!==null)html+='</div></div></div></section>';day=p.day;hour=null;
+    if(p.day!==day){if(day!==null)html+='</div></div></div></div></section>';day=p.day;ev=undefined;firstEv=true;
       const n=items.filter(x=>localParts(x).day===day).length;
-      html+=`<section class="day"><h3>${esc(dayTitle(day))}<small>${n} items</small></h3><div>`;}
-    if(p.hour!==hour){if(hour!==null)html+='</div></div>';hour=p.hour;html+=`<div class="hour"><div class="h">${esc(hour)}:00</div><div class="tiles">`;}
+      const edited=(data.events||[]).some(e=>e.day===day&&e.locked);
+      html+=`<section class="day"><h3>${esc(dayTitle(day))}<small>${n} items</small>
+        ${edited?`<button class="linkbtn" data-reset="${esc(day)}">Undo my event edits for this day</button>`:''}</h3><div>`;}
+    if(it.event_id!==ev){if(ev!==undefined)html+='</div></div></div>';ev=it.event_id;const E=evMap[ev]||{name:'Not grouped',count:0};
+      html+=`<div class="hour event"><div class="h">${esc(p.time.slice(0,5))}</div><div>
+        <div class="evhead"><span class="evname">${esc(E.name)}</span><small>${E.count} photos${E.name_source==='user'?', named by you':''}</small>
+        ${E.id?`<button class="linkbtn" data-ren="${E.id}">Rename</button>`:''}${E.id&&!firstEv?`<button class="linkbtn" data-merge="${E.id}">Merge with previous</button>`:''}</div>
+        <div class="tiles">`;firstEv=false;}
     const thumb=it.kind==='image'?`<img class="img" loading="lazy" alt="" src="/api/thumb?path=${encodeURIComponent(it.path)}&v=2">`:`<span class="vid">Video ${esc(it.ext)}</span>`;
     const dp=it.duplicate&&it.duplicate.category!=='similar_scene'?it.duplicate:null;
     const flag=dp&&dp.keeper===false?'<span class="flag">duplicate</span>'
@@ -341,9 +353,18 @@ async function loadTimeline(){
     html+=`<button class="tile ${esc(it.confidence)}" data-i="${idx}" style="--lane:${lane(it.source_id)}" title="${esc(it.filename)}">${thumb}${flag}
       <span class="meta"><span class="t">${esc(p.time)}</span><span class="who">${esc(it.owner)}</span></span></button>`;
   });
-  html+='</div></div></div></section>';
+  html+='</div></div></div></div></section>';
   $('#main').innerHTML=html;bindTabs();
   document.querySelectorAll('.tile').forEach(t=>t.onclick=()=>showDetail(+t.dataset.i,t));
+  document.querySelectorAll('[data-ren]').forEach(b=>b.onclick=async()=>{
+    const cur=(data.events||[]).find(e=>e.id===+b.dataset.ren);const name=prompt('Event name',cur?cur.name:'');
+    if(!name)return;await eventAction(`/events/${b.dataset.ren}`,{action:'rename',name});});
+  document.querySelectorAll('[data-merge]').forEach(b=>b.onclick=()=>eventAction(`/events/${b.dataset.merge}`,{action:'merge_previous'}));
+  document.querySelectorAll('[data-reset]').forEach(b=>b.onclick=()=>eventAction('/events/reset',{day:b.dataset.reset}));
+}
+async function eventAction(path,body){
+  const r=await api(`/api/collections/${cid}${path}`,{method:'POST',body:JSON.stringify(body)});
+  if(r.error){status(r.error,true);return;} status('');loadTimeline();
 }
 
 function showDetail(i,el){
@@ -361,6 +382,7 @@ function showDetail(i,el){
       <dt>Source</dt><dd>${esc(it.owner)}</dd>
       <dt>Device</dt><dd>${esc(it.device)}</dd>
       <dt>Size</dt><dd>${it.width&&it.height?esc(it.width+' × '+it.height):'unknown'}</dd>
+      <dt>Place</dt><dd>${it.place?`${esc(it.place.label)}${it.place.region?', '+esc(it.place.region):''}${it.place.country?', '+esc(it.place.country):''} <span class="hint">(from GPS, ${esc(it.place.distance_km)} km from the place centre)</span>`:'unknown (no GPS)'}</dd>
       <dt>GPS</dt><dd>${it.gps?esc(it.gps.map(v=>v.toFixed(5)).join(', ')):'none'}</dd>
       <dt>File</dt><dd>${esc(it.path)}</dd>
       ${it.exact_copies?`<dt>Exact copies</dt><dd>${it.exact_copies} other file(s) with identical bytes</dd>`:''}
@@ -371,6 +393,9 @@ function showDetail(i,el){
       <p style="font-size:13px;margin:4px 0">${esc(it.ai.description||'')}</p>
       <div class="legend">${(it.ai.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>
       ${it.ai.text_visible?`<p class="hint">Text in the photo: ${esc(it.ai.text_visible)}</p>`:''}`:''}`;
+  if(it.event_id&&$('#detail').querySelector('dl'))$('#detail').querySelector('dl').insertAdjacentHTML('afterend',
+    `<button class="btn ghost" id="splitHere">Start a new event at this photo</button>`);
+  const sp=$('#splitHere');if(sp)sp.onclick=async()=>{await eventAction('/events/split',{asset_id:it.id});$('#detail').classList.remove('open');};
   $('#detail').classList.add('open');$('#close').onclick=()=>{$('#detail').classList.remove('open');el.classList.remove('sel');el.focus();};
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#detail').classList.contains('open'))$('#close').click();});

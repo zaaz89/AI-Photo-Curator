@@ -519,6 +519,8 @@ User should be able to:
 
 Do not automatically discard photos simply because they do not fit a detected event.
 
+Implemented in M4 (2026-11-12): places come from GPS via offline GeoNames data (owner approved the download); details and rules in `notes/m4-events-places.md`.
+
 ---
 
 # 8. SMART FILE NAMING

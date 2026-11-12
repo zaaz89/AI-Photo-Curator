@@ -181,6 +181,8 @@ def change_clock(cid, clock_id):
     except (ValueError, TypeError) as e:
         return _err(str(e))
     build_groups(conn)          # burst detection uses corrected times
+    from app.timeline.event_detector import detect_events
+    detect_events(conn)         # so do events
     return jsonify({'ok': True, **res})
 
 
@@ -288,3 +290,52 @@ def change_settings():
         return jsonify({'ok': True, 'settings': settings.save(request.get_json() or {})})
     except ValueError as e:
         return _err(str(e))
+
+
+
+@bp.route('/api/collections/<cid>/events/<int:eid>', methods=['POST'])
+def edit_event(cid, eid):
+    """Body: {"action": "rename", "name": str} | {"action": "merge_previous"}."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.timeline import event_detector as ed
+    data = request.get_json() or {}
+    try:
+        if data.get('action') == 'rename':
+            ed.rename_event(conn, eid, data.get('name', ''))
+        elif data.get('action') == 'merge_previous':
+            ed.merge_with_previous(conn, eid)
+        else:
+            return _err('unknown action')
+    except ValueError as e:
+        return _err(str(e))
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/collections/<cid>/events/split', methods=['POST'])
+def split_event(cid):
+    """Body: {"asset_id": int} starts a new event at that photo."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.timeline import event_detector as ed
+    try:
+        new_id = ed.split_at(conn, int((request.get_json() or {}).get('asset_id', 0)))
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    return jsonify({'ok': True, 'event_id': new_id})
+
+
+@bp.route('/api/collections/<cid>/events/reset', methods=['POST'])
+def reset_events(cid):
+    """Body: {"day": "YYYY-MM-DD"} drops the owner's edits for that day."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.timeline import event_detector as ed
+    day = (request.get_json() or {}).get('day', '')
+    if not day:
+        return _err('day is required')
+    ed.reset_day(conn, day)
+    return jsonify({'ok': True})
