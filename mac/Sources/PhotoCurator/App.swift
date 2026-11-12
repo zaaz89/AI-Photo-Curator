@@ -63,6 +63,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("y", modifiers: .command)
             Divider()
             Button(library.tr("analyseAgain")) { library.analyse() }.disabled(library.job.running)
+            Button(library.tr("newTrip")) { library.sheet = .newAlbum }.keyboardShortcut("n")
             Button(library.tr("stop")) { library.stopJob() }.disabled(!library.job.running)
         }
         CommandGroup(after: .textEditing) {

@@ -14,7 +14,9 @@ struct MainWindow: View {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            PhotoGrid()
+            Group {
+                if library.destination == .overview { OverviewView() } else { PhotoGrid() }
+            }
                 .navigationTitle(title)
                 .navigationSubtitle(subtitle)
                 .toolbar { toolbar }
@@ -35,6 +37,14 @@ struct MainWindow: View {
                 .overlay(alignment: .top) { MessageBanner() }
                 .animation(.spring(duration: 0.35), value: library.selection.count > 1)
                 .sheet(isPresented: $newEvent) { NewEventSheet() }
+                .sheet(item: $library.sheet) { s in
+                    switch s {
+                    case .newAlbum: NewAlbumWizard()
+                    case .moments: MomentsSheet()
+                    case .clocks: ClocksSheet()
+                    case .export: ExportSheet()
+                    }
+                }
                 .quickLookPreview($library.quickLookURL, in: library.quickLookItems)
         }
         .overlay { AIGlow(active: library.job.running && library.job.phase.isAI) }
@@ -66,8 +76,13 @@ struct MainWindow: View {
                 .accessibilityLabel(library.tr("thumbSize"))
         }
         ToolbarSpacer(.fixed)
+        if library.destination == .blurry {
+            ToolbarItem {
+                Button(library.tr("leaveOutAllBlurry"), systemImage: "eye.slash") { library.leaveOutAllBlurry() }
+            }
+        }
         ToolbarItem {
-            Button { openWindow(id: "classic") } label: { Label(library.tr("export"), systemImage: "square.and.arrow.up") }
+            Button { library.sheet = .export } label: { Label(library.tr("export"), systemImage: "square.and.arrow.up") }
                 .buttonStyle(.glassProminent)
                 .help(library.tr("exportHelp"))
         }
@@ -79,6 +94,8 @@ struct MainWindow: View {
 
     var title: String {
         switch library.destination {
+        case .overview: return library.tr("overview")
+        case .blurry: return library.tr("blurryNav")
         case .all: return library.tr("allPhotos")
         case .favourites: return library.tr("favourites")
         case .leftOut: return library.tr("leftOut")
@@ -88,6 +105,7 @@ struct MainWindow: View {
         }
     }
     var subtitle: String {
+        if library.destination == .overview { return library.trips.first { $0.id == library.tripId }?.name ?? "" }
         let n = library.flat.count
         var s = Strings.photos(n, library.lang)
         if library.destination == .search, let en = library.searchResult?.english, !en.isEmpty {
@@ -104,7 +122,9 @@ struct Sidebar: View {
     var body: some View {
         List(selection: Binding(get: { library.destination }, set: { if let d = $0 { library.destination = d } })) {
             Section(library.tr("album")) {
+                Label(library.tr("overview"), systemImage: "sparkles.rectangle.stack").tag(Destination.overview)
                 row(.all, "photo.on.rectangle", library.tr("allPhotos"))
+                if library.count(.blurry) > 0 { row(.blurry, "camera.aperture", library.tr("blurryNav")) }
                 row(.leftOut, "eye.slash", library.tr("leftOut"))
                 if library.searchResult != nil { row(.search, "magnifyingglass", library.tr("searchResults")) }
             }
@@ -152,7 +172,7 @@ struct AlbumProgress: View {
             }
             .buttonStyle(.bordered)
             .help(library.tr("tripStepsHelp"))
-            Button { openWindow(id: "classic") } label: {
+            Button { library.sheet = .export } label: {
                 Label(library.tr("exportGP"), systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -187,7 +207,7 @@ struct TripPicker: View {
                 }
             }
             Divider()
-            Button(library.tr("newTrip")) { openWindow(id: "classic") }
+            Button(library.tr("newTrip")) { library.sheet = .newAlbum }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "suitcase.fill").foregroundStyle(.tint)

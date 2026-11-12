@@ -5,7 +5,13 @@ import SwiftUI
 
 /// Sidebar destinations.
 enum Destination: Hashable {
-    case all, favourites, leftOut, videos, day(String), search
+    case overview, all, favourites, leftOut, videos, blurry, day(String), search
+}
+
+/// The sheets of the album assistant.
+enum AssistantSheet: String, Identifiable {
+    case newAlbum, moments, clocks, export
+    var id: String { rawValue }
 }
 
 /// The app's state for one window: trips, the current trip's photos, selection, marks with undo,
@@ -26,10 +32,13 @@ enum Destination: Hashable {
     @Published private(set) var sources: [SourceInfo] = []
     /// The album checklist from the engine (import … export).
     @Published private(set) var steps: [String: Bool] = [:]
+    /// What the album still needs (cards of the Overview).
+    @Published private(set) var overview: Overview?
+    @Published var sheet: AssistantSheet?
     var exported: Bool { steps["export"] == true }
     static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "descriptions", "export"]
     var stepsDone: Int { Self.stepOrder.filter { steps[$0] == true }.count }
-    @Published var destination: Destination = .all { didSet { if destination != oldValue { clearSelection(); recompute() } } }
+    @Published var destination: Destination = .overview { didSet { if destination != oldValue { clearSelection(); recompute() } } }
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
     @Published var cursor: Int = -1                     // flat index into `flat`
@@ -53,6 +62,8 @@ enum Destination: Hashable {
 
     var lang: Lang { Lang(rawValue: settings?.uiLanguage ?? "en") ?? .en }
     func tr(_ key: String) -> String { Strings.text(key, lang) }
+    /// A text for a value from the engine; the engine's own words when there is no translation.
+    func trOr(_ key: String, _ fallback: String) -> String { Strings.table[key] == nil ? fallback : Strings.text(key, lang) }
 
     // MARK: loading
 
@@ -65,6 +76,7 @@ enum Destination: Hashable {
     func loadTrips() async {
         do {
             trips = try await api.trips()
+            if trips.isEmpty { sheet = .newAlbum }              // first start: the wizard opens by itself
             let saved = UserDefaults.standard.string(forKey: "trip")
             if tripId == nil || !trips.contains(where: { $0.id == tripId }) {
                 tripId = trips.first(where: { $0.id == saved })?.id ?? trips.first?.id
@@ -76,12 +88,13 @@ enum Destination: Hashable {
         undoManager?.removeAllActions()            // undo must never write into another trip
         photos = []                                // never show or act on the previous trip's photos
         steps = [:]
+        overview = nil
         events = []
         loadedTripId = nil
         clearSelection()
         searchResult = nil
         searchText = ""
-        if destination == .search { destination = .all }
+        destination = .overview
         if let tripId { UserDefaults.standard.set(tripId, forKey: "trip") }
         Task { await reload() }
     }
@@ -96,8 +109,10 @@ enum Destination: Hashable {
             async let w = api.workflow(trip: tripId)
             let (timeline, src) = try await (t, s)
             let wf = (try? await w) ?? [:]
+            let ov = try? await api.overview(trip: tripId)
             guard tripId == self.tripId else { return }
             steps = wf
+            overview = ov
             photos = timeline.items
             events = timeline.events
             sources = src
@@ -114,6 +129,8 @@ enum Destination: Hashable {
         case .favourites: return .favourites
         case .leftOut: return .leftOut
         case .videos: return .videos
+        case .blurry: return .blurry
+        case .overview: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -132,6 +149,8 @@ enum Destination: Hashable {
         case .favourites: return photos.filter(\.favorite).count
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
+        case .blurry: return photos.filter { $0.focus?.tier == "blurry" || $0.focus?.autoTier == "blurry" }.count
+        case .overview: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -307,6 +326,49 @@ enum Destination: Hashable {
         }
     }
 
+    // MARK: album assistant
+
+    /// Creates the album from the wizard, remembers which device belongs to whom, starts the analysis.
+    func createAlbum(name: String, folders: [(path: String, owner: String, devices: [String])]) async -> Bool {
+        do {
+            let id = try await api.createAlbum(name: name)
+            for f in folders { try await api.addFolder(trip: id, path: f.path, owner: f.owner) }
+            try? await api.setStep(trip: id, step: "import", done: true)
+            var memory = (try? await api.settingsRaw())?["device_owners"] as? [String: String] ?? [:]
+            for f in folders { for d in f.devices.prefix(2) { memory[d] = f.owner } }
+            save(["device_owners": memory])
+            trips = (try? await api.trips()) ?? trips
+            tripId = id
+            try await api.startAnalysis(trip: id)
+            return true
+        } catch { message = describe(error); return false }
+    }
+
+    func markStep(_ step: String, _ done: Bool = true) {
+        guard let tripId else { return }
+        steps[step] = done
+        Task { try? await api.setStep(trip: tripId, step: step, done: done); await reload() }
+    }
+
+    func describePhotos() {
+        guard let tripId else { return }
+        Task { do { try await api.describePhotos(trip: tripId) } catch { message = describe(error) } }
+    }
+
+    func leaveOutAllBlurry() {
+        let blurry = photos.filter { ($0.focus?.tier == "blurry" || $0.focus?.autoTier == "blurry") && !$0.rejected && !$0.favorite }
+        mark(blurry, ["rejected": .bool(true)], name: tr("leaveOutAllBlurry"))
+    }
+
+    /// The last finished export of this album (folder and success), for the Export sheet.
+    @Published private(set) var lastExport: (folder: String, ok: Bool)?
+    private func jobFinished() {
+        if let f = job.exportFolder, job.collection == tripId {
+            lastExport = (f, job.exportOK ?? false)
+            if job.exportOK == true { markStep("export") }
+        }
+    }
+
     // MARK: finish album
 
     /// Deletes the app's working data for the current album (after the owner confirmed) and
@@ -353,11 +415,16 @@ enum Destination: Hashable {
                 guard let self else { return }
                 let wasRunning = self.job.running
                 await self.pollOnce()
-                if wasRunning && !self.job.running { await self.reload() }
+                if wasRunning && !self.job.running { await self.reload(); self.jobFinished() }
+                if self.job.running, let id = self.tripId, self.job.collection == id {
+                    self.overview = (try? await self.api.overview(trip: id)) ?? self.overview
+                }
                 try? await Task.sleep(for: .milliseconds(self.job.running ? 700 : 4000))
             }
         }
     }
+
+    func pollNow() async { await pollOnce() }
 
     private func pollOnce() async {
         guard let tripId, let s = try? await api.jobStatus(trip: tripId) else { return }

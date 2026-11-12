@@ -19,7 +19,8 @@ import Testing
         for m in src.matches(of: regex) { keys.insert(String(m.output[1].substring!)) }
         for m in src.matches(of: quoted) { keys.insert(String(m.output[1].substring!)); keys.insert(String(m.output[2].substring!)) }
     }
-    keys.subtract(["phase_", "sort_", "tier_", "w_", "key"])
+    keys.subtract(["phase_", "sort_", "tier_", "w_", "key", "ownerFrom_"])
+    keys.formUnion(["ownerFrom_remembered", "ownerFrom_exif", "ownerFrom_folder"])
     keys.formUnion(ActivityPhase.allCases.map { "phase_" + $0.rawValue })
     keys.formUnion(PhotoSort.allCases.map { "sort_" + $0.rawValue })
     keys.formUnion(["tier_sharp", "tier_soft", "tier_blurry", "w_faces", "w_focus", "w_look", "w_resolution"])
@@ -36,4 +37,14 @@ import Testing
     #expect(Strings.photos(5, .sl) == "5 fotografij" && Strings.photos(11, .sl) == "11 fotografij")
     #expect(Strings.photos(101, .sl) == "101 fotografija" && Strings.photos(102, .sl) == "102 fotografiji")
     #expect(Strings.photos(0, .sl) == "0 fotografij")
+}
+
+/// A key written twice would crash the app when the table loads.
+@Test func noDuplicateKeys() throws {
+    let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/CuratorCore/Strings.swift")
+    let src = try String(contentsOf: file, encoding: .utf8)
+    let keys = src.matches(of: try Regex(#"(?m)^\s+"([^"]+)": \("#)).map { String($0.output[1].substring!) }
+    let dupes = Dictionary(grouping: keys, by: { $0 }).filter { $0.value.count > 1 }.keys.sorted()
+    #expect(dupes.isEmpty, "duplicate keys: \(dupes)")
+    #expect(keys.count > 150)
 }

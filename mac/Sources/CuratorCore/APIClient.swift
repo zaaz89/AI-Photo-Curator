@@ -115,6 +115,13 @@ public final class APIClient: Sendable {
         return try await get("api/settings", as: R.self).settings
     }
 
+    /// All settings as raw JSON (for values the app does not model, e.g. device_owners).
+    public func settingsRaw() async throws -> [String: Any] {
+        let (data, _) = try await session.data(from: url("api/settings"))
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return obj?["settings"] as? [String: Any] ?? [:]
+    }
+
     /// `json`: the changed settings as a JSON object, e.g. `{"ui_language": "sl"}`.
     @discardableResult
     public func saveSettings(json: Data) async throws -> EngineSettings {

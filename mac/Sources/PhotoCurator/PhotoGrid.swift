@@ -108,7 +108,11 @@ struct PhotoGrid: View {
         if library.loading {
             ProgressView()
         } else if library.trips.isEmpty {
-            ContentUnavailableView(library.tr("noTripsTitle"), systemImage: "suitcase", description: Text(library.tr("noTripsText")))
+            ContentUnavailableView {
+                Label(library.tr("noTripsTitle"), systemImage: "photo.stack")
+            } description: { Text(library.tr("noTripsText")) } actions: {
+                Button(library.tr("newTrip")) { library.sheet = .newAlbum }.buttonStyle(.glassProminent).controlSize(.large)
+            }
         } else if library.destination == .search {
             ContentUnavailableView.search(text: library.searchResult?.query ?? library.searchText)
         } else {
