@@ -48,3 +48,12 @@ import Testing
     #expect(dupes.isEmpty, "duplicate keys: \(dupes)")
     #expect(keys.count > 150)
 }
+
+@Test func countedWords() {
+    #expect(Strings.count(1, .moment, .en) == "1 moment" && Strings.count(3, .moment, .en) == "3 moments")
+    #expect(Strings.count(1, .moment, .sl) == "1 trenutek" && Strings.count(2, .moment, .sl) == "2 trenutka")
+    #expect(Strings.count(4, .moment, .sl) == "4 trenutki" && Strings.count(5, .moment, .sl) == "5 trenutkov")
+    #expect(Strings.count(2, .person, .sl) == "2 osebi" && Strings.count(3, .person, .sl) == "3 osebe")
+    #expect(Strings.count(1, .day, .sl) == "1 dan" && Strings.count(2, .day, .sl) == "2 dneva" && Strings.count(5, .day, .sl) == "5 dni")
+    #expect(Strings.count(2, .event, .sl) == "2 dogodka" && Strings.count(1, .video, .en) == "1 video")
+}

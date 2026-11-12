@@ -22,7 +22,7 @@ struct MomentsSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(library.tr("cardMoments")).font(.title2.weight(.bold))
-                    if !groups.isEmpty {
+                    if current != nil {
                         Text(String(format: library.tr("momentOf"), min(index + 1, groups.count), groups.count))
                             .foregroundStyle(.secondary).monospacedDigit()
                     }
@@ -38,7 +38,7 @@ struct MomentsSheet: View {
                 HStack(spacing: 14) {
                     ForEach(Array(g.members.enumerated()), id: \.element.id) { i, m in
                         FrameCard(member: m, photo: library.photos.first { $0.id == m.id },
-                                  recommended: m.id == g.keeperId, highlighted: i == frame)
+                                  recommended: m.id == g.keeperId, ownChoice: g.chosenByOwner, highlighted: i == frame)
                             .onTapGesture { frame = i }
                             .onTapGesture(count: 2) { frame = i; keepAndNext() }
                     }
@@ -75,6 +75,8 @@ struct MomentsSheet: View {
         .frame(minWidth: 1000, minHeight: 680)
         .animation(.spring(duration: 0.4), value: index)
         .focusable().focusEffectDisabled().focused($focused)
+        .onKeyPress(.escape) { finish(); return .handled }
+        .onExitCommand { finish() }
         .onKeyPress(.leftArrow) { move(-1); return .handled }
         .onKeyPress(.rightArrow) { move(1); return .handled }
         .onKeyPress(.return) { keepAndNext(); return .handled }
@@ -86,7 +88,7 @@ struct MomentsSheet: View {
 
     func load() async {
         guard let trip = library.tripId else { return }
-        let all = (try? await library.api.moments(trip: trip)) ?? []
+        let all = ((try? await library.api.moments(trip: trip)) ?? []).filter { !library.reviewedMoments.contains($0.id) }
         // Moments that need the owner first, then the ones decided automatically.
         groups = all.filter { !$0.clear } + all.filter(\.clear)
         index = 0
@@ -106,6 +108,7 @@ struct MomentsSheet: View {
         if chosen != g.keeperId || !g.chosenByOwner {
             Task { try? await library.api.keep(trip: trip, group: g.id, photo: chosen) }
         }
+        library.reviewedMoments.insert(g.id)
         next()
     }
 
@@ -117,6 +120,7 @@ struct MomentsSheet: View {
 
     /// The rest keeps the recommendation (nothing to write: the engine already uses it).
     func acceptRest() {
+        groups[index...].forEach { library.reviewedMoments.insert($0.id) }
         index = groups.count
         library.markStep("duplicates")
     }
@@ -138,6 +142,7 @@ struct FrameCard: View {
     let member: MomentGroup.Member
     let photo: Photo?
     let recommended: Bool
+    var ownChoice = false
     let highlighted: Bool
 
     var body: some View {
@@ -147,7 +152,7 @@ struct FrameCard: View {
                 .clipShape(.rect(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
                     if recommended {
-                        Label(library.tr("recommended"), systemImage: "sparkles")
+                        Label(library.tr(ownChoice ? "yourChoice" : "recommended"), systemImage: ownChoice ? "hand.thumbsup" : "sparkles")
                             .font(.caption.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 4)
                             .glassEffect(.regular, in: .capsule).padding(8)
                     }

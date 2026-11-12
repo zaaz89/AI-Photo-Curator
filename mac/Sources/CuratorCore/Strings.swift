@@ -10,6 +10,27 @@ public enum Strings {
         return lang == .sl ? pair.1 : pair.0
     }
 
+    public enum Word: Sendable { case photo, moment, person, day, event, video }
+
+    /// "3 moments" / "3 trenutki": English singular and plural, Slovenian singular, dual, 3–4 and plural.
+    public static func count(_ n: Int, _ word: Word, _ lang: Lang) -> String {
+        let forms: (en: (String, String), sl: (String, String, String, String)) = switch word {
+        case .photo: (("photo", "photos"), ("fotografija", "fotografiji", "fotografije", "fotografij"))
+        case .moment: (("moment", "moments"), ("trenutek", "trenutka", "trenutki", "trenutkov"))
+        case .person: (("person", "people"), ("oseba", "osebi", "osebe", "oseb"))
+        case .day: (("day", "days"), ("dan", "dneva", "dnevi", "dni"))
+        case .event: (("event", "events"), ("dogodek", "dogodka", "dogodki", "dogodkov"))
+        case .video: (("video", "videos"), ("video", "videa", "videi", "videov"))
+        }
+        if lang == .en { return "\(n) " + (n == 1 ? forms.en.0 : forms.en.1) }
+        switch n % 100 {
+        case 1: return "\(n) \(forms.sl.0)"
+        case 2: return "\(n) \(forms.sl.1)"
+        case 3, 4: return "\(n) \(forms.sl.2)"
+        default: return "\(n) \(forms.sl.3)"
+        }
+    }
+
     /// "5 photos" / "5 fotografij" with the right Slovenian dual and plural forms.
     public static func photos(_ n: Int, _ lang: Lang) -> String {
         guard lang == .sl else { return n == 1 ? "1 photo" : "\(n) photos" }
@@ -49,32 +70,28 @@ public enum Strings {
         "createAlbum": ("Create Album", "Ustvari album"),
         "nothingAnalysed": ("Getting the album ready", "Pripravljam album"),
         "nothingAnalysedText": ("The photos appear here as soon as they are read.", "Fotografije se pokažejo, ko jih preberem."),
-        "onePerson": ("%d person", "%d oseba"),
-        "people": ("%d people", "%d osebi ali več"),
-        "videosN": ("%d videos", "%d videov"),
-        "oneDay": ("%d day", "%d dan"),
-        "daysN": ("%d days", "%d dni"),
         "analysingHint": ("You can already look through the photos. Cards update as results arrive.",
                           "Fotografije lahko že pregleduješ. Kartice se sproti posodabljajo."),
+        "stillAnalysing": ("Still analysing. This card fills in when the photos are read.", "Še analiziram. Kartica se izpolni, ko preberem fotografije."),
         "cardClocks": ("Camera clocks", "Ure naprav"),
-        "clocksPending": ("%d device clock looks off. Check the suggested correction.", "Ura %d naprave ne drži. Preveri predlagani popravek."),
+        "clocksPending": ("Clocks that look off: %d. Check the suggested correction.", "Ure, ki ne držijo: %d. Preveri predlagani popravek."),
         "clocksApplied": ("%d clock correction applied. The timeline is in order.", "Uporabljenih popravkov ure: %d. Časovnica je urejena."),
         "clocksOK": ("No correction needed so far.", "Zaenkrat ni potreben noben popravek."),
         "cardMoments": ("Best of each moment", "Najboljše iz trenutka"),
         "momentsNone": ("No near-identical shots in this album.", "V tem albumu ni skoraj enakih posnetkov."),
-        "momentsNeed": ("%d moments need you. %d were decided: eyes open, sharp, looking at the camera.",
-                        "%d trenutkov potrebuje tebe. %d jih je odločenih: odprte oči, ostrina, pogled v kamero."),
-        "momentsDone": ("All %d moments are decided. You can still change any of them.", "Vseh %d trenutkov je odločenih. Vsakega lahko še spremeniš."),
+        "momentsNeed": ("Your decision: %@.", "Tvoja odločitev: %@."),
+        "momentsAuto": ("Decided automatically: %@ (eyes open, sharp, looking at the camera).", "Samodejno odločeno: %@ (odprte oči, ostrina, pogled v kamero)."),
+        "momentsDone": ("Decided: %@. You can still change any of them.", "Odločeno: %@. Vsakega lahko še spremeniš."),
         "cardBlurry": ("Blurry photos", "Zamegljene fotografije"),
         "blurryNone": ("No blurry photos.", "Ni zamegljenih fotografij."),
-        "blurrySome": ("%d photos look blurry, %d left out. Keep the ones you like.", "%d fotografij je zamegljenih, %d izpuščenih. Obdrži tiste, ki ti ugajajo."),
+        "blurrySome": ("Blurry: %@. Left out: %d. Keep the ones you like.", "Zamegljene: %@. Izpuščene: %d. Obdrži tiste, ki ti ugajajo."),
         "cardEvents": ("Days and events", "Dnevi in dogodki"),
-        "eventsText": ("%d events over %d days, named from time and place.", "%d dogodkov v %d dneh, poimenovanih po času in kraju."),
+        "eventsText": ("%@ in %@, named from time and place.", "%@, %@. Poimenovani po času in kraju."),
         "cardDescriptions": ("Descriptions", "Opisi"),
         "descAll": ("All %d photos have a description for Google Photos.", "Vseh %d fotografij ima opis za Google Photos."),
         "descSome": ("%d of %d described. About %d min for the rest, on this Mac.", "%d od %d opisanih. Za ostale okoli %d min, na tem Macu."),
         "cardExport": ("Export for Google Photos", "Izvoz za Google Photos"),
-        "exportReady": ("%d photos and videos are ready. One folder to drop into Google Photos.", "%d fotografij in videov je pripravljenih. Ena mapa za Google Photos."),
+        "exportReady": ("Ready: %@. One folder to drop into Google Photos.", "Pripravljeno: %@. Ena mapa za Google Photos."),
         "exportDone": ("Exported. Upload the folder to Google Photos, then finish the album.", "Izvoženo. Mapo naloži v Google Photos, nato zaključi album."),
         "exportShort": ("Export…", "Izvozi …"),
         "exportAgain": ("Export Again…", "Izvozi znova …"),
@@ -93,6 +110,7 @@ public enum Strings {
                                "Ostali posnetki ostanejo v tvojih mapah; izvozijo se samo izbrani."),
         "decidedBecause": ("Chosen because:", "Izbran, ker:"),
         "suggestedBecause": ("Suggested, close call:", "Predlog, odločitev je tesna:"),
+        "yourChoice": ("Your choice", "Tvoja izbira"),
         "recommended": ("Recommended", "Priporočeno"),
         "why_sharpest frame": ("sharpest frame", "najostrejši posnetek"),
         "why_highest resolution": ("highest resolution", "največja ločljivost"),

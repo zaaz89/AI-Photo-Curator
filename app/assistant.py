@@ -16,7 +16,10 @@ from app.metadata.exif_reader import exiftool_path
 
 SAMPLE = 40
 GENERIC_FOLDERS = {'dcim', 'camera', 'photos', 'pictures', 'images', 'export', 'exports', 'img', 'download',
-                   'downloads', 'desktop', 'new folder', 'untitled folder', 'fotografije', 'slike', 'nova mapa'}
+                   'downloads', 'desktop', 'new folder', 'untitled folder', 'fotografije', 'slike', 'nova mapa',
+                   # device names say which camera, not whose photos
+                   'iphone', 'ipad', 'android', 'phone', 'telefon', 'sony', 'canon', 'nikon', 'fuji', 'fujifilm',
+                   'gopro', 'dji', 'drone', 'pixel', 'samsung'}
 SECONDS_PER_DESCRIPTION = 8          # at the default 30 % GPU limit (measured on test-10)
 
 
@@ -143,6 +146,10 @@ def overview(conn, job: dict | None = None) -> dict:
         elif (r.get('margin') or 0) >= 0.12:
             decided += 1
 
+    # Other frames of a decided moment are not exported (same rule as the export plan).
+    extra_frames = {r[0] for r in conn.execute(
+        "SELECT m.asset_id FROM duplicate_members m JOIN duplicate_groups g ON g.id = m.group_id "
+        "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")}
     tiers = focus_tiers(conn)
     blurry = [i for i, t in tiers.items() if t['tier'] == 'blurry']
     days = conn.execute("SELECT COUNT(DISTINCT day) FROM events").fetchone()[0]
@@ -169,7 +176,7 @@ def overview(conn, job: dict | None = None) -> dict:
                    'kept_favourites': sum(1 for i in blurry if i in favourite and i not in rejected)},
         'events': {'events': events, 'days': days},
         'descriptions': {'done': described, 'photos': images, 'minutes_left': minutes},
-        'export': {'done': bool(exported and exported[0]), 'photos': photos - len(rejected)},
+        'export': {'done': bool(exported and exported[0]), 'photos': photos - len(rejected | extra_frames)},
     }
 
 

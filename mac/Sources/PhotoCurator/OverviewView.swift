@@ -33,13 +33,21 @@ struct OverviewView: View {
     }
 
     func facts(_ f: Overview.Facts) -> String {
-        var parts: [String] = []
-        parts.append(String(format: library.tr(f.people == 1 ? "onePerson" : "people"), f.people))
-        parts.append(Strings.photos(f.photos - f.videos, library.lang))
-        if f.videos > 0 { parts.append(String(format: library.tr("videosN"), f.videos)) }
-        if f.days > 0 { parts.append(String(format: library.tr(f.days == 1 ? "oneDay" : "daysN"), f.days)) }
+        let l = library.lang
+        var parts = [Strings.count(f.people, .person, l), Strings.count(f.photos - f.videos, .photo, l)]
+        if f.videos > 0 { parts.append(Strings.count(f.videos, .video, l)) }
+        if f.days > 0 { parts.append(Strings.count(f.days, .day, l)) }
         if !f.places.isEmpty { parts.append(f.places.joined(separator: ", ")) }
         return parts.joined(separator: " · ")
+    }
+
+    func momentsText(_ m: Overview.Moments) -> String {
+        let l = library.lang
+        if m.total == 0 { return library.tr("momentsNone") }
+        if m.needYou == 0 { return String(format: library.tr("momentsDone"), Strings.count(m.total, .moment, l)) }
+        var t = String(format: library.tr("momentsNeed"), Strings.count(m.needYou, .moment, l))
+        if m.decided > 0 { t += " " + String(format: library.tr("momentsAuto"), Strings.count(m.decided, .moment, l)) }
+        return t
     }
 
     var analysing: some View {
@@ -79,29 +87,47 @@ struct OverviewView: View {
 
     @ViewBuilder func cards(_ o: Overview) -> some View {
         let s = library.steps
-        AssistantCard(icon: "clock.arrow.2.circlepath", tint: .teal, title: library.tr("cardClocks"), done: s["times"] == true,
+        let busy = o.analysing || (library.job.running && library.job.collection == library.tripId)
+        if busy {
+            // Until the analysis is through, only show what is already true; no zeros that look final.
+            AssistantCard(icon: "clock.arrow.2.circlepath", tint: .teal, title: library.tr("cardClocks"),
+                          text: library.tr("stillAnalysing"), action: nil) {}
+            AssistantCard(icon: "square.stack.3d.up", tint: .blue, title: library.tr("cardMoments"),
+                          text: library.tr("stillAnalysing"), action: nil) {}
+            AssistantCard(icon: "camera.aperture", tint: .orange, title: library.tr("cardBlurry"),
+                          text: library.tr("stillAnalysing"), action: nil) {}
+        } else {
+            decisionCards(o, s)
+        }
+        restCards(o, s, busy: busy)
+    }
+
+    @ViewBuilder func decisionCards(_ o: Overview, _ s: [String: Bool]) -> some View {
+        AssistantCard(icon: "clock.arrow.2.circlepath", tint: .teal, title: library.tr("cardClocks"), done: library.isDone("times"),
                       text: o.clocks.pending > 0 ? String(format: library.tr("clocksPending"), o.clocks.pending)
                           : o.clocks.applied > 0 ? String(format: library.tr("clocksApplied"), o.clocks.applied)
                           : library.tr("clocksOK"),
                       action: library.tr(o.clocks.pending > 0 ? "check" : "showCard"), prominent: o.clocks.pending > 0) {
             library.sheet = .clocks
         }
-        AssistantCard(icon: "square.stack.3d.up", tint: .blue, title: library.tr("cardMoments"), done: s["duplicates"] == true,
-                      text: o.moments.total == 0 ? library.tr("momentsNone")
-                          : o.moments.needYou > 0 ? String(format: library.tr("momentsNeed"), o.moments.needYou, o.moments.decided + o.moments.chosen)
-                          : String(format: library.tr("momentsDone"), o.moments.total),
+        AssistantCard(icon: "square.stack.3d.up", tint: .blue, title: library.tr("cardMoments"), done: library.isDone("duplicates"),
+                      text: momentsText(o.moments),
                       action: o.moments.total == 0 ? nil : library.tr(o.moments.needYou > 0 ? "review" : "showCard"),
                       prominent: o.moments.needYou > 0) {
+            library.reviewedMoments = []          // a fresh look shows every moment again
             library.sheet = .moments
         }
-        AssistantCard(icon: "camera.aperture", tint: .orange, title: library.tr("cardBlurry"), done: s["blurry"] == true,
+        AssistantCard(icon: "camera.aperture", tint: .orange, title: library.tr("cardBlurry"), done: library.isDone("blurry"),
                       text: o.blurry.total == 0 ? library.tr("blurryNone")
-                          : String(format: library.tr("blurrySome"), o.blurry.total, o.blurry.leftOut),
+                          : String(format: library.tr("blurrySome"), Strings.count(o.blurry.total, .photo, library.lang), o.blurry.leftOut),
                       action: o.blurry.total == 0 ? nil : library.tr("review"), prominent: false) {
             library.destination = .blurry
         }
+    }
+
+    @ViewBuilder func restCards(_ o: Overview, _ s: [String: Bool], busy: Bool) -> some View {
         AssistantCard(icon: "calendar", tint: .purple, title: library.tr("cardEvents"), done: s["events"] == true,
-                      text: String(format: library.tr("eventsText"), o.events.events, o.events.days),
+                      text: String(format: library.tr("eventsText"), Strings.count(o.events.events, .event, library.lang), Strings.count(o.events.days, .day, library.lang)),
                       action: library.tr("browse"), prominent: false) {
             library.destination = .all
             library.markStep("events")
@@ -116,7 +142,7 @@ struct OverviewView: View {
             library.describePhotos()
         }
         AssistantCard(icon: "square.and.arrow.up", tint: .green, title: library.tr("cardExport"), done: o.export.done,
-                      text: o.export.done ? library.tr("exportDone") : String(format: library.tr("exportReady"), o.export.photos),
+                      text: o.export.done ? library.tr("exportDone") : String(format: library.tr("exportReady"), Strings.count(o.export.photos, .photo, library.lang)),
                       action: library.tr(o.export.done ? "exportAgain" : "exportShort"), prominent: !o.export.done,
                       disabled: library.job.running) {
             library.sheet = .export

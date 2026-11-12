@@ -24,7 +24,8 @@ struct MainWindow: View {
                 .searchFocused($searchFocused)
                 .onSubmit(of: .search) { library.runSearch() }
                 .onChange(of: library.searchFocusRequest) { _, _ in searchFocused = true }
-                .inspector(isPresented: $showInspector) {
+                .inspector(isPresented: Binding(get: { showInspector && library.destination != .overview },
+                                                set: { showInspector = $0 })) {
                     InspectorView().inspectorColumnWidth(min: 260, ideal: 300, max: 380)
                 }
                 .overlay(alignment: .bottom) {

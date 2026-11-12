@@ -35,9 +35,24 @@ enum AssistantSheet: String, Identifiable {
     /// What the album still needs (cards of the Overview).
     @Published private(set) var overview: Overview?
     @Published var sheet: AssistantSheet?
+    /// Moments the owner went through in this session; a reopened sheet continues after them.
+    var reviewedMoments: Set<Int> = []
     var exported: Bool { steps["export"] == true }
     static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "descriptions", "export"]
-    var stepsDone: Int { Self.stepOrder.filter { steps[$0] == true }.count }
+    var stepsDone: Int { Self.stepOrder.filter(isDone).count }
+    /// A step is done when the owner marked it, or when there is nothing left to decide in it.
+    func isDone(_ step: String) -> Bool {
+        if steps[step] == true { return true }
+        guard let o = overview, !o.analysing, !(job.running && job.collection == tripId) else { return false }
+        switch step {
+        case "times": return o.clocks.pending == 0
+        case "duplicates": return o.moments.needYou == 0
+        case "blurry": return o.blurry.total == 0
+        case "descriptions": return o.descriptions.photos > 0 && o.descriptions.done >= o.descriptions.photos
+        case "export": return o.export.done
+        default: return false
+        }
+    }
     @Published var destination: Destination = .overview { didSet { if destination != oldValue { clearSelection(); recompute() } } }
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
@@ -86,6 +101,7 @@ enum AssistantSheet: String, Identifiable {
 
     private func tripChanged() {
         undoManager?.removeAllActions()            // undo must never write into another trip
+        reviewedMoments = []
         photos = []                                // never show or act on the previous trip's photos
         steps = [:]
         overview = nil
@@ -418,6 +434,8 @@ enum AssistantSheet: String, Identifiable {
                 if wasRunning && !self.job.running { await self.reload(); self.jobFinished() }
                 if self.job.running, let id = self.tripId, self.job.collection == id {
                     self.overview = (try? await self.api.overview(trip: id)) ?? self.overview
+                    // New photos were read: show them while the rest of the analysis runs.
+                    if let n = self.overview?.facts.photos, n != self.photos.count { await self.reload() }
                 }
                 try? await Task.sleep(for: .milliseconds(self.job.running ? 700 : 4000))
             }

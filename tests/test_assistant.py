@@ -50,6 +50,13 @@ def test_suggest_owners_devices_dates_and_place(client, H, tmp_path):
     assert snapshot(tmp_path) == before                 # nothing written into the folders
 
 
+def test_device_named_folders_are_not_people(client, H, tmp_path):
+    f = tmp_path / 'iPhone'
+    make_photo(f / 'a.jpg', seed=7)
+    r = client.post('/api/suggest', json={'paths': [str(f)]}, headers=H).get_json()
+    assert r['folders'][0]['owner'] == ''
+
+
 def test_suggest_rejects_bad_input(client, H, tmp_path):
     f = tmp_path / 'one.jpg'
     make_photo(f, seed=1)
@@ -94,6 +101,14 @@ def test_overview_reports_what_needs_a_decision(client, H, album):
     assert r['export'] == {'done': False, 'photos': 3}
     assert set(r['clocks']) >= {'pending', 'applied', 'devices'}
     assert r['analysing'] is False
+
+
+def test_overview_export_count_matches_the_export_plan(client, H, album):
+    conn, slug = album
+    from app.organization.export_plan import plan_export
+    r = client.get(f'/api/collections/{slug}/overview', headers=H).get_json()
+    plan = plan_export(conn, folders='flat', selection='all')
+    assert r['export']['photos'] == plan['files']
 
 
 def test_keeper_margin_marks_clear_decisions():
