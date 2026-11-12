@@ -107,7 +107,7 @@ The loopback binding (`:2289`), Host/Origin guard (`:65-80`) and realpath whitel
 
 The brief's section 13.3 structure is right. Two additions:
 
-- **App data outside source folders.** Each collection lives in `~/Library/Application Support/AI Photo Curator/collections/<id>/` with `curator.db` (SQLite), `thumbs/` and caches. Nothing is written to source folders, ever. Exports go to a destination the user picks, which must not be inside any source.
+- **App data outside source folders.** Each collection lives in `local-data/collections/<id>/` inside the project folder (ignored by git; owner's decision 2026-11-12), with `curator.db` (SQLite), `thumbs/` and caches. Nothing is written to source folders, ever. Exports go to a destination the user picks, which must not be inside any source.
 - **Read-only source access by construction.** Importers and analyzers receive source paths through one `SourceReader` that opens files read-only and has no write methods. Only `organization/export_engine.py` writes, and only to the export destination, after a manifest is generated.
 
 How old and new code connect:
@@ -181,3 +181,11 @@ Follow the brief: AI understanding (embeddings first, VLM only on selected photo
 3. Remove the move features from the fork entirely (recommended), or keep them behind a confirmation?
 4. A small real test set: 50–100 photos and a few videos from both phones of one trip, in `local-data/` (never committed). Synthetic fixtures cannot validate time zones, Live Photos or duplicate accuracy.
 5. Which agent does M0 and which does M1? M0 and M1 touch different files, so they can run in parallel. M1's tests are more reliable on top of M0's Python 3.12 setup.
+
+### Owner's answers (2026-11-12)
+
+1. ExifTool: yes. Installed with Homebrew, version 13.55.
+2. App data: inside the project folder, in `local-data/` (ignored by git), not in `~/Library`.
+3. Move features: remove them from the fork entirely.
+4. Real test set: `~/Desktop/photos`, read-only. Contents checked with ExifTool: 236 JPEGs (2.5 GB) in two subfolders, `Engagement` (212) and `Palazzo Piccolomini` (24). Two cameras: Sony ILCE-7M4 (210) and ILCE-7M3 (26). All are Lightroom Classic exports. All have `DateTimeOriginal` and `OffsetTimeOriginal` +02:00, none have GPS. Capture times are 2026-10-23, 17:46–18:40. This set is good for testing two devices at one event and the date precedence bug. It does not cover iPhone HEIC, Live Photos, videos, GPS or time zone changes, so synthetic fixtures still cover those.
+5. Open.

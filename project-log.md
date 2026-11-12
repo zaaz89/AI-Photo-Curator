@@ -17,3 +17,7 @@ Key findings: three code paths move originals (tier toggle, dedup auto-move, mov
 Proposed plan: M0 safety lock (small PR), then M1 multi-source indexing and timeline in a new `app/` package with SQLite and ExifTool.
 Not done: no code changed. Duplicate accuracy not measured (no real photos yet).
 Next: owner answers the open questions in section 10 of the audit and decides who does M0 and M1.
+
+### 2026-11-12 — Owner decisions after audit (Claude)
+ExifTool approved and installed (Homebrew, 13.55). App data goes to `local-data/` in the project folder. Move features are removed from the fork. Real test set is `~/Desktop/photos` (read-only): 236 JPEGs, two Sony cameras, one event, no GPS/HEIC/video. Brief and audit updated.
+Next: owner decides who does M0 and M1.

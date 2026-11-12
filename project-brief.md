@@ -104,6 +104,8 @@ This is unacceptable for the intended default workflow.
 
 Implement a truly read-only analysis and preview system.
 
+Decision 2026-11-12: all features that move original files (tier toggle relocation, dedup auto-move, "Move blurry") are removed from the fork. Selection becomes marks only; files leave the source only as verified copies in an export. Details: `notes/phase-0-audit.md`.
+
 Exports must use a separate destination and preserve original files.
 
 The existing repository's documentation describes local execution and security protections. These claims must be verified against implementation and tests.
@@ -806,7 +808,7 @@ Avoid a complete rewrite unless the repository audit establishes a clear technic
 | Existing backend | Python |
 | Initial API | Flask |
 | Database | SQLite |
-| Metadata | ExifTool, existing EXIF libraries |
+| Metadata | ExifTool (required, Homebrew; batch JSON), Pillow EXIF as fallback |
 | Image processing | Pillow, OpenCV |
 | HEIC | pillow-heif |
 | RAW | rawpy |
@@ -881,6 +883,8 @@ Preserve compatibility during migration.
 # 14. DATABASE DESIGN
 
 Use SQLite for persistent indexing and processing state.
+
+Storage location (decision 2026-11-12): all collection data (database, thumbnails, caches, logs) lives in `local-data/collections/<id>/` inside the project folder, which git ignores. Nothing is ever written inside a source folder.
 
 Suggested entities:
 
@@ -1284,6 +1288,8 @@ Validate:
 AI quality should be evaluated using manually labeled reference examples rather than relying entirely on subjective impressions.
 
 Real personal photos used for testing stay outside git (see `.gitignore`, folder `local-data/`).
+
+First real test set (2026-11-12): `~/Desktop/photos` on the owner's Mac. It is a source folder: read only, never write into it. 236 Lightroom-exported JPEGs from two Sony cameras at one event; no GPS, HEIC, Live Photos or video. Description in `notes/phase-0-audit.md`, section 10.
 
 ---
 
