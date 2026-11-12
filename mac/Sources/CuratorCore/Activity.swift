@@ -4,6 +4,7 @@ import Foundation
 public struct JobStatus: Decodable, Equatable, Sendable {
     public let running: Bool
     public let collection: String?
+    public let kind: String?                 // analysis | describe | export
     public let status: String
     public let progress: Double
     public let error: String?
@@ -13,14 +14,15 @@ public struct JobStatus: Decodable, Equatable, Sendable {
 
     public init(running: Bool, collection: String? = nil, status: String, progress: Double = 0, error: String? = nil) {
         self.running = running; self.collection = collection; self.status = status; self.progress = progress; self.error = error
-        self.exportFolder = nil; self.exportOK = nil
+        self.exportFolder = nil; self.exportOK = nil; self.kind = nil
     }
-    enum CodingKeys: String, CodingKey { case running, collection, status, progress, error, result }
+    enum CodingKeys: String, CodingKey { case running, collection, kind, status, progress, error, result }
     struct Result: Decodable { struct Export: Decodable { let ok: Bool?; let dest: String? }; let export: Export? }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         running = try c.decode(Bool.self, forKey: .running)
         collection = try c.decodeIfPresent(String.self, forKey: .collection)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
         status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
         progress = try c.decodeIfPresent(Double.self, forKey: .progress) ?? 0
         error = try c.decodeIfPresent(String.self, forKey: .error)

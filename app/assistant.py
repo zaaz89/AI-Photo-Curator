@@ -15,6 +15,7 @@ from app.importers.local_importer import walk_source
 from app.metadata.exif_reader import exiftool_path
 
 SAMPLE = 40
+COUNT_LIMIT = 20000      # files counted per folder for the wizard; beyond this it shows "20000+"
 GENERIC_FOLDERS = {'dcim', 'camera', 'photos', 'pictures', 'images', 'export', 'exports', 'img', 'download',
                    'downloads', 'desktop', 'new folder', 'untitled folder', 'fotografije', 'slike', 'nova mapa',
                    # device names say which camera, not whose photos
@@ -38,11 +39,11 @@ def _read_sample(paths: list[str]) -> list[dict]:
     args = [exe, '-json', '-n', '-charset', 'filename=utf8', '-q', '-q', '-Make', '-Model', '-Artist',
             '-OwnerName', '-CameraOwnerName', '-DateTimeOriginal', '-CreateDate', '-GPSLatitude', '-GPSLongitude',
             '-@', '-']
-    proc = subprocess.run(args, input='\n'.join(paths), capture_output=True, text=True, timeout=120)
     try:
+        proc = subprocess.run(args, input='\n'.join(paths), capture_output=True, text=True, timeout=120)
         return json.loads(proc.stdout or '[]')
-    except json.JSONDecodeError:
-        return []
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return []                       # suggestions are optional: the folder name still works
 
 
 def _clean_folder_name(path: str) -> str:
@@ -52,19 +53,35 @@ def _clean_folder_name(path: str) -> str:
 
 def suggest(paths: list[str]) -> dict:
     remembered = settings.load().get('device_owners') or {}
+    from itertools import islice
+    from app.collections import data_dir
+    data = os.path.realpath(data_dir())
     folders, rejected, seen, places, days = [], [], set(), [], []
+    real = {str(raw): os.path.realpath(str(raw)) for raw in paths if str(raw).strip()}
     for raw in paths:
-        path = os.path.realpath(str(raw))
+        if not str(raw).strip():
+            rejected.append({'path': str(raw), 'problem': 'not found'})
+            continue
+        path = real[str(raw)]
         if path in seen:
             continue
         seen.add(path)
+        inside = lambda a, b: a == b or a.startswith(b.rstrip(os.sep) + os.sep)
+        if inside(path, data) or inside(data, path):
+            rejected.append({'path': raw, 'problem': "the app's own data folder"})
+            continue
+        if any(other != path and inside(path, other) for other in real.values()):
+            rejected.append({'path': raw, 'problem': 'inside another folder of this album'})
+            continue
         if not os.path.exists(path):
             rejected.append({'path': raw, 'problem': 'not found'})
             continue
         if not os.path.isdir(path):
             rejected.append({'path': raw, 'problem': 'not a folder'})
             continue
-        files = [f for f, _ in walk_source(path)]
+        files = [f for f, _ in islice(walk_source(path), COUNT_LIMIT + 1)]
+        more = len(files) > COUNT_LIMIT
+        files = files[:COUNT_LIMIT]
         if not files:
             rejected.append({'path': raw, 'problem': 'no photos or videos'})
             continue
@@ -90,7 +107,7 @@ def suggest(paths: list[str]) -> dict:
             owner, source = artists.most_common(1)[0][0], 'exif'
         if not owner and (name := _clean_folder_name(path)):
             owner, source = name, 'folder'
-        folders.append({'path': path, 'count': len(files), 'owner': owner, 'owner_from': source or None,
+        folders.append({'path': path, 'count': len(files), 'more': more, 'owner': owner, 'owner_from': source or None,
                         'devices': [{'name': d, 'count': n} for d, n in devices.most_common(4)],
                         'start': dates[0] if dates else None, 'end': dates[-1] if dates else None})
     return {'folders': folders, 'rejected': rejected, 'album': _album(places, sorted(days))}
@@ -125,8 +142,10 @@ def overview(conn, job: dict | None = None) -> dict:
     from app.timeline.clock_sync import list_clocks
     present = "a.status = 'present'"
     photos = conn.execute(f"SELECT COUNT(*) FROM assets a WHERE {present}").fetchone()[0]
-    images = conn.execute(f"SELECT COUNT(*) FROM assets a WHERE {present} AND kind = 'image'").fetchone()[0]
-    videos = photos - images
+    images_all = conn.execute(f"SELECT COUNT(*) FROM assets a WHERE {present} AND kind = 'image'").fetchone()[0]
+    # The same picture in two folders (AirDrop) is described once.
+    images = conn.execute(f"SELECT COUNT(DISTINCT sha256) FROM assets a WHERE {present} AND kind = 'image'").fetchone()[0]
+    videos = photos - images_all
     marks = {r['sha256']: r for r in conn.execute('SELECT sha256, favorite, rejected FROM marks')}
     ids = conn.execute(f"SELECT id, sha256 FROM assets a WHERE {present}").fetchall()
     rejected = {r['id'] for r in ids if marks.get(r['sha256']) and marks[r['sha256']]['rejected']}
@@ -167,7 +186,7 @@ def overview(conn, job: dict | None = None) -> dict:
         "GROUP BY p.label ORDER BY COUNT(*) DESC LIMIT 3")] if _has(conn, 'places') else []
     span = conn.execute("SELECT MIN(day), MAX(day) FROM events WHERE day != 'unknown'").fetchone()
     return {
-        'analysing': bool(job and job.get('running')),
+        'analysing': bool(job and job.get('running') and job.get('kind') in (None, 'analysis')),
         'facts': {'photos': photos, 'videos': videos, 'people': people, 'days': days, 'places': top,
                   'start': span[0], 'end': span[1]},
         'clocks': {'devices': len(clocks), 'pending': pending, 'applied': applied},
@@ -176,8 +195,17 @@ def overview(conn, job: dict | None = None) -> dict:
                    'kept_favourites': sum(1 for i in blurry if i in favourite and i not in rejected)},
         'events': {'events': events, 'days': days},
         'descriptions': {'done': described, 'photos': images, 'minutes_left': minutes},
-        'export': {'done': bool(exported and exported[0]), 'photos': photos - len(rejected | extra_frames)},
+        'export': {'done': bool(exported and exported[0]), 'photos': _export_count(conn)},
     }
+
+
+def _export_count(conn) -> int:
+    """Exactly what "Export for Google Photos" will copy."""
+    from app.organization.export_plan import google_photos_options, plan_export
+    try:
+        return plan_export(conn, **google_photos_options())['files']
+    except Exception:
+        return 0
 
 
 def _has(conn, table: str) -> bool:

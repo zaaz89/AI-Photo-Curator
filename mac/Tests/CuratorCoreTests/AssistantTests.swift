@@ -14,6 +14,20 @@ import Testing
     let t = try JSONDecoder().decode(Timeline.self, from: fixture("timeline"))
     // Photo 1 is soft, not blurry: nothing in the fixture is blurry.
     #expect(sections(t.items, events: t.events, filter: .blurry, sort: .time).isEmpty)
+    // The owner's own focus mark wins over the automatic one.
+    var p = t.items[0]
+    p.focus = try JSONDecoder().decode(Photo.Focus.self, from: Data(#"{"tier": "sharp", "auto_tier": "blurry", "override": "sharp"}"#.utf8))
+    #expect(sections([p], events: [], filter: .blurry, sort: .time).isEmpty)
+}
+
+@Test func devicesAreRememberedOnlyWhenTheyClearlyBelongToOneFolder() {
+    let r = devicesToRemember([
+        (owner: "Me", devices: [("Apple iPhone 15", 30), ("SONY ILCE-7M4", 2)]),
+        (owner: "Partner", devices: [("Apple iPhone 16 Pro", 25), ("Apple iPhone 15", 3)]),
+        (owner: "Ana", devices: [("Pixel 8", 10), ("Pixel 9", 10)]),
+    ])
+    // iPhone 15 is in two folders; the Sony is a few AirDropped photos; Pixel 8 is exactly half: kept.
+    #expect(r == ["Apple iPhone 16 Pro": "Partner", "Pixel 8": "Ana", "Pixel 9": "Ana"])
 }
 
 @Test func decodesOverview() throws {

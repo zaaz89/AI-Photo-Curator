@@ -104,11 +104,10 @@ struct MomentsSheet: View {
 
     func keepAndNext() {
         guard let g = current, let trip = library.tripId else { return }
+        _ = trip
         let chosen = g.members[frame].id
-        if chosen != g.keeperId || !g.chosenByOwner {
-            Task { try? await library.api.keep(trip: trip, group: g.id, photo: chosen) }
-        }
-        library.reviewedMoments.insert(g.id)
+        if chosen != g.keeperId || !g.chosenByOwner { library.keep(group: g.id, photo: chosen) }
+        else { library.reviewedMoments.insert(g.id) }
         next()
     }
 
@@ -152,9 +151,15 @@ struct FrameCard: View {
                 .clipShape(.rect(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
                     if recommended {
+                        // A plain material, not Liquid Glass: glass never sits on photos.
                         Label(library.tr(ownChoice ? "yourChoice" : "recommended"), systemImage: ownChoice ? "hand.thumbsup" : "sparkles")
                             .font(.caption.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule).padding(8)
+                            .background(.regularMaterial, in: .capsule).padding(8)
+                    }
+                    if member.rejected == true {
+                        Text(library.tr("leftOut")).font(.caption.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.orange, in: .capsule).foregroundStyle(.white).padding(8)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
                 .overlay {
@@ -285,6 +290,8 @@ struct ExportSheet: View {
             if exporting {
                 Text(job.status).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                 ProgressView(value: job.progress, total: 100)
+            } else if started, let error = job.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
             } else if started, let last = library.lastExport {
                 Label(library.tr(last.ok ? "exportFinished" : "exportProblems"),
                       systemImage: last.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
@@ -317,6 +324,7 @@ struct ExportSheet: View {
         panel.prompt = library.tr("exportHere")
         panel.message = library.tr("exportWhere")
         guard panel.runModal() == .OK, let url = panel.url, let t = library.tripId else { return }
+        library.clearLastExport()
         Task {
             do { try await library.api.startExport(trip: t, destination: url.path); started = true; await library.pollNow() }
             catch { library.message = library.describe(error) }

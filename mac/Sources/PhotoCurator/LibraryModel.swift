@@ -165,7 +165,7 @@ enum AssistantSheet: String, Identifiable {
         case .favourites: return photos.filter(\.favorite).count
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
-        case .blurry: return photos.filter { $0.focus?.tier == "blurry" || $0.focus?.autoTier == "blurry" }.count
+        case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
         case .overview: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
@@ -345,19 +345,36 @@ enum AssistantSheet: String, Identifiable {
     // MARK: album assistant
 
     /// Creates the album from the wizard, remembers which device belongs to whom, starts the analysis.
-    func createAlbum(name: String, folders: [(path: String, owner: String, devices: [String])]) async -> Bool {
+    func createAlbum(name: String, folders: [(path: String, owner: String, devices: [(String, Int)])]) async -> Bool {
+        var created: String?
         do {
             let id = try await api.createAlbum(name: name)
+            created = id
             for f in folders { try await api.addFolder(trip: id, path: f.path, owner: f.owner) }
             try? await api.setStep(trip: id, step: "import", done: true)
-            var memory = (try? await api.settingsRaw())?["device_owners"] as? [String: String] ?? [:]
-            for f in folders { for d in f.devices.prefix(2) { memory[d] = f.owner } }
-            save(["device_owners": memory])
+            let learned = devicesToRemember(folders.map { (owner: $0.owner, devices: $0.devices) })
+            if !learned.isEmpty, let raw = try? await api.settingsRaw() {     // never overwrite the memory on a read error
+                var memory = raw["device_owners"] as? [String: String] ?? [:]
+                memory.merge(learned) { _, new in new }
+                save(["device_owners": memory])
+            }
             trips = (try? await api.trips()) ?? trips
             tripId = id
             try await api.startAnalysis(trip: id)
             return true
-        } catch { message = describe(error); return false }
+        } catch {
+            // A half-made album (a folder was refused) is removed so it does not linger unseen.
+            if let id = created, tripId != id { _ = try? await api.finishAlbum(trip: id) }
+            message = describe(error)
+            return false
+        }
+    }
+
+    /// Keep this frame of a moment; written in order with the other changes.
+    func keep(group: Int, photo: Int?) {
+        guard let tripId, tripId == loadedTripId else { return }
+        reviewedMoments.insert(group)
+        enqueue { api in try await api.keep(trip: tripId, group: group, photo: photo) }
     }
 
     func markStep(_ step: String, _ done: Bool = true) {
@@ -372,12 +389,13 @@ enum AssistantSheet: String, Identifiable {
     }
 
     func leaveOutAllBlurry() {
-        let blurry = photos.filter { ($0.focus?.tier == "blurry" || $0.focus?.autoTier == "blurry") && !$0.rejected && !$0.favorite }
+        let blurry = photos.filter { $0.focus?.tier == "blurry" && !$0.rejected && !$0.favorite }
         mark(blurry, ["rejected": .bool(true)], name: tr("leaveOutAllBlurry"))
     }
 
     /// The last finished export of this album (folder and success), for the Export sheet.
     @Published private(set) var lastExport: (folder: String, ok: Bool)?
+    func clearLastExport() { lastExport = nil }
     private func jobFinished() {
         if let f = job.exportFolder, job.collection == tripId {
             lastExport = (f, job.exportOK ?? false)
@@ -429,14 +447,13 @@ enum AssistantSheet: String, Identifiable {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                let wasRunning = self.job.running
                 await self.pollOnce()
-                if wasRunning && !self.job.running { await self.reload(); self.jobFinished() }
-                if self.job.running, let id = self.tripId, self.job.collection == id {
+                if self.job.running, let id = self.tripId, self.job.collection == id, self.pollCount % 4 == 0 {
                     self.overview = (try? await self.api.overview(trip: id)) ?? self.overview
                     // New photos were read: show them while the rest of the analysis runs.
                     if let n = self.overview?.facts.photos, n != self.photos.count { await self.reload() }
                 }
+                self.pollCount += 1
                 try? await Task.sleep(for: .milliseconds(self.job.running ? 700 : 4000))
             }
         }
@@ -444,10 +461,16 @@ enum AssistantSheet: String, Identifiable {
 
     func pollNow() async { await pollOnce() }
 
+    private var pollCount = 0
     private func pollOnce() async {
         guard let tripId, let s = try? await api.jobStatus(trip: tripId) else { return }
+        let wasRunning = job.running
         if s.collection == nil || s.collection == tripId || s.running { job = s }
+        // A job that ended between two polls is still noticed here (export result, reload).
+        if wasRunning && !job.running { await reload(); jobFinished() }
     }
+    /// Analysis of this album runs (not descriptions or an export).
+    var analysing: Bool { job.running && job.collection == tripId && (job.kind ?? "analysis") == "analysis" }
 
     // MARK: settings
 

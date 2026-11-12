@@ -9,7 +9,7 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
-                if library.job.running && library.job.collection == library.tripId { analysing }
+                if library.job.running && library.job.collection == library.tripId { analysingBanner }
                 strip
                 if let o = library.overview {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16)], spacing: 16) { cards(o) }
@@ -50,7 +50,7 @@ struct OverviewView: View {
         return t
     }
 
-    var analysing: some View {
+    var analysingBanner: some View {
         HStack(spacing: 14) {
             AIRing(symbol: library.job.phase.symbol, size: 44, spinning: true, progress: library.job.progress / 100)
             VStack(alignment: .leading, spacing: 3) {
@@ -69,10 +69,11 @@ struct OverviewView: View {
 
     /// A few of the album's photos: favourites first, then sharp ones.
     var strip: some View {
-        let pick = (library.photos.filter { $0.favorite && !$0.rejected && !$0.isVideo }
-                    + library.photos.filter { !$0.favorite && !$0.rejected && !$0.isVideo && $0.focus?.tier == "sharp" }
-                    + library.photos.filter { !$0.rejected && !$0.isVideo }).reduce(into: [Photo]()) { acc, p in
-            if !acc.contains(where: { $0.id == p.id }) { acc.append(p) }
+        // One pass per kind, stopping at six photos (albums can hold tens of thousands).
+        var pick: [Photo] = [], seen = Set<Int>()
+        let kept = library.photos.lazy.filter { !$0.rejected && !$0.isVideo }
+        for rule in [{ (p: Photo) in p.favorite }, { (p: Photo) in p.focus?.tier == "sharp" }, { (_: Photo) in true }] {
+            for p in kept where pick.count < 6 && rule(p) && seen.insert(p.id).inserted { pick.append(p) }
         }
         return HStack(spacing: 10) {
             ForEach(pick.prefix(6)) { p in
@@ -87,7 +88,7 @@ struct OverviewView: View {
 
     @ViewBuilder func cards(_ o: Overview) -> some View {
         let s = library.steps
-        let busy = o.analysing || (library.job.running && library.job.collection == library.tripId)
+        let busy = o.analysing || library.analysing
         if busy {
             // Until the analysis is through, only show what is already true; no zeros that look final.
             AssistantCard(icon: "clock.arrow.2.circlepath", tint: .teal, title: library.tr("cardClocks"),
@@ -126,26 +127,36 @@ struct OverviewView: View {
     }
 
     @ViewBuilder func restCards(_ o: Overview, _ s: [String: Bool], busy: Bool) -> some View {
-        AssistantCard(icon: "calendar", tint: .purple, title: library.tr("cardEvents"), done: s["events"] == true,
-                      text: String(format: library.tr("eventsText"), Strings.count(o.events.events, .event, library.lang), Strings.count(o.events.days, .day, library.lang)),
-                      action: library.tr("browse"), prominent: false) {
-            library.destination = .all
-            library.markStep("events")
+        if busy {
+            AssistantCard(icon: "calendar", tint: .purple, title: library.tr("cardEvents"),
+                          text: library.tr("stillAnalysing"), action: nil) {}
+        } else {
+            eventsCard(o, s)
         }
         AssistantCard(icon: "text.bubble", tint: .pink, title: library.tr("cardDescriptions"),
                       done: o.descriptions.photos > 0 && o.descriptions.done >= o.descriptions.photos,
-                      text: o.descriptions.done >= o.descriptions.photos && o.descriptions.photos > 0
+                      text: busy ? library.tr("stillAnalysing")
+                          : o.descriptions.done >= o.descriptions.photos && o.descriptions.photos > 0
                           ? String(format: library.tr("descAll"), o.descriptions.photos)
                           : String(format: library.tr("descSome"), o.descriptions.done, o.descriptions.photos, max(1, o.descriptions.minutesLeft)),
-                      action: o.descriptions.done >= o.descriptions.photos ? nil : library.tr("describe"),
+                      action: busy || o.descriptions.done >= o.descriptions.photos ? nil : library.tr("describe"),
                       prominent: false, disabled: library.job.running) {
             library.describePhotos()
         }
         AssistantCard(icon: "square.and.arrow.up", tint: .green, title: library.tr("cardExport"), done: o.export.done,
-                      text: o.export.done ? library.tr("exportDone") : String(format: library.tr("exportReady"), Strings.count(o.export.photos, .photo, library.lang)),
-                      action: library.tr(o.export.done ? "exportAgain" : "exportShort"), prominent: !o.export.done,
+                      text: busy ? library.tr("stillAnalysing")
+                          : o.export.done ? library.tr("exportDone") : String(format: library.tr("exportReady"), Strings.count(o.export.photos, .photo, library.lang)),
+                      action: busy ? nil : library.tr(o.export.done ? "exportAgain" : "exportShort"), prominent: !o.export.done && !busy,
                       disabled: library.job.running) {
             library.sheet = .export
+        }
+    }
+
+    @ViewBuilder func eventsCard(_ o: Overview, _ s: [String: Bool]) -> some View {
+        AssistantCard(icon: "calendar", tint: .purple, title: library.tr("cardEvents"), done: s["events"] == true,
+                      text: String(format: library.tr("eventsText"), Strings.count(o.events.events, .event, library.lang), Strings.count(o.events.days, .day, library.lang)),
+                      action: library.tr("browse"), prominent: false) {
+            library.destination = .all
         }
     }
 }

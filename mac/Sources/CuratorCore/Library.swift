@@ -18,7 +18,7 @@ public enum LibraryFilter: Hashable, Sendable {
         case .favourites: return p.favorite
         case .leftOut: return p.rejected
         case .videos: return p.isVideo && !p.rejected
-        case .blurry: return p.focus?.tier == "blurry" || p.focus?.autoTier == "blurry"
+        case .blurry: return p.focus?.tier == "blurry"          // the owner's own mark wins
         case .day(let d): return p.day == d && !p.rejected
         }
     }

@@ -175,6 +175,7 @@ def build_groups(conn, progress: Optional[Callable] = None,
     for r in conn.execute('SELECT sha256, region_sharpness, scores_json FROM quality'):
         qual[r['sha256']] = (r['region_sharpness'], json.loads(r['scores_json']).get('aesthetic'))
     kw = settings.load().get('keeper_weights')
+    left_out = {r[0] for r in conn.execute('SELECT sha256 FROM marks WHERE rejected = 1')}
     with conn:
         conn.execute('DELETE FROM duplicate_groups')
         counts = defaultdict(int)
@@ -184,7 +185,10 @@ def build_groups(conn, progress: Optional[Callable] = None,
                 keeper, reasons = None, ['different shots of the same scene: keep both']
             else:
                 info = {}
-                keeper, reasons = _recommend(rows, feats, members, cat, choices.get(key), face_map, qual, kw, info)
+                # A frame the owner left out is never recommended; otherwise the moment would vanish
+                # from the export (the keeper is left out, the others are extra frames).
+                kept = [m for m in members if rows[m]['sha256'] not in left_out] or members
+                keeper, reasons = _recommend(rows, feats, kept, cat, choices.get(key), face_map, qual, kw, info)
             pair_notes = sorted({e for a in members for b in members if a < b
                                  for e in evidence.get(frozenset((a, b)), [])})
             cur = conn.execute('INSERT INTO duplicate_groups (group_key, category, keeper_id, reasons_json) '

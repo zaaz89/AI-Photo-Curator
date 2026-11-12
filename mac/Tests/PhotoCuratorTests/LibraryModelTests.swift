@@ -21,10 +21,16 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
         let answer: Data
         if path.hasSuffix("/timeline") {
             answer = try! Data(contentsOf: Bundle.module.url(forResource: "timeline", withExtension: "json", subdirectory: "Fixtures")!)
-        } else if path.hasSuffix("/sources") {
+        } else if path.hasSuffix("/sources") && request.httpMethod == "POST" && String(data: body, encoding: .utf8)?.contains("bad") == true {
+            Self.writes.append("ADD bad")
+            answer = Data(#"{"error": "overlaps with an existing source"}"#.utf8)
+        } else if path.hasSuffix("/sources") && request.httpMethod == "GET" {
             answer = Data(#"{"sources": []}"#.utf8)
         } else if path.hasSuffix("/workflow") {
             answer = Data(#"{"steps": [{"step": "import", "done": true}, {"step": "export", "done": false}]}"#.utf8)
+        } else if path == "/api/collections" && request.httpMethod == "POST" {
+            Self.writes.append("CREATE")
+            answer = Data(#"{"ok": true, "id": "new-album"}"#.utf8)
         } else if request.httpMethod == "DELETE" {
             Self.writes.append("DELETE " + path)
             answer = Data(#"{"ok": true, "removed_cache_files": 3, "freed_bytes": 52428800}"#.utf8)
@@ -41,8 +47,8 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
             self.client?.urlProtocol(self, didLoad: answer)
             self.client?.urlProtocolDidFinishLoading(self)
         }
-        // The first mark answers late, so a second mark could overtake it without a write queue.
-        if Self.delayMarks && path.hasSuffix("/marks/batch") && order == 1 {
+        // The first write answers late, so a second could overtake it without a write queue.
+        if Self.delayMarks && (path.hasSuffix("/marks/batch") || path.hasSuffix("/keeper")) && order == 1 {
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.3, execute: finish)
         } else { finish() }
     }
@@ -112,6 +118,26 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
 }
 
 extension LibraryModelTests {
+    @Test func aFailedFolderRemovesTheHalfMadeAlbum() async {
+        let m = await model()
+        let ok = await m.createAlbum(name: "X", folders: [(path: "/good", owner: "Me", devices: []),
+                                                          (path: "/bad", owner: "Ana", devices: [])])
+        #expect(!ok)
+        #expect(FakeEngine.writes.contains("DELETE /api/collections/new-album"))
+        #expect(m.tripId == "a")
+        #expect(m.message?.contains("overlaps") == true)
+    }
+
+    @Test func keeperChoicesAreWrittenInOrder() async {
+        let m = await model()
+        FakeEngine.delayMarks = true
+        defer { FakeEngine.delayMarks = false }
+        m.keep(group: 1, photo: 12)
+        m.keep(group: 1, photo: 13)
+        await waitUntil { FakeEngine.writes.count >= 2 }
+        #expect(FakeEngine.writes.map { $0.contains("12") } == [true, false])
+    }
+
     @Test func finishingAnAlbumRemovesItAndOpensTheNext() async {
         let m = await model()
         #expect(m.steps["import"] == true && m.exported == false)

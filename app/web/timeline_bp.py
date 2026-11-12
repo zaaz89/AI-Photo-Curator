@@ -23,7 +23,7 @@ from app.ai import vision_analyzer as vlm
 bp = Blueprint('timeline', __name__, template_folder='templates', static_folder='static', static_url_path='/ui')
 
 _job_lock = threading.Lock()
-_job = {'running': False, 'collection': None, 'status': 'Idle', 'progress': 0,
+_job = {'running': False, 'collection': None, 'kind': None, 'status': 'Idle', 'progress': 0,
         'result': None, 'error': None, 'cancel': False, 'started': None}
 
 # Set by photo_curator.py so this module can open the native folder dialog
@@ -144,7 +144,7 @@ def start_index(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"indexing {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Starting…', progress=0,
+        _job.update(running=True, collection=cid, kind='analysis', status='Starting…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_index, args=(cid,), daemon=True).start()
     return jsonify({'ok': True})
@@ -152,7 +152,7 @@ def start_index(cid):
 
 @bp.route('/api/collections/<cid>/index', methods=['GET'])
 def index_status(cid):
-    return jsonify({k: _job[k] for k in ('running', 'collection', 'status', 'progress', 'result', 'error')})
+    return jsonify({k: _job.get(k) for k in ('running', 'collection', 'kind', 'status', 'progress', 'result', 'error')})
 
 
 @bp.route('/api/collections/<cid>/index', methods=['DELETE'])
@@ -294,7 +294,7 @@ def start_describe(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Starting local AI…', progress=0,
+        _job.update(running=True, collection=cid, kind='describe', status='Starting local AI…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_describe, args=(cid, int(limit) if limit else None), daemon=True).start()
     return jsonify({'ok': True})
@@ -368,10 +368,8 @@ def reset_events(cid):
 def _export_options(data):
     from app import settings
     if data.get('preset') == 'google_photos':
-        # One folder, the kept photos (no rejected, no blurry unless favourite, no extra duplicates),
-        # Live Photo videos next to their stills.
-        return {'template': 'default', 'folders': 'flat', 'duplicates': 'skip', 'selection': 'no_blurry',
-                'topn': 50, 'weights': settings.load()['rank_weights']}
+        from app.organization.export_plan import google_photos_options
+        return google_photos_options()
     return {'template': data.get('template', 'default'), 'folders': data.get('folders', 'day'),
             'duplicates': data.get('duplicates', 'skip'), 'selection': data.get('selection', 'all'),
             'topn': int(data.get('topn') or 50), 'weights': settings.load()['rank_weights']}
@@ -435,7 +433,7 @@ def start_smart_export(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Preparing export…', progress=0,
+        _job.update(running=True, collection=cid, kind='export', status='Preparing export…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_smart_export,
                      args=(cid, _export_options(data), dest, data.get('resume_dir'),
@@ -521,7 +519,7 @@ def export_wallpapers(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Exporting wallpapers…', progress=0,
+        _job.update(running=True, collection=cid, kind='export', status='Exporting wallpapers…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_wallpapers, args=(cid, dest), daemon=True).start()
     return jsonify({'ok': True})

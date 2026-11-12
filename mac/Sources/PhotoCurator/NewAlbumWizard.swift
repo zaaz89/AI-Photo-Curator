@@ -139,7 +139,7 @@ struct NewAlbumWizard: View {
     func create() {
         creating = true
         let list = folders.map { (path: $0.suggestion.path, owner: $0.owner.trimmingCharacters(in: .whitespaces),
-                                  devices: $0.suggestion.devices.map(\.name)) }
+                                  devices: $0.suggestion.devices.map { ($0.name, $0.count) }) }
         Task {
             if await library.createAlbum(name: name.trimmingCharacters(in: .whitespaces), folders: list) { dismiss() }
             creating = false
@@ -177,7 +177,7 @@ struct FolderRow: View {
     }
 
     var details: String {
-        var parts = [Strings.photos(row.suggestion.count, library.lang)]
+        var parts = [Strings.photos(row.suggestion.count, library.lang) + (row.suggestion.more == true ? "+" : "")]
         if let d = row.suggestion.devices.first { parts.append(d.name) }
         if let a = row.suggestion.start {
             parts.append(albumName(place: nil, start: a, end: row.suggestion.end, lang: library.lang))

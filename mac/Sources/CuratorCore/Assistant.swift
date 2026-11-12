@@ -6,13 +6,14 @@ public struct FolderSuggestion: Decodable, Identifiable, Hashable, Sendable {
     public struct Device: Decodable, Hashable, Sendable { public let name: String; public let count: Int }
     public let path: String
     public let count: Int
+    public let more: Bool?                   // the folder has more files than were counted
     public let owner: String
     public let ownerFrom: String?            // remembered | exif | folder | nil
     public let devices: [Device]
     public let start: String?
     public let end: String?
     public var id: String { path }
-    enum CodingKeys: String, CodingKey { case path, count, owner, devices, start, end, ownerFrom = "owner_from" }
+    enum CodingKeys: String, CodingKey { case path, count, more, owner, devices, start, end, ownerFrom = "owner_from" }
 }
 
 public struct Suggestion: Decodable, Sendable {
@@ -27,6 +28,20 @@ public struct Suggestion: Decodable, Sendable {
     public let folders: [FolderSuggestion]
     public let rejected: [Rejected]
     public let album: Album
+}
+
+/// Which device → person pairs to remember for the next album: only a device that appears in
+/// exactly one folder and makes up at least half of that folder's sample (not a few AirDropped photos,
+/// not a phone model two people share).
+public func devicesToRemember(_ folders: [(owner: String, devices: [(String, Int)])]) -> [String: String] {
+    var seen: [String: Int] = [:]
+    for f in folders { for (d, _) in f.devices { seen[d, default: 0] += 1 } }
+    var out: [String: String] = [:]
+    for f in folders where !f.owner.isEmpty {
+        let total = f.devices.reduce(0) { $0 + $1.1 }
+        for (d, n) in f.devices where seen[d] == 1 && total > 0 && n * 2 >= total { out[d] = f.owner }
+    }
+    return out
 }
 
 private let monthsEN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -119,7 +134,8 @@ public struct MomentGroup: Decodable, Identifiable, Hashable, Sendable {
         public let localTime: String?
         public let width: Int?
         public let height: Int?
-        enum CodingKeys: String, CodingKey { case id, path, owner, width, height, localTime = "local_time" }
+        public let rejected: Bool?
+        enum CodingKeys: String, CodingKey { case id, path, owner, width, height, rejected, localTime = "local_time" }
     }
     public struct Reasons: Decodable, Hashable, Sendable {
         public let keeper: [String]?

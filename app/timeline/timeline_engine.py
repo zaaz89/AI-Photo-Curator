@@ -140,11 +140,14 @@ def duplicate_groups(conn: sqlite3.Connection) -> list:
     for g in conn.execute('SELECT * FROM duplicate_groups ORDER BY id'):
         members = conn.execute(
             "SELECT a.id, a.filename, a.rel_path, a.width, a.height, a.size, s.owner, s.path || '/' || a.rel_path AS path, "
-            "a.make, a.model, m.score AS sharpness, c.local_time FROM duplicate_members m "
+            "a.make, a.model, m.score AS sharpness, c.local_time, COALESCE(mk.rejected, 0) AS rejected "
+            'FROM duplicate_members m '
             'JOIN assets a ON a.id = m.asset_id JOIN sources s ON s.id = a.source_id '
+            'LEFT JOIN marks mk ON mk.sha256 = a.sha256 '
             'LEFT JOIN capture_time c ON c.asset_id = a.id WHERE m.group_id = ? ORDER BY c.sort_key, a.id',
             (g['id'],)).fetchall()
         groups.append({'id': g['id'], 'category': g['category'], 'keeper_id': g['keeper_id'],
-                       'reasons': json.loads(g['reasons_json']), 'members': [dict(m) for m in members]})
+                       'reasons': json.loads(g['reasons_json']),
+                       'members': [{**dict(m), 'rejected': bool(m['rejected'])} for m in members]})
     order = {'exact': 0, 'near': 1, 'similar_scene': 2}
     return sorted(groups, key=lambda g: (order.get(g['category'], 9), g['id']))
