@@ -77,6 +77,50 @@ MIGRATIONS = [
         UNIQUE (kind, asset_a, asset_b)
     );
     """,
+    # 2: visual features, duplicate groups, device clocks and corrections (M2)
+    """
+    CREATE TABLE visual_features (
+        sha256      TEXT PRIMARY KEY,         -- keyed by content, shared by exact copies
+        sig         BLOB NOT NULL,            -- 192-bit perceptual signature (aHash + dHash h/v)
+        sharpness   REAL NOT NULL,            -- Laplacian variance / image variance
+        computed_at TEXT NOT NULL
+    );
+    CREATE TABLE duplicate_groups (
+        id           INTEGER PRIMARY KEY,
+        group_key    TEXT NOT NULL UNIQUE,    -- sorted member sha256s, stable across runs
+        category     TEXT NOT NULL,           -- exact | near | similar_scene
+        keeper_id    INTEGER REFERENCES assets(id) ON DELETE SET NULL,  -- recommended
+        reasons_json TEXT NOT NULL
+    );
+    CREATE TABLE duplicate_members (
+        group_id  INTEGER NOT NULL REFERENCES duplicate_groups(id) ON DELETE CASCADE,
+        asset_id  INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        score     REAL,
+        PRIMARY KEY (group_id, asset_id)
+    );
+    CREATE TABLE keeper_choices (             -- the owner's override, survives re-analysis
+        group_key  TEXT PRIMARY KEY,
+        sha256     TEXT NOT NULL,             -- chosen file, by content
+        decided_at TEXT NOT NULL
+    );
+    CREATE TABLE clocks (
+        id        INTEGER PRIMARY KEY,
+        source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+        make      TEXT NOT NULL DEFAULT '',
+        model     TEXT NOT NULL DEFAULT '',
+        UNIQUE (source_id, make, model)
+    );
+    CREATE TABLE clock_corrections (
+        clock_id      INTEGER PRIMARY KEY REFERENCES clocks(id) ON DELETE CASCADE,
+        suggested_s   REAL,                   -- latest suggestion (NULL = none)
+        confidence    TEXT,
+        method        TEXT,
+        evidence_json TEXT NOT NULL DEFAULT '{}',
+        applied_s     REAL NOT NULL DEFAULT 0, -- what the timeline uses; 0 = no correction
+        status        TEXT NOT NULL DEFAULT 'none',  -- none | suggested | conflicting | accepted | manual | rejected
+        updated_at    TEXT NOT NULL
+    );
+    """,
 ]
 
 

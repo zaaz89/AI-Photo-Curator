@@ -98,3 +98,51 @@ def wait_step(pc, step, timeout=60):
         if time.time() - t0 > timeout:
             raise TimeoutError(step)
         time.sleep(0.05)
+
+
+def make_view(src: Path, dst: Path, crop=0.08, dto='2026:10:23 18:00:00', offset='+02:00',
+              model='Pixel 8', brightness=1.0, gps_utc=None):
+    """Another device's photo of the same scene: cropped/rescaled, own EXIF."""
+    from PIL import ImageEnhance
+    im = Image.open(src)
+    w, h = im.size
+    dx, dy = int(w * crop), int(h * crop)
+    im = im.crop((dx, dy, w - dx // 2, h - dy // 2)).resize((w, h), Image.Resampling.LANCZOS)
+    if brightness != 1.0:
+        im = ImageEnhance.Brightness(im).enhance(brightness)
+    exif = Image.Exif()
+    exif[0x010F] = 'Google'
+    exif[0x0110] = model
+    sub = exif.get_ifd(0x8769)
+    sub[36867] = dto
+    if offset:
+        sub[36881] = offset
+    if gps_utc:
+        d, t = gps_utc.split(' ')
+        gps = exif.get_ifd(0x8825)
+        gps[7] = tuple(float(x) for x in t.split(':'))
+        gps[29] = d
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    im.save(dst, exif=exif, quality=92)
+    return dst
+
+
+def textured_scene(path: Path, seed: int, **kw):
+    """A photo with enough corners for ORB (many small shapes)."""
+    rng = np.random.default_rng(seed)
+    img = Image.new('RGB', (800, 600), tuple(int(c) for c in rng.integers(0, 255, 3)))
+    d = ImageDraw.Draw(img)
+    for _ in range(140):
+        x, y = int(rng.integers(0, 780)), int(rng.integers(0, 580))
+        s = int(rng.integers(6, 40))
+        col = tuple(int(c) for c in rng.integers(0, 255, 3))
+        (d.rectangle if rng.random() < 0.6 else d.ellipse)([x, y, x + s, y + int(s * rng.uniform(.5, 1.5))], fill=col)
+    exif = Image.Exif()
+    exif[0x010F] = 'Apple'
+    exif[0x0110] = kw.get('model', 'iPhone 15')
+    sub = exif.get_ifd(0x8769)
+    sub[36867] = kw.get('dto', '2026:10:23 18:00:00')
+    sub[36881] = kw.get('offset', '+02:00')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path, exif=exif, quality=92)
+    return path

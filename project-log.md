@@ -34,3 +34,11 @@ Branch `claude/m1-timeline`. New `app/` modules: SQLite per collection in `local
 Tests: 34 pass (17 new for resolver, indexing, API). Real set `~/Desktop/photos`: 236 files indexed in about 4 s, all `high` confidence, re-index skips all, source unchanged. `/timeline` checked in a browser. A collection "Toskana 2026 test" with both folders exists in `local-data/` for the owner to look at.
 Not verified: real HEIC/Live Photo/video files, Takeout sidecars. Known limit: sources without offsets can misorder against sources with offsets until clock correction (M2).
 Next: M2 (clock offset between devices, exact and near duplicates on the index), after the owner reviews PRs #1–#4.
+
+### 2026-11-12 — M2 device clocks and duplicates (Claude)
+Owner said PRs #1–#4 were merged, but GitHub still showed them open; M2 is stacked on `claude/m1-timeline` (branch `claude/m2-clock-duplicates`).
+Added: device clocks with GPS and scene-match evidence, suggestions only with ≥3 independent agreeing matches, apply/manual/reject/undo (never automatic, file values kept); duplicate groups (exact, near, similar scene) with keeper recommendation and reasons, owner override stored by content; Duplicates tab and clock panel on `/timeline`. Details: `notes/m2-clocks-duplicates.md`.
+Bug found: OpenCV `findFundamentalMat` returns garbage masks when it finds no model; fixed (inliers only with a model).
+Tests: 42 pass, 3 runs stable. Real set: no clock suggestion for A7 III (2 matches disagree: −52 s vs −17 s), 25 near-duplicate groups, source unchanged. UI checked in a browser.
+Not verified: grouping quality against human judgement, real phones/GPS/HEIC, timing above 236 files.
+Next: owner merges #1–#5 and reviews the Duplicates tab; then M3 (local AI: embeddings, descriptions, search).
