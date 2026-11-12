@@ -76,7 +76,7 @@ struct MainWindow: View {
     }
     var subtitle: String {
         let n = library.flat.count
-        var s = "\(n) " + library.tr(n == 1 ? "photo" : "photos")
+        var s = Strings.photos(n, library.lang)
         if library.destination == .search, let en = library.searchResult?.english, !en.isEmpty {
             s += " · " + library.tr("alsoAs") + " “\(en)”"
         }
@@ -140,7 +140,7 @@ struct TripPicker: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(library.trips.first { $0.id == library.tripId }?.name ?? library.tr("noTrip"))
                         .font(.headline).lineLimit(1)
-                    Text("\(library.photos.count) " + library.tr("photos")).font(.caption).foregroundStyle(.secondary)
+                    Text(Strings.photos(library.photos.count, library.lang)).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.secondary)

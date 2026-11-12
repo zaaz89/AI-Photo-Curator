@@ -121,7 +121,7 @@ struct SectionHeader: View {
                 Text(e).font(continuesDay ? .headline : .title3).foregroundStyle(continuesDay ? .primary : .secondary)
             }
             Spacer()
-            Text("\(section.photos.count) " + library.tr(section.photos.count == 1 ? "photo" : "photos"))
+            Text(Strings.photos(section.photos.count, library.lang))
                 .font(.callout).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 20).padding(.top, continuesDay ? 10 : 16).padding(.bottom, 8)

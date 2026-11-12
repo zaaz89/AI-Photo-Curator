@@ -10,6 +10,17 @@ public enum Strings {
         return lang == .sl ? pair.1 : pair.0
     }
 
+    /// "5 photos" / "5 fotografij" with the right Slovenian dual and plural forms.
+    public static func photos(_ n: Int, _ lang: Lang) -> String {
+        guard lang == .sl else { return n == 1 ? "1 photo" : "\(n) photos" }
+        switch n % 100 {
+        case 1: return "\(n) fotografija"
+        case 2: return "\(n) fotografiji"
+        case 3, 4: return "\(n) fotografije"
+        default: return "\(n) fotografij"
+        }
+    }
+
     public static let table: [String: (String, String)] = [
         // window and sidebar
         "library": ("Library", "Knjižnica"),

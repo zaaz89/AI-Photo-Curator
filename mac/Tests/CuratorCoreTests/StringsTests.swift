@@ -27,3 +27,13 @@ import Testing
     #expect(missing.isEmpty, "missing strings: \(missing)")
     #expect(keys.count > 80)
 }
+
+@Test func photoCountPlurals() {
+    #expect(Strings.photos(1, .en) == "1 photo" && Strings.photos(5, .en) == "5 photos")
+    #expect(Strings.photos(1, .sl) == "1 fotografija")
+    #expect(Strings.photos(2, .sl) == "2 fotografiji")
+    #expect(Strings.photos(3, .sl) == "3 fotografije" && Strings.photos(4, .sl) == "4 fotografije")
+    #expect(Strings.photos(5, .sl) == "5 fotografij" && Strings.photos(11, .sl) == "11 fotografij")
+    #expect(Strings.photos(101, .sl) == "101 fotografija" && Strings.photos(102, .sl) == "102 fotografiji")
+    #expect(Strings.photos(0, .sl) == "0 fotografij")
+}
