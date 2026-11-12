@@ -128,11 +128,28 @@ def describe(path: str) -> dict:
     img = _jpeg_b64(path)
     if img is None:
         raise ValueError('image could not be decoded')
-    r = _post('/api/generate', {'model': VLM_MODEL, 'prompt': PROMPT, 'images': [img], 'format': SCHEMA,
-                                'stream': False, 'think': False, 'keep_alive': '2m',
-                                # Cap the answer: the model sometimes keeps listing tags for 1,000+ tokens.
-                                'options': {'temperature': 0, 'num_predict': 320}})
-    return clean(json.loads(r.get('response') or '{}'))
+    # Cap the answer so a looping model cannot run for minutes. The cap must
+    # leave room for "thinking" models: qwen3-vl:4b (the thinking variant)
+    # writes ~300-400 tokens of reasoning even with think=False, and a 320-token
+    # cap left the answer empty (found 2026-11-12). A cut-off or empty answer is
+    # retried once with a repeat penalty, then reported as an error, never
+    # stored as an empty success.
+    attempts = ({'temperature': 0, 'num_predict': 1024},
+                {'temperature': 0.2, 'repeat_penalty': 1.3, 'num_predict': 1024})
+    for k, options in enumerate(attempts):
+        r = _post('/api/generate', {'model': VLM_MODEL, 'prompt': PROMPT, 'images': [img], 'format': SCHEMA,
+                                    'stream': False, 'think': False, 'keep_alive': '2m', 'options': options})
+        try:
+            text = (r.get('response') or '').strip()
+            if not text:
+                raise ValueError(f"empty answer from the model (stopped: {r.get('done_reason')})")
+            out = clean(json.loads(text))
+            if not out['description']:
+                raise ValueError('the model returned no description')
+            return out
+        except (json.JSONDecodeError, ValueError):
+            if k == len(attempts) - 1:
+                raise
 
 
 def translate_to_english(text: str) -> str:

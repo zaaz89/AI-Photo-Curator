@@ -156,3 +156,24 @@ def test_search_api_without_model(pc, client, H, tmp_path, monkeypatch):
     assert r.status_code == 503 and 'not downloaded' in r.get_json()['error']
     s = client.get('/api/ai/status', headers=H).get_json()
     assert 'vlm' in s and 'search_ready' in s
+
+
+def test_describe_retries_cut_off_json(monkeypatch, tmp_path):
+    from conftest import textured_scene
+    p = textured_scene(tmp_path / 'x.jpg', seed=5)
+    answers = iter(['{"description": "a tower", "tags": ["tower", "tower", "tow',      # cut off
+                    '{"description": "a tower", "tags": ["tower"], "people": 0, "text_visible": ""}'])
+    sent = []
+    monkeypatch.setattr(vlm, '_post', lambda path, body, timeout=300: sent.append(body['options']) or
+                        {'response': next(answers)})
+    assert vlm.describe(str(p))['description'] == 'A tower.'
+    assert sent[1].get('repeat_penalty') == 1.3
+
+
+def test_empty_answer_is_an_error_not_a_description(monkeypatch, tmp_path):
+    from conftest import textured_scene
+    p = textured_scene(tmp_path / 'y.jpg', seed=6)
+    monkeypatch.setattr(vlm, '_post', lambda path, body, timeout=300:
+                        {'response': '', 'thinking': 'Got it, ...', 'done_reason': 'length'})
+    with pytest.raises(ValueError, match='empty answer'):
+        vlm.describe(str(p))
