@@ -22,7 +22,7 @@ public enum LibraryFilter: Hashable, Sendable {
     }
 }
 
-public enum SortOrder: String, CaseIterable, Hashable, Sendable { case time, person, place, quality }
+public enum PhotoSort: String, CaseIterable, Hashable, Sendable { case time, person, place, quality }
 
 /// A titled group of photos in the grid (an event of a day, a person, a place…).
 public struct PhotoSection: Identifiable, Hashable, Sendable {
@@ -35,7 +35,7 @@ public struct PhotoSection: Identifiable, Hashable, Sendable {
 }
 
 /// Groups photos for the grid. Time order: one section per event in time order, undated last.
-public func sections(_ photos: [Photo], events: [TripEvent], filter: LibraryFilter, sort: SortOrder) -> [PhotoSection] {
+public func sections(_ photos: [Photo], events: [TripEvent], filter: LibraryFilter, sort: PhotoSort) -> [PhotoSection] {
     var list = photos.filter(filter.includes)
     if case .ids(let ids) = filter {
         let byId = Dictionary(photos.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })

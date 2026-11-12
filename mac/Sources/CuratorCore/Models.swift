@@ -153,6 +153,10 @@ public struct EngineSettings: Codable, Hashable, Sendable {
     public var aiGpuShare: Int
     public var aiPauseOnBattery: Bool
     public var keeperWeights: [String: Int]
+    public init(uiLanguage: String, aiGpuShare: Int, aiPauseOnBattery: Bool, keeperWeights: [String: Int]) {
+        self.uiLanguage = uiLanguage; self.aiGpuShare = aiGpuShare
+        self.aiPauseOnBattery = aiPauseOnBattery; self.keeperWeights = keeperWeights
+    }
     enum CodingKeys: String, CodingKey {
         case uiLanguage = "ui_language", aiGpuShare = "ai_gpu_share", aiPauseOnBattery = "ai_pause_on_battery",
              keeperWeights = "keeper_weights"

@@ -115,10 +115,16 @@ public final class APIClient: Sendable {
         return try await get("api/settings", as: R.self).settings
     }
 
+    /// `json`: the changed settings as a JSON object, e.g. `{"ui_language": "sl"}`.
     @discardableResult
-    public func saveSettings(_ changes: [String: Any]) async throws -> EngineSettings {
+    public func saveSettings(json: Data) async throws -> EngineSettings {
         struct R: Decodable { let settings: EngineSettings }
-        return try await post("api/settings", changes, as: R.self).settings
+        var r = URLRequest(url: url("api/settings"))
+        r.httpMethod = "POST"
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = json
+        let res: R = try await send(r)
+        return res.settings
     }
 
     public func jobStatus(trip: String) async throws -> JobStatus {
