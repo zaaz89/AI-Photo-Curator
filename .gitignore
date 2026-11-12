@@ -23,3 +23,7 @@ test-photos/
 
 # Built Mac app
 dist/
+
+# Throwaway spikes (screenshots contain the owner's photos)
+spikes/
+.superpowers/
