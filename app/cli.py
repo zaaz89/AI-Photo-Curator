@@ -5,6 +5,8 @@
   uv run python -m app.cli index <collection>
   uv run python -m app.cli timeline <collection> [--limit 50]
   uv run python -m app.cli list
+  uv run python -m app.cli search <collection> "sunset" [--limit 12]
+  uv run python -m app.cli describe <collection> [--limit 20]
 """
 from __future__ import annotations
 
@@ -27,6 +29,8 @@ def main(argv=None):
     t = sub.add_parser('timeline'); t.add_argument('collection'); t.add_argument('--limit', type=int, default=0)
     t.add_argument('--json', action='store_true')
     sub.add_parser('list')
+    q = sub.add_parser('search'); q.add_argument('collection'); q.add_argument('query'); q.add_argument('--limit', type=int, default=12)
+    d = sub.add_parser('describe'); d.add_argument('collection'); d.add_argument('--limit', type=int)
     args = p.parse_args(argv)
 
     if args.cmd == 'create':
@@ -41,6 +45,17 @@ def main(argv=None):
         res = analyze_collection(conn, progress=lambda m, i, n: print(f'  {m} {i}/{n}' if n else f'  {m}',
                                                                      file=sys.stderr))
         print(json.dumps(res, indent=2, ensure_ascii=False))
+    elif args.cmd == 'search':
+        from app.ai.search import search
+        res = search(col.open_db(args.collection), args.query, limit=args.limit)
+        print(json.dumps({k: res.get(k) for k in ('query', 'english', 'translation', 'model')}, ensure_ascii=False))
+        for r in res['results']:
+            print(f"{r['score']:.3f} {'tag ' if r['tag_match'] else '    '}{r['filename']}")
+    elif args.cmd == 'describe':
+        from app.ai.vision_analyzer import describe_collection
+        res = describe_collection(col.open_db(args.collection), limit=args.limit,
+                                  progress=lambda m, i, n: print(f'  {m} {i}/{n}', file=sys.stderr))
+        print(json.dumps(res))
     elif args.cmd == 'timeline':
         data = timeline(col.open_db(args.collection))
         items = data['items'][:args.limit] if args.limit else data['items']

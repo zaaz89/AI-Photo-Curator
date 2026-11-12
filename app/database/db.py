@@ -121,6 +121,33 @@ MIGRATIONS = [
         updated_at    TEXT NOT NULL
     );
     """,
+    # 3: local AI (M3): image embeddings for search, VLM descriptions and tags
+    """
+    CREATE TABLE image_embeddings (
+        sha256      TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        vec         BLOB NOT NULL,            -- float16, L2-normalised
+        computed_at TEXT NOT NULL,
+        PRIMARY KEY (sha256, model)
+    );
+    CREATE TABLE ai_annotations (
+        sha256         TEXT NOT NULL,
+        model          TEXT NOT NULL,         -- e.g. qwen3-vl:4b
+        prompt_version TEXT NOT NULL,
+        description    TEXT,
+        tags_json      TEXT NOT NULL DEFAULT '[]',
+        people         INTEGER,
+        text_visible   TEXT,
+        error          TEXT,
+        created_at     TEXT NOT NULL,
+        PRIMARY KEY (sha256, model, prompt_version)
+    );
+    CREATE TABLE query_translations (
+        query       TEXT PRIMARY KEY,
+        english     TEXT NOT NULL,
+        model       TEXT NOT NULL
+    );
+    """,
 ]
 
 

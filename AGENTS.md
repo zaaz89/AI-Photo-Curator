@@ -34,6 +34,7 @@ Shared instructions for every AI agent working on this repository. Two agents wo
 - Tests: `uv run pytest`. Every PR runs them and reports the result. `tests/test_source_safety.py` must always pass.
 - Dependency audit: `uv run pip-audit -r requirements.txt`.
 - ExifTool is required (`brew install exiftool`).
+- Local AI (M3): `brew install ollama`, then `scripts/download-models.sh` once. Models live in `local-data/models/`. The app starts Ollama via `scripts/ollama-serve.sh`. Tests use fake models and never need them.
 - Real test photos on the owner's Mac: `~/Desktop/photos` (read-only source; never write into it).
 
 ## Hard safety rules (from the brief, sections 15 and 16)

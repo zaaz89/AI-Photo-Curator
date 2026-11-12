@@ -814,8 +814,8 @@ Avoid a complete rewrite unless the repository audit establishes a clear technic
 | RAW | rawpy |
 | Exact duplicate detection | SHA-256 |
 | Near duplicate detection | Existing perceptual hash + ORB |
-| Semantic image retrieval | CLIP or SigLIP embeddings |
-| Local vision AI | Ollama with compatible vision model |
+| Semantic image retrieval | SigLIP 2 base (`google/siglip2-base-patch16-224`, decided 2026-11-12) |
+| Local vision AI | Ollama with `qwen3-vl:4b` (decided 2026-11-12; models stored in `local-data/models/`) |
 | Face detection | Apple Vision or suitable local model |
 | Background processing | Python workers |
 | Frontend | Existing interface initially |

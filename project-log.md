@@ -42,3 +42,12 @@ Bug found: OpenCV `findFundamentalMat` returns garbage masks when it finds no mo
 Tests: 42 pass, 3 runs stable. Real set: no clock suggestion for A7 III (2 matches disagree: −52 s vs −17 s), 25 near-duplicate groups, source unchanged. UI checked in a browser.
 Not verified: grouping quality against human judgement, real phones/GPS/HEIC, timing above 236 files.
 Next: owner merges #1–#5 and reviews the Duplicates tab; then M3 (local AI: embeddings, descriptions, search).
+
+### 2026-11-12 — PRs #1–#5 merged (Claude)
+On the owner's request Claude merged PRs #1–#5 into `main` in order, with merge commits (squash would have duplicated the stacked commits). `main` equals the M2 branch; 42 tests passed on `main`.
+
+### 2026-11-12 — M3 local AI: search, descriptions, tags (Claude)
+Branch `claude/m3-local-ai`. Owner approved downloading the models into the project: SigLIP 2 base (1.4 GB) and Qwen3-VL 4B via Ollama (3.3 GB), both Apache 2.0, in `local-data/models/`. Added: search index during indexing, semantic search with local query translation (Slovenian queries work through it), background "Describe photos" job (skips non-keeper duplicates, forbids place/person names, cached per content/model/prompt), AI status API, search box and AI description on `/timeline`, `app.cli search|describe`, `scripts/ollama-serve.sh`, `scripts/download-models.sh`. Details: `notes/m3-local-ai.md`.
+Tests: 49 pass (7 new, fake models). Real set: search index 236 photos in 24 s; English queries correct in top 3; Slovenian with translation correct. Descriptions about 10 s per photo; the full run on 202 photos was still going when this was written.
+Not done: place names (needs GPS/landmark evidence, M4), faces, review of all descriptions.
+Owner feedback: write to Žaž only in Slovenian (no mixed or other languages).
