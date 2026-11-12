@@ -28,3 +28,9 @@ Removed every path that moves originals: tier toggle relocation, dedup auto-move
 Tests: 17 pytest tests pass; a deliberate regression (cache back in the source folder) makes the safety test fail. Real run on `~/Desktop/photos/Engagement` (212 JPEGs): cull 28 s, dedup 42 s (58 marked as duplicates of 186), rank 17 s, export of TOP 10 verified; source folder byte-identical, mtimes unchanged.
 Not verified: UI clicked through in a browser (page renders, embedded JS parses); duplicate accuracy on the real set; RAW/HEIC files (none in the real set).
 Next: M1 multi-source indexing and timeline.
+
+### 2026-11-12 — M1 multi-source indexing and timeline (Claude)
+Branch `claude/m1-timeline`. New `app/` modules: SQLite per collection in `local-data/collections/<slug>/`, recursive read-only importer (SHA-256, incremental, missing files kept), ExifTool batch reader with Pillow fallback, capture-time resolver with rule/confidence/notes, RAW+JPEG and Live Photo pairing, timeline engine, `/timeline` page and `app.cli`. Details: `notes/m1-indexing-timeline.md`.
+Tests: 34 pass (17 new for resolver, indexing, API). Real set `~/Desktop/photos`: 236 files indexed in about 4 s, all `high` confidence, re-index skips all, source unchanged. `/timeline` checked in a browser. A collection "Toskana 2026 test" with both folders exists in `local-data/` for the owner to look at.
+Not verified: real HEIC/Live Photo/video files, Takeout sidecars. Known limit: sources without offsets can misorder against sources with offsets until clock correction (M2).
+Next: M2 (clock offset between devices, exact and near duplicates on the index), after the owner reviews PRs #1–#4.

@@ -20,7 +20,8 @@ os.environ['PHOTOCURATOR_DATA_DIR'] = _DATA
 
 def make_photo(path: Path, seed: int, dto: str | None = '2026:10:23 18:14:32',
                offset: str | None = '+02:00', datetime_ifd0: str | None = '2026:10:23 20:00:00',
-               blur: bool = False, model: str = 'iPhone 15', size=(800, 600)):
+               blur: bool = False, model: str = 'iPhone 15', size=(800, 600),
+               gps_utc: str | None = None):
     """A structured synthetic photo (shapes on a gradient) with chosen EXIF."""
     rng = np.random.default_rng(seed)
     w, h = size
@@ -48,6 +49,14 @@ def make_photo(path: Path, seed: int, dto: str | None = '2026:10:23 18:14:32',
         sub[36867] = dto
     if offset:
         sub[36881] = offset
+    if gps_utc:                                 # 'YYYY:MM:DD HH:MM:SS' in UTC
+        d, t = gps_utc.split(' ')
+        h, m, s = (int(x) for x in t.split(':'))
+        gps = exif.get_ifd(0x8825)
+        gps[1], gps[2] = 'N', (43.0, 4.0, 30.0)
+        gps[3], gps[4] = 'E', (11.0, 40.0, 50.0)
+        gps[7] = (float(h), float(m), float(s))
+        gps[29] = d
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, exif=exif, quality=92)
     return path
