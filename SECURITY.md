@@ -3,7 +3,7 @@
 Photo Curator is a **100% local** desktop tool. It runs a small Flask server bound
 to `127.0.0.1` and opens a browser tab against it. No data leaves your machine:
 no uploads, no telemetry, no external APIs (the only outbound requests are
-optional OpenFreeMap vector map tiles in the GPS view and a Ko-fi donate badge,
+optional OpenFreeMap vector map tiles in the GPS view (the Ko-fi badge was removed in the AI Photo Curator fork),
 both loaded by your browser, not the app; the map library itself is bundled, not
 loaded from a CDN).
 
@@ -40,7 +40,7 @@ server hardening (the app is single-user and loopback-only).
 | Path traversal / arbitrary read (2) | The image, thumbnail, and EXIF endpoints resolve the requested path with `os.path.realpath()` (collapsing `..` and following symlinks) and serve it only if it is a real image file **inside** the currently selected or a recently used folder. Everything else returns 404. |
 | Network exposure (3) | The server binds explicitly to `127.0.0.1`, never `0.0.0.0`. It is unreachable from the network. |
 | Dependency vulnerabilities (4) | Dependencies are pinned to exact versions in `requirements.txt`. Scan them with `pip-audit -r requirements.txt`. |
-| Accidental data loss (5) | Actions are reversible and explicit: nothing is deleted. Blurry photos move to a `Blurred/` subfolder, exports **copy** originals into `TOP_N/` and `PhoneBG/`. Originals are never modified in place. |
+| Accidental data loss (5) | AI Photo Curator fork: source folders are read-only. Nothing is moved, renamed, deleted or written there (blurry and duplicate photos are only marked; caches live in `local-data/`). Exports create a new folder inside a destination you choose outside the source, copy original bytes with exclusive create (no overwrite), verify every copy by SHA-256 and write `manifest.json`. Covered by `tests/test_source_safety.py`. |
 | Response hardening | Security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a Content-Security-Policy. |
 
 ## Verifying your download

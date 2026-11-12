@@ -1,3 +1,5 @@
+> **AI Photo Curator fork.** This repository is a private-use fork of [kotyzap/Photo-Curator](https://github.com/kotyzap/Photo-Curator) v7.0 (MIT). Differences: source folders are never modified (no Blurred/ or Duplicates/ moves), exports are verified copies to a destination you choose, app data lives in `local-data/`. Setup: `uv sync`, run `uv run python photo_curator.py`, test `uv run pytest`. Project scope: `project-brief.md`; agent rules: `AGENTS.md`. The upstream README follows.
+
 # 📸 Photo Curator
 
 <img width="1503" height="744" alt="Photo-Curator-header" src="https://github.com/user-attachments/assets/7c3a22ff-b035-4feb-8d13-07f26dbf1879" />
