@@ -705,6 +705,8 @@ Design goals:
 - Simple actions
 - Transparent AI recommendations
 
+Decision 2026-11-13 (M9): the native app leads through one guide with four steps (Photos & Clocks, Selection, Story, Export), each reachable and editable at any time, with an album home that shows the next step and what goes into the album. Design and engine contract: `notes/m9-album-guide.md`.
+
 ## 12.1 Main navigation
 
 Suggested sections:

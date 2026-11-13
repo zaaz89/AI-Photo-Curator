@@ -133,6 +133,7 @@ struct ChapterCard: View {
         .padding(16)
         .card(hover: true)
         .onAppear { name = event.name }
+        .onDisappear { if focused { library.renameEvent(event.id, to: name) } }
         .onChange(of: event.name) { _, n in if !focused { name = n } }
     }
 
@@ -162,7 +163,8 @@ struct ChapterSheet: View {
                     Text(library.tr("chapterSheetLead")).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(library.tr("done")) { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
+                // Escape closes; Return stays with the description being written.
+                Button(library.tr("done")) { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.cancelAction)
             }
             .padding(24)
             ScrollView {
@@ -215,13 +217,17 @@ struct DescribedPhoto: View {
             TextField(library.tr("descPlaceholder"), text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(2...5)
+                .focused($focused)
                 .padding(10)
                 .background(.fill.quaternary, in: .rect(cornerRadius: 10))
-                .focused($focused)
+                .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: focused ? 2 : 0) }
+                .contentShape(.rect)
+                .onTapGesture { focused = true }          // the whole box starts editing, not only the text line
                 .onSubmit { save() }
                 .onChange(of: focused) { _, f in if !f { save() } }
         }
         .onAppear { text = photo.ai?.description ?? "" }
+        .onDisappear { save() }                      // the sheet closed while typing
         .onChange(of: photo.ai?.description) { _, d in if !focused { text = d ?? "" } }
     }
 

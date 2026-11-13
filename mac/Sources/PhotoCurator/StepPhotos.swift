@@ -91,6 +91,7 @@ struct SourceCard: View {
         .padding(16)
         .card()
         .onAppear { name = source.owner }
+        .onDisappear { if focused { library.renamePerson(source: source.id, to: name) } }
         .onChange(of: source.owner) { _, n in if !focused { name = n } }
     }
 
