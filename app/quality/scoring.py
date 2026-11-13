@@ -163,10 +163,10 @@ def weighted(scores: dict, weights: dict) -> float:
     return sum(max(0, float(weights.get(k, 0))) * float(scores.get(k, 0)) for k in CATEGORIES) / wsum
 
 
-def best_photos(conn, weights: Optional[dict] = None, topn: int = 50) -> list:
+def best_photos(conn, weights: Optional[dict] = None, topn: int = 50, keep_extra: frozenset = frozenset()) -> list:
     """Ranking like the upstream Rank step: blurry photos, non-keeper duplicates
     and photos the owner removed are left out; the rest is ordered by the
-    weighted score."""
+    weighted score. `keep_extra`: non-keeper frames the owner marked favourite stay in."""
     weights = {**DEFAULT_WEIGHTS, **(weights or {})}
     tiers = focus_tiers(conn)
     non_keepers = {r[0] for r in conn.execute(
@@ -180,7 +180,7 @@ def best_photos(conn, weights: Optional[dict] = None, topn: int = 50) -> list:
         "LEFT JOIN marks m ON m.sha256 = a.sha256 WHERE a.status = 'present'").fetchall()
     seen, ranked = set(), []
     for r in rows:
-        if r['sha256'] in seen or r['id'] in non_keepers or r['excluded'] or r['rejected']:
+        if r['sha256'] in seen or (r['id'] in non_keepers and r['id'] not in keep_extra) or r['excluded'] or r['rejected']:
             continue
         if tiers.get(r['id'], {}).get('tier') == 'blurry':
             continue

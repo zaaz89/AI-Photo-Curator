@@ -5,12 +5,22 @@ import SwiftUI
 
 /// Sidebar destinations.
 enum Destination: Hashable {
-    case overview, all, favourites, leftOut, videos, blurry, day(String), search
+    case home, step(GuideStep), all, favourites, leftOut, videos, blurry, day(String), search
+    /// The guide's pages (album home and the four steps), not a photo grid.
+    var isGuide: Bool {
+        switch self { case .home, .step: true; default: false }
+    }
+}
+
+/// The Selection step's three views.
+enum SelectionView: String, CaseIterable, Identifiable {
+    case moments, blurry, leftOut
+    var id: String { rawValue }
 }
 
 /// The sheets of the album assistant.
 enum AssistantSheet: String, Identifiable {
-    case newAlbum, moments, clocks, export
+    case newAlbum
     var id: String { rawValue }
 }
 
@@ -21,7 +31,12 @@ enum AssistantSheet: String, Identifiable {
 
     @Published var trips: [Trip] = []
     @Published var tripId: String? { didSet { if tripId != oldValue { tripChanged() } } }
-    @Published private(set) var photos: [Photo] = [] { didSet { recompute() } }
+    @Published private(set) var photos: [Photo] = [] {
+        didSet {
+            photoIndex = Dictionary(photos.indices.map { (photos[$0].id, $0) }, uniquingKeysWith: { a, _ in a })
+            recompute()
+        }
+    }
     @Published private(set) var events: [TripEvent] = [] { didSet { recompute() } }
     /// The trip `photos` belong to. Marks and moves are refused while it differs from `tripId`:
     /// photo ids are per trip, so an old id would hit another photo in the new trip.
@@ -53,7 +68,15 @@ enum AssistantSheet: String, Identifiable {
         default: return false
         }
     }
-    @Published var destination: Destination = .overview { didSet { if destination != oldValue { clearSelection(); recompute() } } }
+    /// The four steps' state (done, waiting decisions), recomputed with the overview.
+    var stepStates: [GuideStep: StepState] {
+        var s = CuratorCore.stepStates(overview, marked: steps, analysing: analysing)
+        if steps["export"] == true { s[.export]?.done = true }
+        return s
+    }
+    var next: GuideStep? { nextStep(stepStates) }
+    @Published var selectionView: SelectionView = .moments
+    @Published var destination: Destination = .home { didSet { if destination != oldValue { clearSelection(); recompute() } } }
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
     @Published var cursor: Int = -1                     // flat index into `flat`
@@ -110,7 +133,7 @@ enum AssistantSheet: String, Identifiable {
         clearSelection()
         searchResult = nil
         searchText = ""
-        destination = .overview
+        destination = .home
         if let tripId { UserDefaults.standard.set(tripId, forKey: "trip") }
         Task { await reload() }
     }
@@ -146,7 +169,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return .leftOut
         case .videos: return .videos
         case .blurry: return .blurry
-        case .overview: return .all
+        case .home, .step: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -166,7 +189,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
         case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
-        case .overview: return 0
+        case .home, .step: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -325,6 +348,92 @@ enum AssistantSheet: String, Identifiable {
         }
         photos = copy
         trimSelection()
+    }
+
+    // MARK: M9 editing
+
+    func photo(_ id: Int) -> Photo? { photoIndex[id].map { photos[$0] } }
+    private var photoIndex: [Int: Int] = [:]
+    var albumName: String { trips.first { $0.id == tripId }?.name ?? "" }
+
+    /// Runs one engine change, then reloads; errors become the message.
+    func change(_ work: @escaping @Sendable (APIClient, String) async throws -> Void) {
+        guard let tripId else { return }
+        enqueue { api in try await work(api, tripId) }
+    }
+
+    func renameAlbum(_ name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let tripId, !n.isEmpty, n != albumName else { return }
+        Task {
+            do { try await api.renameAlbum(trip: tripId, name: n); trips = (try? await api.trips()) ?? trips }
+            catch { message = describe(error) }
+        }
+    }
+
+    func renamePerson(source: Int, to name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, sources.first(where: { $0.id == source })?.owner != n else { return }
+        change { api, trip in try await api.renamePerson(trip: trip, source: source, owner: n) }
+    }
+
+    func renameEvent(_ event: Int, to name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, events.first(where: { $0.id == event })?.name != n else { return }
+        change { api, trip in try await api.renameEvent(trip: trip, event: event, name: n) }
+    }
+
+    func mergeWithPrevious(_ event: Int) {
+        change { api, trip in try await api.mergeWithPrevious(trip: trip, event: event) }
+    }
+
+    func newChapter(at photo: Int) {
+        change { api, trip in try await api.splitEvent(trip: trip, at: photo) }
+    }
+
+    func resetChapters(day: String) {
+        change { api, trip in try await api.resetDay(trip: trip, day: day) }
+    }
+
+    func setDescription(_ photo: Int, _ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard self.photo(photo)?.ai?.description != t || t.isEmpty else { return }
+        change { api, trip in try await api.setDescription(trip: trip, photo: photo, text: t) }
+    }
+
+    /// Favourite on a frame of a moment: it goes to the album too, next to the chosen one.
+    func toggleKeepToo(_ id: Int) {
+        guard let p = photo(id) else { return }
+        mark([p], ["favorite": .bool(!p.favorite), "rejected": .bool(false)], name: tr("keepToo"))
+    }
+
+    func setLeftOut(_ ids: [Int], _ out: Bool) {
+        let items = ids.compactMap(photo).filter { $0.rejected != out }
+        mark(items, ["rejected": .bool(out)], name: tr(out ? "leaveOut" : "keep"))
+    }
+
+    /// Adds folders to the open album and analyses again (only the new photos are read).
+    func addFolders(_ urls: [URL]) {
+        guard let tripId, !urls.isEmpty else { return }
+        Task {
+            do {
+                let s = try await api.suggest(paths: urls.map(\.path))
+                for r in s.rejected { message = "\(URL(fileURLWithPath: r.path).lastPathComponent): \(trOr("problem_" + r.problem, r.problem))" }
+                for f in s.folders { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? f.path.split(separator: "/").last.map(String.init) ?? "?" : f.owner) }
+                if !s.folders.isEmpty { try await api.startAnalysis(trip: tripId); await reload(); await pollOnce() }
+            } catch { message = describe(error) }
+        }
+    }
+
+    /// The guide's Next: marks this step's checklist entries done and opens the next step.
+    func finishStep(_ step: GuideStep) {
+        guard let tripId else { return }
+        for w in step.workflowSteps where w != "export" { steps[w] = true }
+        Task {
+            for w in step.workflowSteps where w != "export" { try? await api.setStep(trip: tripId, step: w, done: true) }
+            overview = (try? await api.overview(trip: tripId)) ?? overview
+        }
+        destination = step.next.map { .step($0) } ?? .home
     }
 
     // MARK: events

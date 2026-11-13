@@ -225,6 +225,14 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL
     );
     """,
+    # 9: the owner's own description of a photo, by content, so it survives re-indexing (M9)
+    """
+    CREATE TABLE owner_descriptions (
+        sha256     TEXT PRIMARY KEY,
+        text       TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

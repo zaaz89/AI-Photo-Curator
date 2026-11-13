@@ -55,7 +55,11 @@ def timeline(conn: sqlite3.Connection) -> dict:
                           'WHERE error IS NULL ORDER BY created_at'):
         ai[r['sha256']] = {'model': r['model'], 'description': tidy_description(r['description']),
                            'tags': json.loads(r['tags_json'] or '[]'), 'people': r['people'],
-                           'text_visible': r['text_visible']}
+                           'text_visible': r['text_visible'], 'edited': False}
+    from app.ai.owner_text import owner_descriptions
+    for sha, text in owner_descriptions(conn).items():           # the owner's text wins
+        ai[sha] = {**(ai.get(sha) or {'model': 'owner', 'tags': [], 'people': None, 'text_visible': None}),
+                   'description': text, 'edited': True}
 
     items = []
     for r in rows:

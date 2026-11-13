@@ -52,6 +52,19 @@ def create_collection():
     return jsonify({'ok': True, 'id': slug})
 
 
+@bp.route('/api/collections/<cid>', methods=['PATCH'])
+def rename_album(cid):
+    name = (request.get_json(silent=True) or {}).get('name')
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
+        return _err('name must be 1 to 120 characters')
+    conn, err = _open(cid)
+    if err:
+        return err
+    with conn:
+        conn.execute('UPDATE collection SET name = ? WHERE id = 1', (name.strip(),))
+    return jsonify({'ok': True, 'id': cid, 'name': name.strip()})
+
+
 @bp.route('/api/collections/<cid>', methods=['DELETE'])
 def finish_album(cid):
     """"Finish album": remove the app's working data for this album. Photo folders are never touched."""
@@ -250,6 +263,22 @@ def ai_status():
                     'search_ready': (models_dir() / 'huggingface').exists(),
                     'faces_ready': helper_available(),
                     'vlm': vlm.status()})
+
+
+@bp.route('/api/collections/<cid>/assets/<int:aid>/description', methods=['POST'])
+def set_description(cid, aid):
+    """The owner's own description of a photo (by content); empty text removes it."""
+    from app.ai.owner_text import set_owner_description
+    conn, err = _open(cid)
+    if err:
+        return err
+    try:
+        text = set_owner_description(conn, aid, (request.get_json(silent=True) or {}).get('text'))
+    except LookupError as e:
+        return _err(str(e), 404)
+    except ValueError as e:
+        return _err(str(e))
+    return jsonify({'ok': True, 'description': text, 'edited': text is not None})
 
 
 @bp.route('/api/collections/<cid>/search')

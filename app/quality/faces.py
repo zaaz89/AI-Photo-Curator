@@ -46,9 +46,37 @@ def _run(mode: str, paths: list[str], extra: Optional[list[str]] = None, timeout
     return out
 
 
+MIN_FACE_AREA = 0.0004   # ignore tiny background faces
+MAX_BOXES = 6
+
+
+def _usable(faces: list) -> list:
+    return [f for f in faces or [] if f.get('box') and f['box'][2] * f['box'][3] >= MIN_FACE_AREA]
+
+
+def _eye_closed(f: dict) -> bool:
+    eyes = [e for e in (f.get('left_eye'), f.get('right_eye')) if e is not None]
+    return bool(eyes) and min(eyes) < EYE_CLOSED
+
+
+def _looking_away(f: dict) -> bool:
+    return abs(f.get('yaw') or 0.0) > LOOK_AWAY_RAD
+
+
+def face_boxes(faces: list, limit: int = MAX_BOXES) -> list:
+    """Up to `limit` faces as {x, y, w, h, eyes_closed, looking_away}, normalised to the image with the
+    origin at the top left. The helper stores Apple Vision's boundingBox (origin bottom left), so y is flipped."""
+    out = []
+    for f in _usable(faces)[:limit]:
+        x, y, w, h = (float(v) for v in f['box'])
+        out.append({'x': round(x, 4), 'y': round(1.0 - (y + h), 4), 'w': round(w, 4), 'h': round(h, 4),
+                    'eyes_closed': _eye_closed(f), 'looking_away': _looking_away(f)})
+    return out
+
+
 def face_summary(faces: list) -> Optional[dict]:
-    """Per photo: counts and a 0-1 face score, or None when there are no faces."""
-    faces = [f for f in faces or [] if f.get('box') and f['box'][2] * f['box'][3] >= 0.0004]   # ignore tiny background faces
+    """Per photo: counts, a 0-1 face score and the face boxes, or None when there are no faces."""
+    faces = _usable(faces)
     if not faces:
         return None
     closed, away, scores = 0, 0, []
@@ -56,17 +84,17 @@ def face_summary(faces: list) -> Optional[dict]:
         eyes = [e for e in (f.get('left_eye'), f.get('right_eye')) if e is not None]
         eye = min(eyes) if eyes else None
         eye_ok = 1.0 if eye is None or eye >= EYE_OPEN else max(0.0, (eye - EYE_CLOSED) / (EYE_OPEN - EYE_CLOSED))
-        if eye is not None and eye < EYE_CLOSED:
+        if _eye_closed(f):
             closed += 1
         yaw = abs(f.get('yaw') or 0.0)
         facing = max(0.0, 1.0 - yaw / (2 * LOOK_AWAY_RAD))
-        if yaw > LOOK_AWAY_RAD:
+        if _looking_away(f):
             away += 1
         q = f.get('quality')
         q = 0.5 if q is None else q
         scores.append(0.45 * q + 0.35 * eye_ok + 0.20 * facing)
     return {'faces': len(faces), 'eyes_closed': closed, 'looking_away': away,
-            'score': round(sum(scores) / len(scores), 3)}
+            'score': round(sum(scores) / len(scores), 3), 'boxes': face_boxes(faces)}
 
 
 def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:

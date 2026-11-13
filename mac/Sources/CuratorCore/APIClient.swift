@@ -201,13 +201,51 @@ public final class APIClient: Sendable {
         try await post("api/collections/\(trip)/describe", [:], as: OK.self)
     }
 
-    public func exportPreview(trip: String) async throws -> ExportPreview {
-        try await post("api/collections/\(trip)/export/preview", ["preset": "google_photos"])
+    public func exportPreview(trip: String, choice: ExportChoice = ExportChoice()) async throws -> ExportPreview {
+        try await post("api/collections/\(trip)/export/preview", choice.body)
     }
 
-    /// Starts the Google Photos export into `destination` (a folder outside the photo folders).
-    public func startExport(trip: String, destination: String) async throws {
-        try await post("api/collections/\(trip)/export", ["preset": "google_photos", "dest": destination], as: OK.self)
+    /// Starts the export into `destination` (a folder outside the photo folders).
+    public func startExport(trip: String, destination: String, choice: ExportChoice = ExportChoice()) async throws {
+        var body = choice.body
+        body["dest"] = destination
+        try await post("api/collections/\(trip)/export", body, as: OK.self)
+    }
+
+    // MARK: M9 editing
+
+    func patch(_ path: String, _ body: [String: Any]) async throws {
+        var r = URLRequest(url: url(path))
+        r.httpMethod = "PATCH"
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let _: OK = try await send(r)
+    }
+
+    public func renameAlbum(trip: String, name: String) async throws {
+        try await patch("api/collections/\(trip)", ["name": name])
+    }
+
+    public func renamePerson(trip: String, source: Int, owner: String) async throws {
+        try await patch("api/collections/\(trip)/sources/\(source)", ["owner": owner])
+    }
+
+    public func renameEvent(trip: String, event: Int, name: String) async throws {
+        try await post("api/collections/\(trip)/events/\(event)", ["action": "rename", "name": name], as: OK.self)
+    }
+
+    public func mergeWithPrevious(trip: String, event: Int) async throws {
+        try await post("api/collections/\(trip)/events/\(event)", ["action": "merge_previous"], as: OK.self)
+    }
+
+    /// A new chapter starts at this photo.
+    public func splitEvent(trip: String, at photo: Int) async throws {
+        try await post("api/collections/\(trip)/events/split", ["asset_id": photo], as: OK.self)
+    }
+
+    /// The owner's own description; an empty text brings back the AI's.
+    public func setDescription(trip: String, photo: Int, text: String) async throws {
+        try await post("api/collections/\(trip)/assets/\(photo)/description", ["text": text], as: OK.self)
     }
 
     public func jobStatus(trip: String) async throws -> JobStatus {

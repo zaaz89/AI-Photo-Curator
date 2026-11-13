@@ -26,11 +26,19 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         enum CodingKeys: String, CodingKey { case tier, override, autoTier = "auto_tier" }
     }
     public struct Faces: Decodable, Hashable, Sendable {
+        /// One face, normalised to the image, origin top-left (M9).
+        public struct Box: Decodable, Hashable, Sendable {
+            public let x: Double, y: Double, w: Double, h: Double
+            public let eyesClosed: Bool?
+            public let lookingAway: Bool?
+            enum CodingKeys: String, CodingKey { case x, y, w, h, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
+        }
         public let faces: Int
         public let eyesClosed: Int
         public let lookingAway: Int
         public let score: Double?
-        enum CodingKeys: String, CodingKey { case faces, score, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
+        public let boxes: [Box]?
+        enum CodingKeys: String, CodingKey { case faces, score, boxes, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
     }
     public struct Duplicate: Decodable, Hashable, Sendable {
         public let group: Int
@@ -41,7 +49,9 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         public let description: String?
         public let tags: [String]?
         public let textVisible: String?
-        enum CodingKeys: String, CodingKey { case description, tags, textVisible = "text_visible" }
+        /// The description is the owner's own text (M9).
+        public let edited: Bool?
+        enum CodingKeys: String, CodingKey { case description, tags, edited, textVisible = "text_visible" }
     }
 
     public let id: Int
