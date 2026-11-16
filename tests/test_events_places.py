@@ -115,6 +115,7 @@ def test_place_aliases_help_search(tmp_path, monkeypatch):
     try:
         a, conn = _trip(tmp_path)
         analyze_collection(conn)
+        embeddings.compute_embeddings(conn)         # the first search builds it in the app (M9)
         res = search_mod.search(conn, 'Firence')
         top = res['results'][0]
         assert top['place_match'] and top['filename'] in ('IMG_1.JPG', 'IMG_2.JPG', 'IMG_4.JPG')

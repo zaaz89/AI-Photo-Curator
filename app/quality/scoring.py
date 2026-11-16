@@ -18,7 +18,10 @@ tier; overrides are marks only and never move files.
 from __future__ import annotations
 
 import json
+import os
 import time
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
 from typing import Callable, Optional
 
 import cv2
@@ -87,6 +90,37 @@ def analyze_file(path: str) -> Optional[dict]:
             'scores': {k: round(float(v), 2) for k, v in scores.items()}}
 
 
+# Focus scoring is plain CPU work (no AI model): it runs on several cores at once and does not use the
+# AI duty cycle; thermal and battery pauses still apply (M9 speed-up, owner's OK 2026-11-16).
+WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))
+PARALLEL_FROM = 6                  # fewer photos: one process is faster than starting workers
+
+
+def _analyze_safe(path: str) -> Optional[dict]:
+    try:
+        return analyze_file(path)
+    except Exception:
+        return None
+
+
+def _scored(paths: list, cancelled: Callable[[], bool]):
+    """(path, result) in order; several worker processes for larger albums."""
+    if len(paths) < PARALLEL_FROM or WORKERS == 1:
+        for p in paths:
+            if cancelled():
+                return
+            yield p, _analyze_safe(p)
+        return
+    ex = ProcessPoolExecutor(WORKERS, mp_context=get_context('spawn'))
+    try:
+        for p, res in zip(paths, ex.map(_analyze_safe, paths, chunksize=2)):
+            yield p, res
+            if cancelled():
+                return
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+
 def compute_quality(conn, progress: Optional[Callable] = None,
                     cancelled: Callable[[], bool] = lambda: False) -> dict:
     from app.ai.throttle import Throttle
@@ -94,19 +128,16 @@ def compute_quality(conn, progress: Optional[Callable] = None,
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM quality) GROUP BY a.sha256').fetchall()
-    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
     done = failed = 0
-    for i, r in enumerate(rows):
-        if cancelled():
-            break
+    sha_of = {r['path']: r['sha256'] for r in rows}
+    if progress and rows:
+        progress('Focus and ranking scores', 0, len(rows))
+    for i, (path, res) in enumerate(_scored([r['path'] for r in rows], cancelled)):
         if progress:
-            progress('Focus and ranking scores', i, len(rows))
-        t0 = time.time()
-        try:
-            res = analyze_file(r['path'])
-        except Exception:
-            res = None
-        busy = time.time() - t0
+            progress('Focus and ranking scores', i + 1, len(rows))
+        busy = 0.0
+        r = {'sha256': sha_of[path]}
         if res is None:
             failed += 1
         else:

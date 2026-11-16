@@ -28,10 +28,6 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
     res['faces'] = compute_faces(conn, progress, cancelled)
     res['videos'] = compute_videos(conn, progress, cancelled)
     res['duplicate_groups'] = build_groups(conn, progress, cancelled)
-    # Search index (M3). Optional: without the local model the rest still works.
-    from app.ai.embeddings import ModelUnavailable, compute_embeddings
-    try:
-        res['search_index'] = compute_embeddings(conn, progress, cancelled)
-    except ModelUnavailable as e:
-        res['search_index'] = {'skipped': str(e)}
+    # The search index (M3) is no longer built here: the first search builds it (M9 speed-up, owner's OK
+    # 2026-11-16), so an album is ready to work on sooner and albums nobody searches never pay for it.
     return res

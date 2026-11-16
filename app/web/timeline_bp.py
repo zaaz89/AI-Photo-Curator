@@ -267,15 +267,42 @@ def ai_status():
 
 @bp.route('/api/collections/<cid>/search')
 def search_photos(cid):
+    """Searches the album. The first search builds the search index in the background and answers
+    {"preparing": true}; the app searches again when that job ends."""
     conn, err = _open(cid)
     if err:
         return err
-    from app.ai.embeddings import ModelUnavailable
+    from app.ai.embeddings import ModelUnavailable, missing_embeddings
     from app.ai.search import search
+    missing = missing_embeddings(conn)
+    if missing:
+        with _job_lock:
+            if not _job['running']:
+                _job.update(running=True, collection=cid, kind='search_index', status='Preparing search…', progress=0,
+                            result=None, error=None, cancel=False, started=time.time())
+                threading.Thread(target=_run_search_index, args=(cid,), daemon=True).start()
+        return jsonify({'preparing': True, 'missing': missing, 'query': request.args.get('q', ''), 'results': []})
     try:
         return jsonify(search(conn, request.args.get('q', ''), translate=request.args.get('translate') != '0'))
     except ModelUnavailable as e:
         return _err(str(e), 503)
+
+
+def _run_search_index(cid):
+    def progress(msg, i, n):
+        _job['status'] = msg if not n else f'{msg} ({i}/{n})'
+        _job['progress'] = int(i / n * 100) if n else _job['progress']
+    try:
+        from app.ai.embeddings import compute_embeddings
+        _job['result'] = {'search_index': compute_embeddings(col.open_db(cid), progress,
+                                                             cancelled=lambda: _job['cancel'])}
+        _job['status'] = 'Search ready'
+        _job['progress'] = 100
+    except Exception as e:
+        _job['error'] = str(e)
+        _job['status'] = f'Error: {e}'
+    finally:
+        _job['running'] = False
 
 
 def _run_describe(cid, limit):

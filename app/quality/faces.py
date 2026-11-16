@@ -22,6 +22,7 @@ EYE_CLOSED = 0.12        # eye contour height / width; below this the eye is tre
 EYE_OPEN = 0.18
 LOOK_AWAY_RAD = 0.6      # about 35 degrees of head turn
 BATCH = 12
+FACE_WORKERS = 3
 
 
 def helper_path() -> Path:
@@ -105,17 +106,29 @@ def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM faces) GROUP BY a.sha256').fetchall()
-    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
+    # Apple Vision face detection is light: no AI duty cycle, and a few batches run at once
+    # (thermal and battery pauses still apply; M9 speed-up, owner's OK 2026-11-16).
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
     done = 0
-    for i in range(0, len(rows), BATCH):
+    chunks = [rows[i:i + BATCH] for i in range(0, len(rows), BATCH)]
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(FACE_WORKERS)
+    try:
+        futures = [pool.submit(_run, 'faces', [c['path'] for c in chunk]) for chunk in chunks]
+    except Exception:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    for i, (chunk, fut) in enumerate(zip(chunks, futures)):
         if cancelled():
+            pool.shutdown(wait=False, cancel_futures=True)
             break
-        chunk = rows[i:i + BATCH]
         if progress:
-            progress('Faces (Apple Vision)', i, len(rows))
-        t0 = time.time()
-        res = {r['path']: r for r in _run('faces', [c['path'] for c in chunk])}
-        busy = time.time() - t0
+            progress('Faces (Apple Vision)', i * BATCH, len(rows))
+        try:
+            res = {r['path']: r for r in fut.result()}
+        except Exception:
+            res = {}
+        busy = 0.0
         with conn:
             for c in chunk:
                 r = res.get(c['path'])
@@ -126,6 +139,7 @@ def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable
                              (c['sha256'], len(faces), json.dumps(faces), now_iso()))
                 done += 1
         throttle.after_work(busy)
+    pool.shutdown(wait=False, cancel_futures=True)
     return {'analysed': done}
 
 
