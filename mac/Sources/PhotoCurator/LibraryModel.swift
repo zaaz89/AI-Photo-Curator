@@ -416,9 +416,49 @@ enum AssistantSheet: String, Identifiable {
         mark(items, ["rejected": .bool(out)], name: tr(out ? "leaveOut" : "keep"))
     }
 
-    /// Blurry photos: "keep" must be what the export reads, so a kept blurry photo gets the owner's focus
-    /// mark "soft" (acceptable) besides not being left out; "leave out" marks it left out.
-    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) {
+    /// Puts photos into the album or leaves them out, by the export's own rule: a kept blurry photo gets the
+    /// owner's focus mark "soft", a kept extra frame of a moment becomes a favourite ("keep too").
+    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) { setInAlbum(ids, inAlbum) }
+
+    // MARK: quick review (M10)
+
+    /// The quick review on screen, and what it goes through.
+    @Published var reviewFilter: ReviewFilter?
+    /// ⌘Z during the quick review means Back (the review restores the photo and shows it again).
+    @Published var reviewUndoRequest = 0
+    /// ⌘/ in the quick review: the keys card.
+    func startReview(_ f: ReviewFilter = .all) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }
+
+    /// A photo's marks before a quick-review decision (Back restores them exactly).
+    func marksOf(_ id: Int) -> [String: MarkValue] {
+        guard let p = photo(id) else { return [:] }
+        return ["favorite": .bool(p.favorite), "rejected": .bool(p.rejected),
+                "focus": p.focus?.override.map { .string($0) } ?? .null]
+    }
+
+    /// Back in the quick review: the photo gets its earlier marks again.
+    func restore(_ id: Int, _ previous: [String: MarkValue]) {
+        guard let p = photo(id), !previous.isEmpty else { return }
+        mark([p], previous, name: tr("back"))
+    }
+
+    func toggleFavourite(_ id: Int) {
+        guard let p = photo(id) else { return }
+        mark([p], ["favorite": .bool(!p.favorite), "rejected": .bool(false)], name: tr("favourite"))
+    }
+
+    /// Where the last quick review of this album stopped (photo id), per filter.
+    func reviewBookmark(_ f: ReviewFilter) -> Int? {
+        guard let tripId else { return nil }
+        let v = UserDefaults.standard.integer(forKey: "review.\(tripId).\(f.rawValue)")
+        return v == 0 ? nil : v
+    }
+    func setReviewBookmark(_ f: ReviewFilter, _ id: Int?) {
+        guard let tripId else { return }
+        UserDefaults.standard.set(id ?? 0, forKey: "review.\(tripId).\(f.rawValue)")
+    }
+
+    func setInAlbum(_ ids: [Int], _ inAlbum: Bool) {
         let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
         if inAlbum {
             // An extra frame of a moment only goes in as a favourite ("keep too"); a blurry one needs the focus mark.

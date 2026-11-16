@@ -9,10 +9,16 @@ struct StepSelection: View {
     var body: some View {
         StepPage(step: .selection, lead: library.tr("lead_selection"), status: status, scrolls: false) {
             VStack(spacing: 16) {
-                Picker("", selection: $library.selectionView) {
-                    ForEach(SelectionView.allCases) { v in Text(label(v)).tag(v) }
+                HStack(spacing: 14) {
+                    Picker("", selection: $library.selectionView) {
+                        ForEach(SelectionView.allCases) { v in Text(label(v)).tag(v) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 560)
+                    Button { library.startReview() } label: {
+                        Label(library.tr("quickReview") + "  ⌘R", systemImage: "rectangle.stack.badge.play")
+                    }
+                    .buttonStyle(.glassProminent).help(library.tr("quickReviewHelp"))
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 560)
                 .padding(.horizontal, 8)
                 Group {
                     switch library.selectionView {

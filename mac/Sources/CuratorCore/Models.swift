@@ -38,7 +38,10 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
             public let x: Double, y: Double, w: Double, h: Double
             public let eyesClosed: Bool?
             public let lookingAway: Bool?
-            enum CodingKeys: String, CodingKey { case x, y, w, h, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
+            /// M10: "open" | "closed" | "unsure", and whether this is one of the photo's main faces.
+            public let state: String?
+            public let main: Bool?
+            enum CodingKeys: String, CodingKey { case x, y, w, h, state, main, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
         }
         public let faces: Int
         public let eyesClosed: Int
@@ -51,6 +54,16 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         public let group: Int
         public let category: String
         public let keeper: Bool?
+    }
+    /// M10 quality check: blur judged on the subject (bokeh is not a fault), Apple's aesthetics score,
+    /// utility images (screenshots, receipts, documents) and stable reason codes.
+    public struct Quality: Decodable, Hashable, Sendable {
+        public let blur: String?
+        public let blurReason: String?
+        public let aesthetic: Double?
+        public let utility: Bool?
+        public let reasons: [String]?
+        enum CodingKeys: String, CodingKey { case blur, aesthetic, utility, reasons, blurReason = "blur_reason" }
     }
     public struct AI: Decodable, Hashable, Sendable {
         public let description: String?
@@ -84,11 +97,12 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
     public let faces: Faces?
     public let duplicate: Duplicate?
     public let ai: AI?
+    public let quality: Quality?
     public let notes: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, filename, path, kind, owner, device, confidence, favorite, rejected, wallpaper, width, height, duration,
-             poster, place, focus, faces, duplicate, ai, notes
+             poster, place, focus, faces, duplicate, ai, quality, notes
         case sourceId = "source_id", localTime = "local_time", correctedLocalTime = "corrected_local_time",
              utcTime = "utc_time", offsetMinutes = "offset_minutes", eventId = "event_id"
     }
@@ -120,6 +134,7 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         faces = try c.decodeIfPresent(Faces.self, forKey: .faces)
         duplicate = try c.decodeIfPresent(Duplicate.self, forKey: .duplicate)
         ai = try c.decodeIfPresent(AI.self, forKey: .ai)
+        quality = try c.decodeIfPresent(Quality.self, forKey: .quality)
         notes = try c.decodeIfPresent([String].self, forKey: .notes)
     }
 

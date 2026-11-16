@@ -66,6 +66,30 @@ struct AppCommands: Commands {
             Button(library.tr("newTrip")) { library.sheet = .newAlbum }.keyboardShortcut("n")
             Button(library.tr("stop")) { library.stopJob() }.disabled(!library.job.running)
         }
+        CommandMenu(library.tr("guide")) {
+            Button(library.tr("quickReview")) { library.startReview() }.keyboardShortcut("r")
+            Button(library.tr("quickReviewUnsure")) { library.startReview(.unsure) }.keyboardShortcut("r", modifiers: [.command, .shift])
+            Divider()
+            Button(library.tr("albumHome")) { library.reviewFilter = nil; library.destination = .home }.keyboardShortcut("0")
+            ForEach(GuideStep.allCases) { s in
+                Button("\(s.number). " + library.tr("step_" + s.rawValue)) { library.reviewFilter = nil; library.destination = .step(s) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(s.number)")))
+            }
+            Button(library.tr("step_photos")) { library.reviewFilter = nil; library.destination = .people }.keyboardShortcut("4")
+            Divider()
+            Button(library.tr("allPhotos")) { library.reviewFilter = nil; library.destination = .all }.keyboardShortcut("5")
+            Button(library.tr("leftOut")) { library.reviewFilter = nil; library.destination = .leftOut }.keyboardShortcut("6")
+        }
+        CommandGroup(replacing: .undoRedo) {
+            // In the quick review ⌘Z is Back: it shows the photo again and undoes its decision.
+            Button(library.reviewFilter != nil ? library.tr("back") : (library.undoManager?.undoMenuItemTitle ?? library.tr("undo"))) {
+                if library.reviewFilter != nil { library.reviewUndoRequest += 1 } else { library.undoManager?.undo() }
+            }
+            .keyboardShortcut("z")
+            Button(library.undoManager?.redoMenuItemTitle ?? library.tr("redo")) { library.undoManager?.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(library.reviewFilter != nil)
+        }
         CommandGroup(after: .textEditing) {
             Button(library.tr("find")) { library.searchFocusRequest += 1 }.keyboardShortcut("f")
         }

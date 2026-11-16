@@ -132,6 +132,13 @@ struct NextCard: View {
                     }
                     .buttonStyle(.glassProminent).controlSize(.extraLarge).tint(step.tint)
                     .padding(.top, 6)
+                    if step == .selection {
+                        Button { library.startReview() } label: {
+                            Label(library.tr("quickReviewAll"), systemImage: "rectangle.stack.badge.play")
+                        }
+                        .buttonStyle(.glass).controlSize(.large)
+                        .help(library.tr("quickReviewHelp"))
+                    }
                 }
                 Spacer(minLength: 0)
                 PhotoMosaic(photos: photos(step)).frame(width: 320, height: 200)
