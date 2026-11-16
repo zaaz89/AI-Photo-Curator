@@ -24,13 +24,28 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         public let autoTier: String?
         public let override: String?
         enum CodingKeys: String, CodingKey { case tier, override, autoTier = "auto_tier" }
+        public init(tier: String, autoTier: String?, override: String?) {
+            self.tier = tier; self.autoTier = autoTier; self.override = override
+        }
+        /// The same photo with the owner's focus mark set (nil: back to the automatic tier).
+        public func overridden(_ mark: String?) -> Focus {
+            Focus(tier: mark ?? autoTier ?? tier, autoTier: autoTier, override: mark)
+        }
     }
     public struct Faces: Decodable, Hashable, Sendable {
+        /// One face, normalised to the image, origin top-left (M9).
+        public struct Box: Decodable, Hashable, Sendable {
+            public let x: Double, y: Double, w: Double, h: Double
+            public let eyesClosed: Bool?
+            public let lookingAway: Bool?
+            enum CodingKeys: String, CodingKey { case x, y, w, h, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
+        }
         public let faces: Int
         public let eyesClosed: Int
         public let lookingAway: Int
         public let score: Double?
-        enum CodingKeys: String, CodingKey { case faces, score, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
+        public let boxes: [Box]?
+        enum CodingKeys: String, CodingKey { case faces, score, boxes, eyesClosed = "eyes_closed", lookingAway = "looking_away" }
     }
     public struct Duplicate: Decodable, Hashable, Sendable {
         public let group: Int
@@ -122,6 +137,16 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         return String(t.dropFirst(11).prefix(5))
     }
     public var isVideo: Bool { kind == "video" }
+    /// The app found it blurry (whatever the owner decided since).
+    public var foundBlurry: Bool { focus?.autoTier == "blurry" || focus?.tier == "blurry" }
+    /// Another frame of a moment whose best frame was chosen (the export skips it unless it is a favourite).
+    public var isExtraFrame: Bool {
+        guard let d = duplicate, ["exact", "near"].contains(d.category) else { return false }
+        return d.keeper == false
+    }
+    /// The Google Photos export takes it (same rule as the engine's export plan): not left out, and, unless it
+    /// is a favourite, neither blurry (by the owner's focus mark when there is one) nor an extra frame.
+    public var goesToAlbumDespiteFocus: Bool { !rejected && (favorite || (focus?.tier != "blurry" && !isExtraFrame)) }
     public var fileURL: URL { URL(fileURLWithPath: path) }
 }
 
@@ -174,4 +199,6 @@ public struct SearchResult: Decodable, Sendable {
     public let english: String?
     public let results: [Hit]
     public let note: String?
+    /// The first search of an album builds the search index in the background (M9); search again after it.
+    public let preparing: Bool?
 }

@@ -219,5 +219,6 @@ def test_google_photos_export_writes_into_copies_only(trip, tmp_path):
     out = json.loads(subprocess.run(['exiftool', '-j', '-r', '-XMP-dc:Description', '-XMP-xmp:Rating', res.job_dir],
                                     capture_output=True, text=True, timeout=60).stdout)
     by_name = {Path(o['SourceFile']).name: o for o in out}
-    assert any(o.get('Description') == 'A stone church at noon.' for o in by_name.values())
+    # No description is written (decided 2026-11-16: Google Photos writes its own), even with an AI text.
+    assert not any(o.get('Description') for o in by_name.values())
     assert any(o.get('Rating') == 5 for o in by_name.values())

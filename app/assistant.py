@@ -6,6 +6,7 @@ GeoNames index. The overview summarises what still needs the owner's decision.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from collections import Counter
@@ -165,10 +166,6 @@ def overview(conn, job: dict | None = None) -> dict:
         elif (r.get('margin') or 0) >= 0.12:
             decided += 1
 
-    # Other frames of a decided moment are not exported (same rule as the export plan).
-    extra_frames = {r[0] for r in conn.execute(
-        "SELECT m.asset_id FROM duplicate_members m JOIN duplicate_groups g ON g.id = m.group_id "
-        "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")}
     tiers = focus_tiers(conn)
     blurry = [i for i, t in tiers.items() if t['tier'] == 'blurry']
     days = conn.execute("SELECT COUNT(DISTINCT day) FROM events").fetchone()[0]
@@ -181,6 +178,7 @@ def overview(conn, job: dict | None = None) -> dict:
     minutes = -(-left * SECONDS_PER_DESCRIPTION * 30 // share // 60) if left else 0
     exported = conn.execute("SELECT done FROM workflow WHERE step = 'export'").fetchone()
     people = conn.execute('SELECT COUNT(*) FROM sources').fetchone()[0]
+    plan = _plan(conn)
     top = [r[0] for r in conn.execute(
         f"SELECT p.label FROM assets a JOIN places p ON p.asset_id = a.id WHERE {present} AND p.precision = 'in' "
         "GROUP BY p.label ORDER BY COUNT(*) DESC LIMIT 3")] if _has(conn, 'places') else []
@@ -195,17 +193,96 @@ def overview(conn, job: dict | None = None) -> dict:
                    'kept_favourites': sum(1 for i in blurry if i in favourite and i not in rejected)},
         'events': {'events': events, 'days': days},
         'descriptions': {'done': described, 'photos': images, 'minutes_left': minutes},
-        'export': {'done': bool(exported and exported[0]), 'photos': _export_count(conn)},
+        'export': {'done': bool(exported and exported[0]), 'photos': plan['photo_counts']['in_album'] if plan else 0},
+        **_safe_album_summary(conn, plan),
     }
 
 
-def _export_count(conn) -> int:
-    """Exactly what "Export for Google Photos" will copy."""
+def _plan(conn):
+    """The plan "Export for Google Photos" will copy, or None when it cannot be built."""
     from app.organization.export_plan import google_photos_options, plan_export
     try:
-        return plan_export(conn, **google_photos_options())['files']
+        return plan_export(conn, **google_photos_options())
     except Exception:
-        return 0
+        return None
+
+
+EMPTY_SUMMARY = {'taken': 0, 'left_out': 0, 'blurry': 0, 'extra_frames': 0, 'in_album': 0}
+
+
+def _safe_album_summary(conn, plan) -> dict:
+    """The summary must never take the whole overview down (the app would show "still analysing" forever)."""
+    try:
+        return _album_summary(conn, plan)
+    except Exception:
+        logging.getLogger(__name__).exception('album summary failed; the overview shows an empty funnel')
+        return {'funnel': dict(EMPTY_SUMMARY), 'people': [], 'cover_id': None, 'highlights': []}
+
+
+def _album_summary(conn, plan) -> dict:
+    """funnel, people, cover_id, highlights (M9), all derived from the same plan as the export.
+
+    funnel: taken == left_out + blurry + extra_frames + in_album, counted by photo: a paired secondary (Live Photo
+    video, RAW/JPEG partner) is not counted on its own (see export_plan's photo_counts). The Google Photos preset
+    uses selection 'no_blurry', so 'not_selected' is 0; it is added to 'blurry' to keep the identity.
+    """
+    if plan is None:
+        funnel = dict(EMPTY_SUMMARY)
+        return {'funnel': funnel, 'people': [], 'cover_id': None, 'highlights': []}
+    c = plan['photo_counts']
+    funnel = {'taken': c['taken'], 'left_out': c['left_out'], 'blurry': c['blurry'] + c['not_selected'],
+              'extra_frames': c['extra_frames'], 'in_album': c['in_album']}
+    in_album = {e['asset_id'] for e in plan['entries']}
+    taken_by, album_by = Counter(), Counter()
+    secondaries = set(plan['secondaries'])
+    for r in conn.execute("SELECT id, source_id FROM assets WHERE status = 'present'"):
+        if r['id'] in secondaries:
+            continue
+        taken_by[r['source_id']] += 1
+        album_by[r['source_id']] += r['id'] in in_album
+    people = [{'owner': r['owner'], 'source_id': r['id'], 'taken': taken_by[r['id']], 'in_album': album_by[r['id']]}
+              for r in conn.execute('SELECT id, owner FROM sources ORDER BY id')]
+    cover_id, highlights = _cover_and_highlights(conn, in_album)
+    return {'funnel': funnel, 'people': people, 'cover_id': cover_id, 'highlights': highlights}
+
+
+HIGHLIGHTS = 12
+PER_EVENT = 2
+
+
+def _cover_and_highlights(conn, in_album: set):
+    """Ranked with the same scores and weights as Best photos, restricted to photos in the album."""
+    from app.quality.scoring import best_photos
+    if not in_album:
+        return None, []
+    marks = {r['sha256'] for r in conn.execute('SELECT sha256 FROM marks WHERE favorite = 1')}
+    favourite = {r['id'] for r in conn.execute("SELECT id, sha256 FROM assets WHERE status = 'present'")
+                 if r['sha256'] in marks}
+    ranked = [b for b in best_photos(conn, settings.load()['rank_weights'], 1_000_000, frozenset(favourite))
+              if b['id'] in in_album]
+    cover = next((b['id'] for b in ranked if b['id'] in favourite), ranked[0]['id'] if ranked else None)
+    if cover is None:                    # nothing is scored yet: a favourite, else the first photo in the album
+        first = [r['id'] for r in conn.execute(
+            "SELECT id FROM assets WHERE status = 'present' AND kind = 'image' ORDER BY id") if r['id'] in in_album]
+        cover = next((i for i in first if i in favourite), first[0] if first else None)
+    event_of = {r['asset_id']: r['event_id'] for r in conn.execute('SELECT asset_id, event_id FROM event_members')}
+    per_event, chosen = Counter(), []
+    for b in ranked:
+        ev = event_of.get(b['id'])
+        if per_event[ev] >= PER_EVENT:
+            continue
+        per_event[ev] += 1
+        chosen.append(b['id'])
+        if len(chosen) == HIGHLIGHTS:
+            break
+    when = {r['id']: r['t'] for r in conn.execute(
+        "SELECT a.id, c.sort_key + COALESCE(cc.applied_s, 0) AS t FROM assets a "
+        "LEFT JOIN capture_time c ON c.asset_id = a.id "
+        "LEFT JOIN clocks k ON k.source_id = a.source_id AND k.make = COALESCE(a.make, '') "
+        "  AND k.model = COALESCE(a.model, '') "
+        "LEFT JOIN clock_corrections cc ON cc.clock_id = k.id WHERE a.status = 'present'")}
+    chosen.sort(key=lambda i: (when.get(i) is None, when.get(i) or 0, i))
+    return cover, chosen
 
 
 def _has(conn, table: str) -> bool:

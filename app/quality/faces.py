@@ -22,6 +22,7 @@ EYE_CLOSED = 0.12        # eye contour height / width; below this the eye is tre
 EYE_OPEN = 0.18
 LOOK_AWAY_RAD = 0.6      # about 35 degrees of head turn
 BATCH = 12
+FACE_WORKERS = 3
 
 
 def helper_path() -> Path:
@@ -46,9 +47,37 @@ def _run(mode: str, paths: list[str], extra: Optional[list[str]] = None, timeout
     return out
 
 
+MIN_FACE_AREA = 0.0004   # ignore tiny background faces
+MAX_BOXES = 6
+
+
+def _usable(faces: list) -> list:
+    return [f for f in faces or [] if f.get('box') and f['box'][2] * f['box'][3] >= MIN_FACE_AREA]
+
+
+def _eye_closed(f: dict) -> bool:
+    eyes = [e for e in (f.get('left_eye'), f.get('right_eye')) if e is not None]
+    return bool(eyes) and min(eyes) < EYE_CLOSED
+
+
+def _looking_away(f: dict) -> bool:
+    return abs(f.get('yaw') or 0.0) > LOOK_AWAY_RAD
+
+
+def face_boxes(faces: list, limit: int = MAX_BOXES) -> list:
+    """Up to `limit` faces as {x, y, w, h, eyes_closed, looking_away}, normalised to the image with the
+    origin at the top left. The helper stores Apple Vision's boundingBox (origin bottom left), so y is flipped."""
+    out = []
+    for f in _usable(faces)[:limit]:
+        x, y, w, h = (float(v) for v in f['box'])
+        out.append({'x': round(x, 4), 'y': round(1.0 - (y + h), 4), 'w': round(w, 4), 'h': round(h, 4),
+                    'eyes_closed': _eye_closed(f), 'looking_away': _looking_away(f)})
+    return out
+
+
 def face_summary(faces: list) -> Optional[dict]:
-    """Per photo: counts and a 0-1 face score, or None when there are no faces."""
-    faces = [f for f in faces or [] if f.get('box') and f['box'][2] * f['box'][3] >= 0.0004]   # ignore tiny background faces
+    """Per photo: counts, a 0-1 face score and the face boxes, or None when there are no faces."""
+    faces = _usable(faces)
     if not faces:
         return None
     closed, away, scores = 0, 0, []
@@ -56,17 +85,17 @@ def face_summary(faces: list) -> Optional[dict]:
         eyes = [e for e in (f.get('left_eye'), f.get('right_eye')) if e is not None]
         eye = min(eyes) if eyes else None
         eye_ok = 1.0 if eye is None or eye >= EYE_OPEN else max(0.0, (eye - EYE_CLOSED) / (EYE_OPEN - EYE_CLOSED))
-        if eye is not None and eye < EYE_CLOSED:
+        if _eye_closed(f):
             closed += 1
         yaw = abs(f.get('yaw') or 0.0)
         facing = max(0.0, 1.0 - yaw / (2 * LOOK_AWAY_RAD))
-        if yaw > LOOK_AWAY_RAD:
+        if _looking_away(f):
             away += 1
         q = f.get('quality')
         q = 0.5 if q is None else q
         scores.append(0.45 * q + 0.35 * eye_ok + 0.20 * facing)
     return {'faces': len(faces), 'eyes_closed': closed, 'looking_away': away,
-            'score': round(sum(scores) / len(scores), 3)}
+            'score': round(sum(scores) / len(scores), 3), 'boxes': face_boxes(faces)}
 
 
 def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
@@ -77,17 +106,29 @@ def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM faces) GROUP BY a.sha256').fetchall()
-    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
+    # Apple Vision face detection is light: no AI duty cycle, and a few batches run at once
+    # (thermal and battery pauses still apply; M9 speed-up, owner's OK 2026-11-16).
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
     done = 0
-    for i in range(0, len(rows), BATCH):
+    chunks = [rows[i:i + BATCH] for i in range(0, len(rows), BATCH)]
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(FACE_WORKERS)
+    try:
+        futures = [pool.submit(_run, 'faces', [c['path'] for c in chunk]) for chunk in chunks]
+    except Exception:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    for i, (chunk, fut) in enumerate(zip(chunks, futures)):
         if cancelled():
+            pool.shutdown(wait=False, cancel_futures=True)
             break
-        chunk = rows[i:i + BATCH]
         if progress:
-            progress('Faces (Apple Vision)', i, len(rows))
-        t0 = time.time()
-        res = {r['path']: r for r in _run('faces', [c['path'] for c in chunk])}
-        busy = time.time() - t0
+            progress('Faces (Apple Vision)', i * BATCH, len(rows))
+        try:
+            res = {r['path']: r for r in fut.result()}
+        except Exception:
+            res = {}
+        busy = 0.0
         with conn:
             for c in chunk:
                 r = res.get(c['path'])
@@ -98,6 +139,7 @@ def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable
                              (c['sha256'], len(faces), json.dumps(faces), now_iso()))
                 done += 1
         throttle.after_work(busy)
+    pool.shutdown(wait=False, cancel_futures=True)
     return {'analysed': done}
 
 

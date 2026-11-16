@@ -70,18 +70,44 @@ def colours(tmp_path, monkeypatch):
     embeddings.set_embedder(None)
 
 
+def _indexed(conn):
+    analyze_collection(conn)
+    embeddings.compute_embeddings(conn)
+
+
 def test_index_builds_search_vectors_once(colours):
     src, conn = colours
     before = snapshot(src)
     res = analyze_collection(conn)
-    assert res['search_index'] == {'embedded': 3, 'failed': 0}
-    assert analyze_collection(conn)['search_index'] == {'embedded': 0, 'failed': 0}   # cached by content
+    assert 'search_index' not in res                                 # built on the first search (M9)
+    assert embeddings.missing_embeddings(conn) == 3
+    assert embeddings.compute_embeddings(conn) == {'embedded': 3, 'failed': 0}
+    assert embeddings.compute_embeddings(conn) == {'embedded': 0, 'failed': 0}       # cached by content
+    assert embeddings.missing_embeddings(conn) == 0
     assert snapshot(src) == before
+
+
+def test_first_search_builds_the_index_in_the_background(colours, client, H):
+    import time
+    from app.web import timeline_bp
+    src, conn = colours
+    analyze_collection(conn)
+    from pathlib import Path
+    slug = Path(conn.execute('PRAGMA database_list').fetchone()[2]).parent.name     # this test's own album
+    first = client.get(f'/api/collections/{slug}/search?q=green', headers=H).get_json()
+    assert first['preparing'] is True and first['missing'] == 3 and first['results'] == []
+    for _ in range(100):
+        if not timeline_bp._job['running']:
+            break
+        time.sleep(0.05)
+    assert timeline_bp._job['kind'] == 'search_index' and timeline_bp._job['error'] is None
+    res = client.get(f'/api/collections/{slug}/search?q=green', headers=H).get_json()
+    assert not res.get('preparing') and res['results'][0]['filename'] == 'green.jpg'
 
 
 def test_search_ranks_by_meaning(colours):
     src, conn = colours
-    analyze_collection(conn)
+    _indexed(conn)
     res = search_mod.search(conn, 'something green')
     assert [r['filename'] for r in res['results']][0] == 'green.jpg'
     assert res['english'] is None and 'unavailable' in res['translation']
@@ -89,7 +115,7 @@ def test_search_ranks_by_meaning(colours):
 
 def test_translation_is_used_and_cached(colours, monkeypatch):
     src, conn = colours
-    analyze_collection(conn)
+    _indexed(conn)
     calls = []
     monkeypatch.setattr(vlm, 'status', lambda: {'running': True, 'model_ready': True, 'model': 'x'})
     monkeypatch.setattr(vlm, 'translate_to_english', lambda q: calls.append(q) or 'blue sky')
@@ -101,7 +127,7 @@ def test_translation_is_used_and_cached(colours, monkeypatch):
 
 def test_tag_match_boost_is_labelled(colours):
     src, conn = colours
-    analyze_collection(conn)
+    _indexed(conn)
     sha = conn.execute("SELECT sha256 FROM assets WHERE filename = 'red.jpg'").fetchone()[0]
     with conn:
         conn.execute("INSERT INTO ai_annotations (sha256, model, prompt_version, description, tags_json, created_at) "

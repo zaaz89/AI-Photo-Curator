@@ -225,6 +225,15 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL
     );
     """,
+    # 9: the owner's own description of a photo (M9). Unused since 2026-11-16 (descriptions were dropped:
+    # Google Photos writes its own); kept so albums that already have it stay at the same schema version.
+    """
+    CREATE TABLE owner_descriptions (
+        sha256     TEXT PRIMARY KEY,
+        text       TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

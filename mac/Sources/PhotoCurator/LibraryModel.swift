@@ -5,12 +5,22 @@ import SwiftUI
 
 /// Sidebar destinations.
 enum Destination: Hashable {
-    case overview, all, favourites, leftOut, videos, blurry, day(String), search
+    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search
+    /// The guide's pages (album home, the steps, people and clocks), not a photo grid.
+    var isGuide: Bool {
+        switch self { case .home, .step, .people: true; default: false }
+    }
+}
+
+/// The Selection step's three views.
+enum SelectionView: String, CaseIterable, Identifiable {
+    case moments, blurry, leftOut
+    var id: String { rawValue }
 }
 
 /// The sheets of the album assistant.
 enum AssistantSheet: String, Identifiable {
-    case newAlbum, moments, clocks, export
+    case newAlbum
     var id: String { rawValue }
 }
 
@@ -21,7 +31,12 @@ enum AssistantSheet: String, Identifiable {
 
     @Published var trips: [Trip] = []
     @Published var tripId: String? { didSet { if tripId != oldValue { tripChanged() } } }
-    @Published private(set) var photos: [Photo] = [] { didSet { recompute() } }
+    @Published private(set) var photos: [Photo] = [] {
+        didSet {
+            photoIndex = Dictionary(photos.indices.map { (photos[$0].id, $0) }, uniquingKeysWith: { a, _ in a })
+            recompute()
+        }
+    }
     @Published private(set) var events: [TripEvent] = [] { didSet { recompute() } }
     /// The trip `photos` belong to. Marks and moves are refused while it differs from `tripId`:
     /// photo ids are per trip, so an old id would hit another photo in the new trip.
@@ -38,7 +53,7 @@ enum AssistantSheet: String, Identifiable {
     /// Moments the owner went through in this session; a reopened sheet continues after them.
     var reviewedMoments: Set<Int> = []
     var exported: Bool { steps["export"] == true }
-    static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "descriptions", "export"]
+    static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "export"]
     var stepsDone: Int { Self.stepOrder.filter(isDone).count }
     /// A step is done when the owner marked it, or when there is nothing left to decide in it.
     func isDone(_ step: String) -> Bool {
@@ -48,12 +63,21 @@ enum AssistantSheet: String, Identifiable {
         case "times": return o.clocks.pending == 0
         case "duplicates": return o.moments.needYou == 0
         case "blurry": return o.blurry.total == 0
-        case "descriptions": return o.descriptions.photos > 0 && o.descriptions.done >= o.descriptions.photos
         case "export": return o.export.done
         default: return false
         }
     }
-    @Published var destination: Destination = .overview { didSet { if destination != oldValue { clearSelection(); recompute() } } }
+    /// The four steps' state (done, waiting decisions), recomputed with the overview.
+    var stepStates: [GuideStep: StepState] {
+        var s = CuratorCore.stepStates(overview, marked: steps, analysing: analysing)
+        if steps["export"] == true { s[.export]?.done = true }
+        return s
+    }
+    var next: GuideStep? { nextStep(stepStates) }
+    /// Clock suggestions nobody answered yet: they come before the steps on the album home.
+    var clocksWaiting: Int { CuratorCore.clocksWaiting(overview, marked: steps, analysing: analysing) }
+    @Published var selectionView: SelectionView = .moments
+    @Published var destination: Destination = .home { didSet { if destination != oldValue { clearSelection(); recompute() } } }
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
     @Published var cursor: Int = -1                     // flat index into `flat`
@@ -110,7 +134,7 @@ enum AssistantSheet: String, Identifiable {
         clearSelection()
         searchResult = nil
         searchText = ""
-        destination = .overview
+        destination = .home
         if let tripId { UserDefaults.standard.set(tripId, forKey: "trip") }
         Task { await reload() }
     }
@@ -146,7 +170,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return .leftOut
         case .videos: return .videos
         case .blurry: return .blurry
-        case .overview: return .all
+        case .home, .step, .people: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -166,7 +190,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
         case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
-        case .overview: return 0
+        case .home, .step, .people: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -319,12 +343,140 @@ enum AssistantSheet: String, Identifiable {
                 case ("favorite", .bool(let b)): copy[i].favorite = b
                 case ("rejected", .bool(let b)): copy[i].rejected = b
                 case ("wallpaper", .bool(let b)): copy[i].wallpaper = b
+                case ("focus", .string(let t)): copy[i].focus = copy[i].focus?.overridden(t)
+                case ("focus", .null): copy[i].focus = copy[i].focus?.overridden(nil)
                 default: break
                 }
             }
         }
         photos = copy
         trimSelection()
+    }
+
+    // MARK: M9 editing
+
+    func photo(_ id: Int) -> Photo? { photoIndex[id].map { photos[$0] } }
+    private var photoIndex: [Int: Int] = [:]
+    var albumName: String { trips.first { $0.id == tripId }?.name ?? "" }
+
+    /// Runs one engine change for an album, then reloads. Ids of photos, chapters and people are per album,
+    /// so a view passes the album it was showing (`trip`): an edit committed after the owner switched albums
+    /// still goes to the album it belongs to, never to the one now open.
+    func change(trip: String? = nil, _ work: @escaping @Sendable (APIClient, String) async throws -> Void) {
+        guard let target = trip ?? (tripId == loadedTripId ? tripId : nil) else { return }
+        enqueue { api in try await work(api, target) }
+    }
+    /// The album now shown, if its photos are loaded (views capture it when they appear).
+    var shownTrip: String? { tripId == loadedTripId ? tripId : nil }
+    /// True when `trip` is the album on screen (comparisons with the shown names only make sense then).
+    private func isShown(_ trip: String?) -> Bool { trip == nil || trip == shownTrip }
+
+    func renameAlbum(_ name: String, trip: String?) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trip, !n.isEmpty, n != trips.first(where: { $0.id == trip })?.name else { return }
+        Task {
+            do { try await api.renameAlbum(trip: trip, name: n); trips = (try? await api.trips()) ?? trips }
+            catch { message = describe(error) }
+        }
+    }
+
+    func renamePerson(source: Int, to name: String, trip: String?) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !(isShown(trip) && sources.first(where: { $0.id == source })?.owner == n) else { return }
+        change(trip: trip) { api, t in try await api.renamePerson(trip: t, source: source, owner: n) }
+    }
+
+    func renameEvent(_ event: Int, to name: String, trip: String?) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !(isShown(trip) && events.first(where: { $0.id == event })?.name == n) else { return }
+        change(trip: trip) { api, t in try await api.renameEvent(trip: t, event: event, name: n) }
+    }
+
+    func mergeWithPrevious(_ event: Int) {
+        change { api, trip in try await api.mergeWithPrevious(trip: trip, event: event) }
+    }
+
+    func newChapter(at photo: Int) {
+        change { api, trip in try await api.splitEvent(trip: trip, at: photo) }
+    }
+
+    func resetChapters(day: String) {
+        change { api, trip in try await api.resetDay(trip: trip, day: day) }
+    }
+
+
+    /// Favourite on a frame of a moment: it goes to the album too, next to the chosen one.
+    func toggleKeepToo(_ id: Int) {
+        guard let p = photo(id) else { return }
+        mark([p], ["favorite": .bool(!p.favorite), "rejected": .bool(false)], name: tr("keepToo"))
+    }
+
+    func setLeftOut(_ ids: [Int], _ out: Bool) {
+        let items = ids.compactMap(photo).filter { $0.rejected != out }
+        mark(items, ["rejected": .bool(out)], name: tr(out ? "leaveOut" : "keep"))
+    }
+
+    /// Blurry photos: "keep" must be what the export reads, so a kept blurry photo gets the owner's focus
+    /// mark "soft" (acceptable) besides not being left out; "leave out" marks it left out.
+    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) {
+        let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
+        if inAlbum {
+            // An extra frame of a moment only goes in as a favourite ("keep too"); a blurry one needs the focus mark.
+            let extra = items.filter { $0.isExtraFrame && !$0.favorite }
+            let needsMark = items.filter { !extra.contains($0) && $0.focus?.tier == "blurry" && !$0.favorite }
+            let plain = items.filter { !extra.contains($0) && !needsMark.contains($0) }
+            mark(extra, ["rejected": .bool(false), "favorite": .bool(true)], name: tr("keep"))
+            mark(needsMark, ["rejected": .bool(false), "focus": .string("soft")], name: tr("keep"))
+            mark(plain, ["rejected": .bool(false)], name: tr("keep"))
+        } else {
+            mark(items, ["rejected": .bool(true)], name: tr("leaveOut"))
+        }
+    }
+
+    /// Adds folders to the open album and analyses the new photos. Every folder is tried; refusals are shown
+    /// together, and the analysis starts when at least one folder was added.
+    func addFolders(_ urls: [URL]) {
+        guard let tripId, tripId == loadedTripId, !urls.isEmpty else { return }
+        Task {
+            var problems: [String] = [], added = 0
+            do {
+                let s = try await api.suggest(paths: urls.map(\.path))
+                problems += s.rejected.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \(trOr("problem_" + $0.problem, $0.problem))" }
+                for f in s.folders {
+                    let name = URL(fileURLWithPath: f.path).lastPathComponent
+                    do { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? name : f.owner); added += 1 }
+                    catch { problems.append("\(name): \(describe(error))") }
+                }
+            } catch { problems.append(describe(error)) }
+            if added > 0 {
+                do { try await api.startAnalysis(trip: tripId) } catch { problems.append(describe(error)) }
+                await reload()
+                await pollOnce()
+            }
+            if !problems.isEmpty { message = problems.joined(separator: " · ") }
+        }
+    }
+
+    /// The guide's Next: marks this step's checklist entries done and opens the next step.
+    func finishStep(_ step: GuideStep) {
+        guard let tripId else { return }
+        for w in step.workflowSteps where w != "export" { steps[w] = true }
+        Task {
+            for w in step.workflowSteps where w != "export" { try? await api.setStep(trip: tripId, step: w, done: true) }
+            overview = (try? await api.overview(trip: tripId)) ?? overview
+        }
+        destination = step.next.map { .step($0) } ?? .home
+    }
+
+    /// Done on the People & clocks page: the owner has seen the clocks; back to the album.
+    func finishPeople() {
+        guard let tripId else { return }
+        for w in ["import", "times"] { steps[w] = true }
+        Task {
+            for w in ["import", "times"] { try? await api.setStep(trip: tripId, step: w, done: true) }
+            overview = (try? await api.overview(trip: tripId)) ?? overview
+        }
+        destination = .home
     }
 
     // MARK: events
@@ -383,10 +535,6 @@ enum AssistantSheet: String, Identifiable {
         Task { try? await api.setStep(trip: tripId, step: step, done: done); await reload() }
     }
 
-    func describePhotos() {
-        guard let tripId else { return }
-        Task { do { try await api.describePhotos(trip: tripId) } catch { message = describe(error) } }
-    }
 
     func leaveOutAllBlurry() {
         let blurry = photos.filter { $0.focus?.tier == "blurry" && !$0.rejected && !$0.favorite }
@@ -397,6 +545,11 @@ enum AssistantSheet: String, Identifiable {
     @Published private(set) var lastExport: (folder: String, ok: Bool)?
     func clearLastExport() { lastExport = nil }
     private func jobFinished() {
+        if let p = pendingSearch, p.trip == tripId, job.error == nil {
+            pendingSearch = nil
+            searchText = p.query
+            runSearch()
+        }
         if let f = job.exportFolder, job.collection == tripId {
             lastExport = (f, job.exportOK ?? false)
             if job.exportOK == true { markStep("export") }
@@ -421,6 +574,9 @@ enum AssistantSheet: String, Identifiable {
 
     // MARK: search
 
+    /// A search that waits for the search index (first search of the album); it runs again when the index is ready.
+    private var pendingSearch: (trip: String, query: String)?
+
     func runSearch() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard let tripId, !q.isEmpty else { return }
@@ -428,7 +584,15 @@ enum AssistantSheet: String, Identifiable {
         Task {
             defer { searching = false }
             do {
-                searchResult = try await api.search(trip: tripId, query: q)
+                let r = try await api.search(trip: tripId, query: q)
+                if r.preparing == true {
+                    pendingSearch = (tripId, q)
+                    message = tr("preparingSearch")
+                    await pollOnce()
+                    return
+                }
+                pendingSearch = nil
+                searchResult = r
                 destination = .search
             } catch { message = describe(error) }
         }

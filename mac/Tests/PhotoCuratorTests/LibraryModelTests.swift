@@ -72,6 +72,21 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized) @MainActor struct LibraryModelTests {
+    /// Ids are per album: an edit committed after switching albums goes to the album it was made in,
+    /// and an edit without its album is not written while another album loads.
+    @Test func editsGoToTheAlbumTheyWereMadeIn() async {
+        let m = await model()
+        let shown = m.shownTrip
+        #expect(shown == "a")
+        m.tripId = "b"                                  // switched; B is still loading
+        m.mergeWithPrevious(5)                          // no album captured: refused
+        m.renameEvent(5, to: "Dinner", trip: shown)
+        m.renameEvent(6, to: "Lunch", trip: shown)
+        await waitUntil { FakeEngine.writes.count >= 2 }
+        #expect(FakeEngine.writes.count == 2)
+        #expect(FakeEngine.writes.allSatisfy { $0.hasPrefix("/api/collections/a/") })
+    }
+
     @Test func tripSwitchClearsPhotosAndRefusesMarks() async {
         let m = await model()
         #expect(m.flat.count == 2)

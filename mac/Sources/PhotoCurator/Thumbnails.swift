@@ -10,7 +10,7 @@ import SwiftUI
     init() { cache.countLimit = 3000 }
 
     func image(for url: URL, side: CGFloat) async -> NSImage? {
-        let bucket = side <= 260 ? 260 : (side <= 520 ? 520 : 1024)          // few sizes, many hits
+        let bucket = side <= 260 ? 260 : (side <= 520 ? 520 : (side <= 1024 ? 1024 : 2048))          // few sizes, many hits
         let key = "\(url.path)#\(bucket)" as NSString
         if let hit = cache.object(forKey: key) { return hit }
         guard FileManager.default.isReadableFile(atPath: url.path) else { return nil }

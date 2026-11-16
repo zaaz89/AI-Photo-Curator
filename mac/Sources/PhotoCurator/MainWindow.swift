@@ -14,9 +14,10 @@ struct MainWindow: View {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            Group {
-                if library.destination == .overview { OverviewView() } else { PhotoGrid() }
-            }
+            DetailPage()
+                .id(guidePage)
+                .transition(.opacity)
+                .animation(.snappy(duration: 0.25), value: guidePage)
                 .navigationTitle(title)
                 .navigationSubtitle(subtitle)
                 .toolbar { toolbar }
@@ -24,7 +25,7 @@ struct MainWindow: View {
                 .searchFocused($searchFocused)
                 .onSubmit(of: .search) { library.runSearch() }
                 .onChange(of: library.searchFocusRequest) { _, _ in searchFocused = true }
-                .inspector(isPresented: Binding(get: { showInspector && library.destination != .overview },
+                .inspector(isPresented: Binding(get: { showInspector && !library.destination.isGuide },
                                                 set: { showInspector = $0 })) {
                     InspectorView().inspectorColumnWidth(min: 260, ideal: 300, max: 380)
                 }
@@ -41,9 +42,6 @@ struct MainWindow: View {
                 .sheet(item: $library.sheet) { s in
                     switch s {
                     case .newAlbum: NewAlbumWizard()
-                    case .moments: MomentsSheet()
-                    case .clocks: ClocksSheet()
-                    case .export: ExportSheet()
                     }
                 }
                 .quickLookPreview($library.quickLookURL, in: library.quickLookItems)
@@ -51,8 +49,33 @@ struct MainWindow: View {
         .overlay { AIGlow(active: library.job.running && library.job.phase.isAI) }
     }
 
+    /// Which guide page shows (grid destinations share one, so the grid keeps its state).
+    var guidePage: String {
+        switch library.destination {
+        case .home: "home"
+        case .step(let s): s.rawValue
+        case .people: "people"
+        default: "grid"
+        }
+    }
+
     @ToolbarContentBuilder var toolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) { ActivityPill() }
+        if !library.destination.isGuide { gridTools }
+        ToolbarItem {
+            Button { library.destination = .step(.export) } label: { Label(library.tr("export"), systemImage: "square.and.arrow.up") }
+                .buttonStyle(.glassProminent)
+                .help(library.tr("exportHelp"))
+        }
+        if !library.destination.isGuide {
+            ToolbarItem {
+                Button { showInspector.toggle() } label: { Label(library.tr("inspector"), systemImage: "sidebar.right") }
+                    .help(library.tr("inspector"))
+            }
+        }
+    }
+
+    @ToolbarContentBuilder var gridTools: some ToolbarContent {
         ToolbarItem {
             Menu {
                 Picker(library.tr("show"), selection: Binding(
@@ -82,20 +105,13 @@ struct MainWindow: View {
                 Button(library.tr("leaveOutAllBlurry"), systemImage: "eye.slash") { library.leaveOutAllBlurry() }
             }
         }
-        ToolbarItem {
-            Button { library.sheet = .export } label: { Label(library.tr("export"), systemImage: "square.and.arrow.up") }
-                .buttonStyle(.glassProminent)
-                .help(library.tr("exportHelp"))
-        }
-        ToolbarItem {
-            Button { showInspector.toggle() } label: { Label(library.tr("inspector"), systemImage: "sidebar.right") }
-                .help(library.tr("inspector"))
-        }
     }
 
     var title: String {
         switch library.destination {
-        case .overview: return library.tr("overview")
+        case .home: return library.albumName
+        case .step(let s): return library.tr("step_" + s.rawValue)
+        case .people: return library.tr("step_photos")
         case .blurry: return library.tr("blurryNav")
         case .all: return library.tr("allPhotos")
         case .favourites: return library.tr("favourites")
@@ -106,7 +122,9 @@ struct MainWindow: View {
         }
     }
     var subtitle: String {
-        if library.destination == .overview { return library.trips.first { $0.id == library.tripId }?.name ?? "" }
+        if case .step(let s) = library.destination { return String(format: library.tr("stepOfThree"), s.number) + " · " + library.albumName }
+        if library.destination == .people { return library.albumName }
+        if library.destination == .home { return library.tr("albumHome") }
         let n = library.flat.count
         var s = Strings.photos(n, library.lang)
         if library.destination == .search, let en = library.searchResult?.english, !en.isEmpty {
@@ -122,8 +140,31 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: Binding(get: { library.destination }, set: { if let d = $0 { library.destination = d } })) {
-            Section(library.tr("album")) {
-                Label(library.tr("overview"), systemImage: "sparkles.rectangle.stack").tag(Destination.overview)
+            Section(library.tr("guide")) {
+                Label(library.tr("albumHome"), systemImage: "house").tag(Destination.home)
+                ForEach(GuideStep.allCases) { s in
+                    let st = library.stepStates[s] ?? StepState(done: false, waiting: 0)
+                    HStack(spacing: 8) {
+                        Label {
+                            Text(library.tr("step_" + s.rawValue))
+                        } icon: {
+                            Image(systemName: st.done ? "checkmark.circle.fill" : "\(s.number).circle")
+                                .foregroundStyle(st.done ? AnyShapeStyle(.green) : AnyShapeStyle(s.tint))
+                        }
+                        Spacer()
+                        if st.waiting > 0 {
+                            Text("\(st.waiting)").font(.caption.weight(.bold)).monospacedDigit()
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(.orange.opacity(0.2), in: .capsule).foregroundStyle(.orange)
+                        }
+                    }
+                    .tag(Destination.step(s))
+                }
+            }
+            Section(library.tr("library")) {
+                Label(library.tr("step_photos"), systemImage: "person.2")
+                    .badge(library.clocksWaiting)
+                    .tag(Destination.people)
                 row(.all, "photo.on.rectangle", library.tr("allPhotos"))
                 if library.count(.blurry) > 0 { row(.blurry, "camera.aperture", library.tr("blurryNav")) }
                 row(.leftOut, "eye.slash", library.tr("leftOut"))
@@ -136,7 +177,7 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .top) { TripPicker().padding(.horizontal, 10).padding(.bottom, 6) }
-        .safeAreaInset(edge: .bottom) { AlbumProgress().padding(10) }
+        .safeAreaInset(edge: .bottom) { FinishAlbumButton().padding(12) }
     }
 
     func row(_ d: Destination, _ icon: String, _ title: String) -> some View {
@@ -146,48 +187,21 @@ struct Sidebar: View {
     }
 }
 
-/// Bottom of the sidebar: how far the album is, the export, and finishing the album.
-/// The album is a work in progress that ends in Google Photos, not a place to keep photos.
-struct AlbumProgress: View {
+/// Bottom of the sidebar: finishing the album removes the app's working data, never the photos.
+struct FinishAlbumButton: View {
     @EnvironmentObject var library: LibraryModel
-    @Environment(\.openWindow) private var openWindow
     @State private var confirmFinish = false
 
     var body: some View {
-        let done = library.stepsDone
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Gauge(value: Double(done), in: 0...7) { EmptyView() }
-                    .gaugeStyle(.accessoryCircularCapacity)
-                    .scaleEffect(0.55).frame(width: 26, height: 26)
-                    .tint(library.exported ? .green : .accentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(String(format: library.tr("stepsProgress"), done)).font(.callout.weight(.medium))
-                    if library.exported {
-                        Label(library.tr("exported"), systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
-                    }
-                }
-            }
-            Button { openWindow(id: "classic") } label: {
-                Label(library.tr("tripSteps"), systemImage: "checklist").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .help(library.tr("tripStepsHelp"))
-            Button { library.sheet = .export } label: {
-                Label(library.tr("exportGP"), systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .help(library.tr("exportHelp"))
-            Button(library.tr("finishAlbum"), role: .destructive) { confirmFinish = true }
-                .buttonStyle(.link)
-                .font(.callout)
-                .disabled(library.tripId == nil || (library.job.running && library.job.collection == library.tripId))
-                .frame(maxWidth: .infinity)
+        Button(role: .destructive) { confirmFinish = true } label: {
+            Label(library.tr("finishAlbum"), systemImage: "checkmark.rectangle.stack").frame(maxWidth: .infinity, alignment: .leading)
         }
-        .controlSize(.large)
-        .padding(12)
-        .background(.fill.quaternary, in: .rect(cornerRadius: 14))     // inside the glass sidebar: no glass on glass
-        .confirmationDialog(String(format: library.tr("finishTitle"), library.trips.first { $0.id == library.tripId }?.name ?? ""),
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .font(.callout)
+        .disabled(library.tripId == nil || (library.job.running && library.job.collection == library.tripId))
+        .help(library.tr("finishHelp"))
+        .confirmationDialog(String(format: library.tr("finishTitle"), library.albumName),
                             isPresented: $confirmFinish, titleVisibility: .visible) {
             Button(library.tr("finishConfirm"), role: .destructive) { Task { await library.finishAlbum() } }
             Button(library.tr("cancel"), role: .cancel) {}
@@ -260,4 +274,20 @@ func formatDay(_ day: String, _ lang: Lang, style: DayStyle) -> String {
     o.locale = Locale(identifier: lang == .sl ? "sl_SI" : "en_GB")
     o.setLocalizedDateFormatFromTemplate(style == .short ? "EEEdMMM" : "EEEEdMMMMyyyy")
     return o.string(from: date)
+}
+
+
+/// The page the sidebar points at: the album home, a step, people and clocks, or a photo grid.
+struct DetailPage: View {
+    @EnvironmentObject var library: LibraryModel
+    var body: some View {
+        switch library.destination {
+        case .home: AlbumHome()
+        case .step(.selection): StepSelection()
+        case .step(.story): StepStory()
+        case .step(.export): StepExport()
+        case .people: StepPhotos()
+        default: PhotoGrid()
+        }
+    }
 }

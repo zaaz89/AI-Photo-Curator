@@ -91,6 +91,18 @@ def load_image(path: str, side: int = 448) -> Optional[Image.Image]:
     return ImageOps.exif_transpose(im).convert('RGB')
 
 
+def missing_embeddings(conn) -> int:
+    """How many photos of the album the search index does not cover yet (0 when the model is missing)."""
+    try:
+        name = get_embedder().name
+    except Exception:
+        return 0
+    return conn.execute(
+        "SELECT COUNT(DISTINCT a.sha256) FROM assets a WHERE a.status = 'present' AND a.kind = 'image' "
+        "AND a.sha256 != '' AND a.sha256 NOT IN (SELECT sha256 FROM image_embeddings WHERE model = ?)",
+        (name,)).fetchone()[0]
+
+
 def compute_embeddings(conn, progress: Optional[Callable] = None,
                        cancelled: Callable[[], bool] = lambda: False) -> dict:
     emb = get_embedder()

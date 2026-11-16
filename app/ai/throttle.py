@@ -53,7 +53,10 @@ def pause_reason(cfg: dict) -> Optional[str]:
 
 class Throttle:
     def __init__(self, cancelled: Callable[[], bool] = lambda: False,
-                 status: Optional[Callable[[str], None]] = None):
+                 status: Optional[Callable[[str], None]] = None, share: Optional[int] = None):
+        """`share` fixes the duty cycle for this job; light work (focus, faces) passes 100: no waiting
+        between steps, but the thermal and battery pauses still apply."""
+        self.fixed_share = share
         self.cancelled = cancelled
         self.status = status or (lambda msg: None)
         self.cfg = settings.load()
@@ -61,7 +64,7 @@ class Throttle:
 
     @property
     def share(self) -> int:
-        return int(self.cfg.get('ai_gpu_share', 100))
+        return self.fixed_share or int(self.cfg.get('ai_gpu_share', 100))
 
     def _sleep(self, seconds: float) -> None:
         end = time.time() + seconds

@@ -18,7 +18,18 @@ Folders
   place     Italy/Florence/
   flat      one folder
 Duplicates (non-keepers of exact/near groups): skip, include, or put into
-Alternatives/ next to Selected/ (the brief's "curated" output).
+Alternatives/ next to Selected/ (the brief's "curated" output). A non-keeper the
+owner marked favourite is never skipped and goes to Selected/ (M9: keep more than
+one frame of a moment).
+
+plan['counts'] accounts for every present file exactly once:
+  taken == left_out + blurry + not_selected + extra_frames + in_album
+left_out = marked "left out" by the owner; blurry = removed by selection no_blurry;
+not_selected = removed by selection best; extra_frames = other frames of a moment
+(skipped duplicates); in_album = len(entries). A paired secondary file (Live Photo
+video, RAW or JPEG partner) is counted as one file and follows its primary: when the
+primary is not exported the secondary is counted under the primary's reason; a
+secondary removed on its own (e.g. only the RAW was left out) under its own reason.
 
 Facts only: the time is the resolved capture time with accepted clock
 corrections; the place comes from GPS; "near X" stays "near-X"; a photo
@@ -102,15 +113,16 @@ def _pairs(conn):
     return out
 
 
-def _non_keepers(conn):
+def _non_keepers(conn, favorites=()):
+    """Other frames of a moment (exact/near groups) that are not exported; favourites are kept."""
     return {r[0] for r in conn.execute(
         'SELECT m.asset_id FROM duplicate_members m JOIN duplicate_groups g ON g.id = m.group_id '
-        "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")}
+        "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")} - set(favorites)
 
 
 def google_photos_options() -> dict:
     """The "Export for Google Photos" preset: one folder, the kept photos (no rejected, no blurry
-    unless favourite, no extra frames of a moment), Live Photo videos next to their stills."""
+    unless favourite, no extra frames of a moment unless favourite), Live Photo videos next to their stills."""
     from app import settings
     return {'template': 'default', 'folders': 'flat', 'duplicates': 'skip', 'selection': 'no_blurry',
             'topn': 50, 'weights': settings.load()['rank_weights']}
@@ -139,15 +151,12 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
         blurry = set()
     if selection == 'best':
         from app.quality.scoring import best_photos
-        keep_only = {b['id'] for b in best_photos(conn, weights, topn)}
+        keep_only = {b['id'] for b in best_photos(conn, weights, topn, frozenset(favorites))}
     trip = clean_part(conn.execute('SELECT name FROM collection WHERE id = 1').fetchone()[0]) or 'Collection'
     rows = _rows(conn)
     pairs = _pairs(conn)
-    skip_dups = _non_keepers(conn)
+    skip_dups = _non_keepers(conn, favorites)
     warnings = Counter()
-    ai = {r['sha256']: r['description'] for r in conn.execute(
-        "SELECT sha256, description FROM ai_annotations WHERE error IS NULL AND COALESCE(description, '') != '' "
-        'ORDER BY created_at')}
     days = sorted({_local_dt(r).date() for r in rows if _local_dt(r)})
     day_no = {d: (d - days[0]).days + 1 for d in days}          # calendar days since the first photo
     day_place = {}
@@ -156,15 +165,25 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                     and r['place_precision'] == 'in' and r['place_name'])
         day_place[d] = c.most_common(1)[0][0] if c else ''
 
+    taken = len(rows)
+    taken_photos = sum(1 for r in rows if r['id'] not in pairs)
+    why = {}                              # asset id -> why it is not exported (counts)
     if rejected:
         before = len(rows)
-        rows = [r for r in rows if r['id'] not in rejected and pairs.get(r['id']) not in rejected]
+        for r in rows:
+            if r['id'] in rejected or pairs.get(r['id']) in rejected:
+                why[r['id']] = 'left_out'
+        rows = [r for r in rows if r['id'] not in why]
         warnings['rejected by you'] = before - len(rows)
     excluded_by_selection = 0
     if keep_only is not None or blurry:
         before = len(rows)
-        rows = [r for r in rows if r['id'] not in blurry and (keep_only is None or r['id'] in keep_only
-                                                               or pairs.get(r['id']) in keep_only)]
+        for r in rows:
+            if r['id'] in blurry:
+                why[r['id']] = 'blurry'
+            elif keep_only is not None and r['id'] not in keep_only and pairs.get(r['id']) not in keep_only:
+                why[r['id']] = 'not_selected'
+        rows = [r for r in rows if r['id'] not in why]
         excluded_by_selection = before - len(rows)
     primary_rows = [r for r in rows if r['id'] not in pairs]
     by_id = {r['id']: r for r in rows}
@@ -195,6 +214,7 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     for r in primary_rows:
         if duplicates == 'skip' and r['id'] in skip_dups:
             warnings['duplicates skipped'] += 1
+            why[r['id']] = 'extra_frames'
             continue
         dt = _local_dt(r)
         folder = '/'.join(folder_for(r, dt))
@@ -219,13 +239,14 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                 parts = [trip, f'Day-{day_no[dt.date()]}', clean_part(r['event_name'] or ''), n]
             stem = '_'.join(p for p in parts if p)
         stems[r['id']] = (folder, stem)
-        entries.append(_entry(r, folder, stem, r['id'] in skip_dups, meta=_meta(r, dt, ai, r['id'] in favorites)))
+        entries.append(_entry(r, folder, stem, r['id'] in skip_dups, meta=_meta(r, dt, r['id'] in favorites)))
 
     for sec, pri in pairs.items():
         r = by_id.get(sec)
         if r is None:
             continue
-        if pri not in stems:              # its partner was skipped as a duplicate: skip it too
+        if pri not in stems:              # its partner was skipped (duplicate, blurry ...): it follows
+            why[sec] = why.get(pri, 'extra_frames')
             continue
         folder, stem = stems[pri]
         entries.append(_entry(r, folder, stem, False, paired_with=pri))
@@ -234,14 +255,28 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     if excluded_by_selection:
         warnings[f'left out by selection ({selection})'] = excluded_by_selection
     entries.sort(key=lambda e: (e['dest'].lower()))
+    reasons = Counter(why.values())
+    counts = {'taken': taken, 'left_out': reasons['left_out'], 'blurry': reasons['blurry'],
+              'not_selected': reasons['not_selected'], 'extra_frames': reasons['extra_frames'],
+              'in_album': len(entries)}
+    counts['extra_frames'] += taken - (sum(counts.values()) - taken)    # safety net: the identity always holds
+    # The same by photo, as the owner sees it: a paired secondary (Live Photo video, RAW partner) is not
+    # counted on its own; it goes wherever its primary goes.
+    photo_reasons = Counter(v for k, v in why.items() if k not in pairs)
+    photo_counts = {'taken': taken_photos, 'left_out': photo_reasons['left_out'], 'blurry': photo_reasons['blurry'],
+                    'not_selected': photo_reasons['not_selected'], 'extra_frames': photo_reasons['extra_frames'],
+                    'in_album': sum(1 for e in entries if e['paired_with'] is None)}
+    photo_counts['extra_frames'] += taken_photos - (sum(photo_counts.values()) - taken_photos)
     total = sum(e['size'] for e in entries)
     return {'trip': trip, 'template': template, 'folders': folders, 'duplicates': duplicates, 'selection': selection,
             'files': len(entries), 'bytes': total, 'folders_count': len({os.path.dirname(e['dest']) for e in entries}),
-            'warnings': dict(warnings), 'entries': entries}
+            'warnings': dict(warnings), 'counts': counts, 'photo_counts': photo_counts, 'secondaries': sorted(pairs),
+            'entries': entries}
 
 
-def _meta(r, dt, ai, favorite) -> dict:
-    """What the Google Photos export writes into a copy (photos only)."""
+def _meta(r, dt, favorite) -> dict:
+    """What the Google Photos export writes into a copy (photos only): corrected time, place, favourite.
+    No description (decided 2026-11-16): Google Photos writes its own."""
     if r['kind'] != 'image':
         return {}
     m = {}
@@ -250,9 +285,6 @@ def _meta(r, dt, ai, favorite) -> dict:
         m['datetime'] = dt.strftime('%Y:%m:%d %H:%M:%S')
         if off is not None:
             m['offset'] = f"{'+' if off >= 0 else '-'}{abs(off) // 60:02d}:{abs(off) % 60:02d}"
-    if ai.get(r['sha256']):
-        from app.ai.vision_analyzer import tidy_description
-        m['description'] = tidy_description(ai[r['sha256']])
     if r['place_precision'] == 'in' and r['place_name']:     # 'near X' is not written as city X
         m['city'] = r['place_name']
     if r['place_precision'] in ('in', 'near', 'region') and r['country']:
@@ -284,7 +316,7 @@ def run_export(conn, dest_root: str, plan: dict, resume_dir: str | None = None, 
         import json
         from app.organization.metadata_writer import write_into_copies
         if progress:
-            progress('Writing time, place and description into the copies', 0, 0)
+            progress('Writing time and place into the copies', 0, 0)
         work = [{'dest': it['dest'], 'meta': e['meta']} for it, e in zip(res.items, plan['entries'])
                 if it['status'] == 'verified' and e.get('meta')]
         res.metadata = write_into_copies(res.job_dir, work, roots)

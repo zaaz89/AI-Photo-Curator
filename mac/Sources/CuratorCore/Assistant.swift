@@ -90,10 +90,6 @@ public struct Overview: Decodable, Sendable {
         enum CodingKeys: String, CodingKey { case total, leftOut = "left_out", keptFavourites = "kept_favourites" }
     }
     public struct Events: Decodable, Sendable { public let events: Int, days: Int }
-    public struct Descriptions: Decodable, Sendable {
-        public let done: Int, photos: Int, minutesLeft: Int
-        enum CodingKeys: String, CodingKey { case done, photos, minutesLeft = "minutes_left" }
-    }
     public struct Export: Decodable, Sendable { public let done: Bool, photos: Int }
     public let analysing: Bool
     public let facts: Facts
@@ -101,8 +97,30 @@ public struct Overview: Decodable, Sendable {
     public let moments: Moments
     public let blurry: Blurry
     public let events: Events
-    public let descriptions: Descriptions
     public let export: Export
+    // M9 (optional so an older engine still decodes)
+    public struct Funnel: Decodable, Sendable, Equatable {
+        public let taken: Int, leftOut: Int, blurry: Int, extraFrames: Int, inAlbum: Int
+        enum CodingKeys: String, CodingKey {
+            case taken, blurry, leftOut = "left_out", extraFrames = "extra_frames", inAlbum = "in_album"
+        }
+        public init(taken: Int, leftOut: Int, blurry: Int, extraFrames: Int, inAlbum: Int) {
+            self.taken = taken; self.leftOut = leftOut; self.blurry = blurry; self.extraFrames = extraFrames; self.inAlbum = inAlbum
+        }
+    }
+    public struct Person: Decodable, Sendable, Hashable, Identifiable {
+        public let owner: String, sourceId: Int, taken: Int, inAlbum: Int
+        public var id: Int { sourceId }
+        enum CodingKeys: String, CodingKey { case owner, taken, sourceId = "source_id", inAlbum = "in_album" }
+    }
+    public let funnel: Funnel?
+    public let people: [Person]?
+    public let coverId: Int?
+    public let highlights: [Int]?
+    enum CodingKeys: String, CodingKey {
+        case analysing, facts, clocks, moments, blurry, events, export, funnel, people, highlights
+        case coverId = "cover_id"
+    }
 }
 
 // MARK: clocks, moments, export
@@ -152,9 +170,45 @@ public struct MomentGroup: Decodable, Identifiable, Hashable, Sendable {
 }
 
 public struct ExportPreview: Decodable, Sendable {
+    public struct Entry: Decodable, Sendable, Hashable {
+        public let assetId: Int
+        public let dest: String
+        public let pairedWith: Int?
+        enum CodingKeys: String, CodingKey { case dest, assetId = "asset_id", pairedWith = "paired_with" }
+    }
     public let files: Int
     public let bytes: Int
     public let warnings: [String: Int]?
     public let writesMetadata: Bool?
-    enum CodingKeys: String, CodingKey { case files, bytes, warnings, writesMetadata = "writes_metadata" }
+    public let foldersCount: Int?
+    public let entries: [Entry]?
+    enum CodingKeys: String, CodingKey {
+        case files, bytes, warnings, entries, writesMetadata = "writes_metadata", foldersCount = "folders_count"
+    }
+    /// The photos of the plan (paired files such as a Live Photo's video left out), in plan order.
+    public var photoIds: [Int] { (entries ?? []).filter { $0.pairedWith == nil }.map(\.assetId) }
+}
+
+/// How an export is made: the whole album for Google Photos, the best few to share, or folders for an archive.
+public enum ExportKind: String, CaseIterable, Identifiable, Sendable {
+    case googlePhotos, best, archive
+    public var id: String { rawValue }
+}
+
+public struct ExportChoice: Equatable, Sendable {
+    public var kind: ExportKind = .googlePhotos
+    public var bestCount = 30
+    public var folders = "event"            // day | date | event | place | flat
+    public var template = "default"         // default | original | place | trip
+    public init() {}
+    /// The engine's export options for this choice.
+    public var body: [String: Any] {
+        switch kind {
+        case .googlePhotos: return ["preset": "google_photos"]
+        case .best: return ["template": "default", "folders": "flat", "duplicates": "skip", "selection": "best",
+                            "topn": bestCount, "write_metadata": true]
+        case .archive: return ["template": template, "folders": folders, "duplicates": "skip", "selection": "no_blurry",
+                               "write_metadata": true]
+        }
+    }
 }

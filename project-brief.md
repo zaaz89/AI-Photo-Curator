@@ -410,6 +410,8 @@ Examples:
 
 "Show all photos taken in the evening."
 
+Decision 2026-11-16 (owner): the app does not make, edit or export photo descriptions. Google Photos writes its own. The native app has no descriptions card, editor or inspector text, and the export writes only corrected time, place and favourites into the copies. The engine's M3 description job and semantic search stay in the code (search does not depend on descriptions).
+
 ## 6.1 Recommended AI approach
 
 Use multiple specialized methods rather than relying on a single language model.
@@ -704,6 +706,8 @@ Design goals:
 - Dark and light modes
 - Simple actions
 - Transparent AI recommendations
+
+Decision 2026-11-13 (M9): the native app leads through one guide with four steps (Photos & Clocks, Selection, Story, Export), each reachable and editable at any time, with an album home that shows the next step and what goes into the album. Design and engine contract: `notes/m9-album-guide.md`.
 
 ## 12.1 Main navigation
 
