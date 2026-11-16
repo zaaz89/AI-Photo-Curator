@@ -15,7 +15,7 @@ Merging cameras in true time order is the most common pain. People do not trust 
 
 ## The design
 
-One guide with four steps, always visible, every step reachable and editable at any time. The album home says what is next. Photos first, everywhere.
+One guide with three steps (since 2026-11-16: Selection, Story, Export; people and clocks moved to their own page and come up only when a clock needs a decision), always visible, every step reachable and editable at any time. The album home says what is next. Photos first, everywhere.
 
 ### Sidebar
 

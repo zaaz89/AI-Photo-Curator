@@ -116,3 +116,10 @@ Owner's decision: remove everything about descriptions, Google Photos writes its
 Tests: Python 115, Swift 39 (new: blurry rule, step 1, album-safe edits). Checked in the app on test-10: Story without descriptions, Export texts and layout (three choices in a row, full-width run card).
 Open: light appearance, VoiceOver; chapter rename/merge/split and Add folder by hand (endpoints have tests).
 
+### 2026-11-16 (later) — faster, simpler: three steps, lazy search, no description model (Claude)
+Owner: speed it up and simplify; approved all four proposals. Measured first on a fresh album of the test-10 photos (19): 41 s in all, of which focus 12.7 s, faces 12.9 s, search index 10.8 s. Cause: focus and faces ran under the 30 % AI duty cycle and one photo at a time.
+Changes: focus scoring runs in worker processes and faces in three Apple Vision batches at once, both without the duty cycle (thermal and battery pauses stay); the search index is no longer part of the analysis, the first search builds it in the background and the app searches again by itself. Same photos now: about 11 s to a finished analysis (focus 1.4 s, faces 5.4 s); focus tiers, sharpness and faces identical to before. The Qwen description model (3.1 GB, Ollama) was deleted with the owner's OK and dropped from `scripts/download-models.sh` and AGENTS.md; models now take 1.4 GB.
+The guide has three steps (Selection, Story, Export). People and clocks have their own page (sidebar, and a button in the people section of the home); a clock suggestion nobody answered comes up on the home before the steps. Review fixes from the second review: the blurry grid's "In album" follows the full export rule (an extra frame of a moment goes in only as keep-too), the album summary logs its errors.
+Not done: Slovenian queries are no longer translated before search (the translation used the deleted Qwen model); semantic search still works on the original words. Typing into the toolbar search could not be driven by the test tool; the lazy search was checked through the engine (first search answers "preparing" and builds 19 vectors, the next returns results).
+Tests: Python 116, Swift 40.
+
