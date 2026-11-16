@@ -138,7 +138,7 @@ struct MainWindow: View {
     var subtitle: String {
         if case .step(let s) = library.destination { return String(format: library.tr("stepOfThree"), s.number) + " · " + library.albumName }
         if library.destination == .people { return library.albumName }
-        if library.destination == .settings { return library.tr("aiLimitHint") }
+        if library.destination == .settings { return library.tr("settingsSubtitle") }
         if library.destination == .home { return library.tr("albumHome") }
         let n = library.flat.count
         var s = Strings.photos(n, library.lang)

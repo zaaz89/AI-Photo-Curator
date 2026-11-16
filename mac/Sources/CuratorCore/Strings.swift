@@ -272,6 +272,7 @@ public enum Strings {
         "aiLimitHint": ("Everything runs on this Mac. Nothing is uploaded.", "Vse teče na tem Macu. Nič se ne nalaga na splet."),
         "settings": ("Settings", "Nastavitve"),
         "settingsChange": ("Change", "Spremeni"),
+        "settingsSubtitle": ("For every album on this Mac", "Za vse albume na tem Macu"),
         "settingsSummary": ("The analysis may use %d %% of the Mac · strictness: %@",
                             "Analiza sme uporabiti %d %% Maca · strogost: %@"),
         "settingsSpeed": ("Analysis speed", "Hitrost analize"),
