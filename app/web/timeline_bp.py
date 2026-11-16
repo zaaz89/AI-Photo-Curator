@@ -135,9 +135,15 @@ def _run_index(cid):
     def progress(msg, i, n):
         _job['status'] = msg if not n else f'{msg} ({i}/{n})'
         _job['progress'] = int(i / n * 100) if n else _job['progress']
+    from app.ai import throttle
     try:
         conn = col.open_db(cid)
+        throttle.reset_totals()
         _job['result'] = analyze_collection(conn, progress, cancelled=lambda: _job['cancel'])
+        if not _job['cancel']:
+            # The measured speed of this Mac feeds the time estimate in Settings (M11).
+            throttle.record_speed((_job['result'].get('quality') or {}).get('scored', 0),
+                                  time.time() - _job['started'])
         _job['status'] = 'Cancelled' if _job['cancel'] else \
             f"Done in {time.time() - _job['started']:.0f} s"
         _job['progress'] = 100
@@ -343,7 +349,9 @@ def start_describe(cid):
 @bp.route('/api/settings', methods=['GET'])
 def get_settings():
     from app import settings
-    return jsonify({'settings': settings.load(), 'choices': settings.CHOICES})
+    from app.ai.throttle import speed
+    return jsonify({'settings': settings.load(), 'choices': settings.CHOICES, 'ranges': settings.RANGES,
+                    'speed': speed()})
 
 
 @bp.route('/api/settings', methods=['POST'])

@@ -32,6 +32,15 @@ public enum Strings {
         }
     }
 
+    /// "about 40 s", "about 3 min", "about 1 h 10 min" (Slovenian "okoli …"), for time estimates.
+    public static func duration(_ seconds: Double, _ lang: Lang) -> String {
+        let s = max(0, seconds)
+        if s < 55 { return String(format: text("about_s", lang), max(5, Int((s / 5).rounded()) * 5)) }
+        let m = Int((s / 60).rounded())
+        if m < 60 { return String(format: text("about_min", lang), max(1, m)) }
+        return String(format: text("about_h", lang), m / 60, m % 60)
+    }
+
     /// "5 photos" / "5 fotografij" with the right Slovenian dual and plural forms.
     public static func photos(_ n: Int, _ lang: Lang) -> String {
         guard lang == .sl else { return n == 1 ? "1 photo" : "\(n) photos" }
@@ -260,13 +269,43 @@ public enum Strings {
         // settings
         "general": ("General", "Splošno"),
         "language": ("Language", "Jezik"),
-        "aiLimit": ("Local AI may use", "Lokalni AI sme uporabiti"),
-        "gentle": ("Gentle (about 25 % GPU time)", "Nežno (okoli 25 % časa GPU)"),
-        "standard": ("Standard (about 30 %)", "Običajno (okoli 30 %)"),
-        "faster": ("Faster (about 50 %)", "Hitreje (okoli 50 %)"),
-        "noLimit": ("No limit (gets warm)", "Brez omejitve (se segreje)"),
-        "pauseOnBattery": ("Pause local AI on battery", "Na bateriji ustavi lokalni AI"),
         "aiLimitHint": ("Everything runs on this Mac. Nothing is uploaded.", "Vse teče na tem Macu. Nič se ne nalaga na splet."),
+        "settings": ("Settings", "Nastavitve"),
+        "settingsChange": ("Change", "Spremeni"),
+        "settingsSubtitle": ("For every album on this Mac", "Za vse albume na tem Macu"),
+        "settingsSummary": ("The analysis may use %d %% of the Mac · strictness: %@",
+                            "Analiza sme uporabiti %d %% Maca · strogost: %@"),
+        "settingsSpeed": ("Analysis speed", "Hitrost analize"),
+        "gpuShare": ("The analysis may use", "Analiza sme uporabiti"),
+        "gpuShareValue": ("%d %% of the Mac", "%d %% Maca"),
+        "gpuHint": ("Applies to the whole analysis (focus, faces, sharpness of the subject) and to the search index. Lower keeps the Mac cooler and quieter, higher is faster.",
+                    "Velja za vso analizo (ostrina, obrazi, ostrina motiva) in za iskalni indeks. Manj pomeni hladnejši in tišji Mac, več pomeni hitreje."),
+        "estimateAlbum": ("This album (%@): the analysis takes %@ at this setting, %@ at 100 %%.",
+                          "Ta album (%@): analiza traja %@ pri tej nastavitvi, %@ pri 100 %%."),
+        "estimateNoAlbum": ("200 photos: the analysis takes %@ at this setting, %@ at 100 %%.",
+                            "200 fotografij: analiza traja %@ pri tej nastavitvi, %@ pri 100 %%."),
+        "estimateLater": ("The time estimate appears after the first analysis on this Mac.",
+                          "Ocena časa se pokaže po prvi analizi na tem Macu."),
+        "thermalNote": ("If the Mac gets too warm, the analysis pauses by itself and continues when it has cooled down.",
+                        "Če se Mac preveč segreje, se analiza sama ustavi in nadaljuje, ko se ohladi."),
+        "pauseOnBattery": ("Pause the analysis on battery", "Na bateriji ustavi analizo"),
+        "batteryHint": ("It continues when the Mac is plugged in.", "Nadaljuje, ko Mac priključiš na elektriko."),
+        "settingsQuality": ("Quality check", "Preverjanje kakovosti"),
+        "strictness": ("Strictness", "Strogost"),
+        "strict_lenient": ("Lenient", "Prizanesljivo"),
+        "strict_normal": ("Normal", "Običajno"),
+        "strict_strict": ("Strict", "Strogo"),
+        "strictText_lenient": ("Only clearly blurry photos count as blurry, and only fully shut eyes as closed. Fewer questions in the quick review.",
+                               "Za zamegljene šteje le izrazito neostre fotografije, za zaprte oči le povsem zaprte. Manj vprašanj v hitrem pregledu."),
+        "strictText_normal": ("Calibrated on your photos: a photo is blurry when the person or subject is not sharp, a soft background is never a fault. Eyes count as closed when they clearly are.",
+                              "Umerjeno na tvojih fotografijah: fotografija je zamegljena, ko oseba ali motiv ni oster, mehko ozadje ni napaka. Oči štejejo za zaprte, ko so očitno zaprte."),
+        "strictText_strict": ("Slightly soft photos and half-closed eyes count as problems too. More questions in the quick review.",
+                              "Za težavo štejejo tudi rahlo mehke fotografije in napol zaprte oči. Več vprašanj v hitrem pregledu."),
+        "strictApplies": ("Applies at once to every album, no new analysis needed.", "Velja takoj za vse albume, brez nove analize."),
+        "strictNow": ("Blurry in this album now: %d", "Zamegljenih v tem albumu zdaj: %d"),
+        "about_s": ("about %d s", "okoli %d s"),
+        "about_min": ("about %d min", "okoli %d min"),
+        "about_h": ("about %d h %d min", "okoli %d h %d min"),
         "bestOfMoment": ("Best of Each Moment", "Najboljše iz trenutka"),
         "w_faces": ("Faces (eyes, gaze)", "Obrazi (oči, pogled)"),
         "w_focus": ("Focus", "Ostrina"),

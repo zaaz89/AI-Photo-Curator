@@ -90,8 +90,8 @@ def analyze_file(path: str) -> Optional[dict]:
             'scores': {k: round(float(v), 2) for k, v in scores.items()}}
 
 
-# Focus scoring is plain CPU work (no AI model): it runs on several cores at once and does not use the
-# AI duty cycle; thermal and battery pauses still apply (M9 speed-up, owner's OK 2026-11-16).
+# Focus scoring is plain CPU work (no AI model): larger albums use several worker processes. Since M11
+# the owner's share applies (work runs in rounds with a rest after each); thermal and battery pauses too.
 WORKERS = max(1, min(6, (os.cpu_count() or 2) - 2))
 PARALLEL_FROM = 6                  # fewer photos: one process is faster than starting workers
 
@@ -103,52 +103,37 @@ def _analyze_safe(path: str) -> Optional[dict]:
         return None
 
 
-def _scored(paths: list, cancelled: Callable[[], bool]):
-    """(path, result) in order; several worker processes for larger albums."""
-    if len(paths) < PARALLEL_FROM or WORKERS == 1:
-        for p in paths:
-            if cancelled():
-                return
-            yield p, _analyze_safe(p)
-        return
-    ex = ProcessPoolExecutor(WORKERS, mp_context=get_context('spawn'))
-    try:
-        for p, res in zip(paths, ex.map(_analyze_safe, paths, chunksize=2)):
-            yield p, res
-            if cancelled():
-                return
-    finally:
-        ex.shutdown(wait=False, cancel_futures=True)
+def process_pool(n: int):
+    return ProcessPoolExecutor(n, mp_context=get_context('spawn'))
 
 
 def compute_quality(conn, progress: Optional[Callable] = None,
                     cancelled: Callable[[], bool] = lambda: False) -> dict:
-    from app.ai.throttle import Throttle
+    from app.ai.throttle import Throttle, throttled_map
     rows = conn.execute(
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM quality) GROUP BY a.sha256').fetchall()
-    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
     done = failed = 0
     sha_of = {r['path']: r['sha256'] for r in rows}
     if progress and rows:
         progress('Focus and ranking scores', 0, len(rows))
-    for i, (path, res) in enumerate(_scored([r['path'] for r in rows], cancelled)):
+    parallel = len(rows) >= PARALLEL_FROM and WORKERS > 1
+    results = throttled_map(_analyze_safe, [r['path'] for r in rows], throttle, WORKERS if parallel else 1,
+                            process_pool if parallel else None, chunksize=2)
+    for i, (path, res) in enumerate(results):
         if progress:
             progress('Focus and ranking scores', i + 1, len(rows))
-        busy = 0.0
-        r = {'sha256': sha_of[path]}
         if res is None:
             failed += 1
         else:
             with conn:
                 conn.execute('INSERT OR REPLACE INTO quality (sha256, region_sharpness, quick_quality, scores_json, '
                              'computed_at) VALUES (?, ?, ?, ?, ?)',
-                             (r['sha256'], res['region_sharpness'], res['quick_quality'],
+                             (sha_of[path], res['region_sharpness'], res['quick_quality'],
                               json.dumps(res['scores']), now_iso()))
             done += 1
-        if i < len(rows) - 1:
-            throttle.after_work(busy)
     return {'scored': done, 'failed': failed}
 
 
@@ -187,13 +172,15 @@ def focus_tiers(conn) -> dict:
         "WHERE a.status = 'present'").fetchall()
     if not rows:
         return {}
-    blur_lo, sharp_hi = thresholds([r['region_sharpness'] for r in rows])
+    from app.quality.strictness import current
+    factor = current()['blur']
+    blur_lo, sharp_hi = thresholds([r['region_sharpness'] for r in rows], factor)
     q_rescue = float(np.percentile([r['quick_quality'] for r in rows], 70))
     subj = subject_rows(conn)
     measured = {r['sha256']: subj[r['sha256']] for r in rows
                 if r['sha256'] in subj and subj[r['sha256']]['subject'] != 'none'
                 and subj[r['sha256']]['sharpness'] is not None}
-    blur_line, soft_line = lines([v['sharpness'] for v in measured.values()])
+    blur_line, soft_line = lines([v['sharpness'] for v in measured.values()], factor)
     out = {}
     for r in rows:
         s = measured.get(r['sha256'])

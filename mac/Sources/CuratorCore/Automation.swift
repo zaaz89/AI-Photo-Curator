@@ -5,7 +5,7 @@ import Foundation
 /// keyboard is taken over. The channel is off unless the user default `automation` is true:
 /// `defaults write si.beehive.photocurator automation -bool true`.
 ///
-///   photocurator://go?page=home|selection|story|export|people|all|leftOut
+///   photocurator://go?page=home|selection|story|export|people|all|leftOut|settings
 ///   photocurator://album?id=<album id>
 ///   photocurator://review?filter=decisions|all|leftOut      photocurator://review?close=1
 ///   photocurator://key?k=right|left|back|skip|favourite|faces|zoom|unzoom|keys|esc
@@ -21,7 +21,7 @@ public enum AutomationCommand: Equatable, Sendable {
     case reload
 
     public static let scheme = "photocurator"
-    public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut"]
+    public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut", "settings"]
     public static let keys: Set<String> = ["right", "left", "back", "skip", "favourite", "faces", "zoom", "unzoom", "keys", "esc"]
 
     /// nil for anything that is not a known, well-formed command.

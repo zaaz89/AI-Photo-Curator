@@ -198,13 +198,48 @@ public struct EngineSettings: Codable, Hashable, Sendable {
     public var aiGpuShare: Int
     public var aiPauseOnBattery: Bool
     public var keeperWeights: [String: Int]
-    public init(uiLanguage: String, aiGpuShare: Int, aiPauseOnBattery: Bool, keeperWeights: [String: Int]) {
+    /// lenient | normal | strict (M11): how strictly photos count as blurry and eyes as closed.
+    public var qualityStrictness: String
+    public init(uiLanguage: String, aiGpuShare: Int, aiPauseOnBattery: Bool, keeperWeights: [String: Int],
+                qualityStrictness: String = "normal") {
         self.uiLanguage = uiLanguage; self.aiGpuShare = aiGpuShare
         self.aiPauseOnBattery = aiPauseOnBattery; self.keeperWeights = keeperWeights
+        self.qualityStrictness = qualityStrictness
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uiLanguage = try c.decode(String.self, forKey: .uiLanguage)
+        aiGpuShare = try c.decode(Int.self, forKey: .aiGpuShare)
+        aiPauseOnBattery = try c.decode(Bool.self, forKey: .aiPauseOnBattery)
+        keeperWeights = try c.decode([String: Int].self, forKey: .keeperWeights)
+        qualityStrictness = try c.decodeIfPresent(String.self, forKey: .qualityStrictness) ?? "normal"
     }
     enum CodingKeys: String, CodingKey {
         case uiLanguage = "ui_language", aiGpuShare = "ai_gpu_share", aiPauseOnBattery = "ai_pause_on_battery",
-             keeperWeights = "keeper_weights"
+             keeperWeights = "keeper_weights", qualityStrictness = "quality_strictness"
+    }
+    public static let strictnessLevels = ["lenient", "normal", "strict"]
+    public static let gpuShareRange = 10...100
+}
+
+/// The measured speed of this Mac (engine `speed.json`, M11): seconds per photo of a first analysis.
+public struct EngineSpeed: Codable, Hashable, Sendable {
+    /// Work the owner's share slows down (focus, faces, subject sharpness).
+    public let throttledPerPhoto: Double
+    /// The rest (reading files, times, places).
+    public let otherPerPhoto: Double
+    public let photos: Int
+    public init(throttledPerPhoto: Double, otherPerPhoto: Double, photos: Int) {
+        self.throttledPerPhoto = throttledPerPhoto; self.otherPerPhoto = otherPerPhoto; self.photos = photos
+    }
+    enum CodingKeys: String, CodingKey {
+        case throttledPerPhoto = "throttled_per_photo", otherPerPhoto = "other_per_photo", photos
+    }
+    /// Seconds for a first analysis of `photos` photos at `share` % (the engine's `estimate_seconds`).
+    public func seconds(photos: Int, share: Int) -> Double? {
+        guard photos > 0 else { return nil }
+        let s = Double(min(100, max(1, share)))
+        return Double(photos) * (otherPerPhoto + throttledPerPhoto * 100 / s)
     }
 }
 

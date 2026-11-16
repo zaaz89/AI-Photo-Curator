@@ -711,6 +711,8 @@ Decision 2026-11-13 (M9): the native app leads through one guide with four steps
 
 Decision 2026-11-16 (M10): a quick review decides only where a decision is needed (frames of a moment, photos with a real problem) with → yes, ← no and Back; the quality check judges blur on the subject (bokeh is not a fault) and eyes per main face with an "unsure" state that never leaves a photo out. Plan: `notes/m10-plan.md`.
 
+Decision 2026-11-16 (M11): settings are a page in the app (sidebar, album home, also ⌘,) and every setting says what it changes. The analysis share is a slider from 10 to 100 % and applies to the whole analysis (focus, faces, subject sharpness) and the search index, with a time estimate from the speed measured on this Mac; thermal and battery pauses stay. The quality check has three levels (lenient, normal = calibrated, strict) applied when results are read, so a change needs no new analysis. Note: `notes/m11-smart-settings.md`.
+
 ## 12.1 Main navigation
 
 Suggested sections:

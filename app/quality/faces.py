@@ -98,9 +98,15 @@ REL_MAX = 0.20           # ... and below this openness (a normal eye next to wid
 SAME_FACE = 0.6          # faces in two frames are the same when their centres are within this many face widths
 
 
+def _closed_line() -> float:
+    """EYE_CLOSED moved by the owner's strictness (app/quality/strictness.py)."""
+    from app.quality.strictness import current
+    return current()['eye_closed']
+
+
 def _eye_closed(f: dict) -> bool:
     eyes = [e for e in (f.get('left_eye'), f.get('right_eye')) if e is not None]
-    return bool(eyes) and min(eyes) < EYE_CLOSED
+    return bool(eyes) and min(eyes) < _closed_line()
 
 
 def _looking_away(f: dict) -> bool:
@@ -138,7 +144,7 @@ def eye_state(f: dict, dims: Optional[tuple] = None, lens: Optional[float] = Non
         return 'open', None
     if (f.get('pitch') or 0.0) > PITCH_DOWN:
         return 'unsure', 'looking_down'        # looking down flattens the eye contour
-    if o < EYE_CLOSED:
+    if o < _closed_line():
         return 'closed', None
     return 'unsure', 'between'
 
@@ -160,7 +166,10 @@ def _annotate(faces: list, dims=None, lenses=None) -> list:
 def apply_moment(frames: list) -> None:
     """Compare each face with the same face (matched by box centre) in the other frames of a moment, in place.
     Closed: clearly below its own best in the moment. A laugh or squint is not closed when the face never
-    looks more open in the moment (unless the eye is shut outright)."""
+    looks more open in the moment (unless the eye is shut outright). The lines follow the owner's strictness."""
+    from app.quality.strictness import current
+    lv = current()
+
     def centre(a):
         x, y, w, h = a['box']
         return x + w / 2, y + h / 2, max(w, h)
@@ -184,7 +193,8 @@ def apply_moment(frames: list) -> None:
                 continue
             if a['state'] == 'closed' and a['open'] >= EYE_SHUT and best < EYE_OPEN:
                 changes.append((a, 'unsure', 'squint'))
-            elif a['state'] != 'closed' and best >= EYE_OPEN and a['open'] < REL_MAX and a['open'] <= REL_CLOSED * best:
+            elif a['state'] != 'closed' and best >= EYE_OPEN and a['open'] < lv['rel_max'] \
+                    and a['open'] <= lv['rel_closed'] * best:
                 changes.append((a, 'closed', 'relative'))
     for a, state, why in changes:
         a['state'], a['why'] = state, why
@@ -255,7 +265,7 @@ def helper_version() -> int:
 
 
 def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
-    from app.ai.throttle import Throttle
+    from app.ai.throttle import Throttle, throttled_map
     hv = helper_version()
     # A photo is measured again only when the installed helper is newer than the one that measured it
     # (rows without a version came from helper 1); an old helper never causes endless re-measuring.
@@ -264,29 +274,21 @@ def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callab
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM faces WHERE vision_json IS NOT NULL '
         "AND COALESCE(json_extract(vision_json, '$.v'), 1) >= ?) GROUP BY a.sha256", (hv,)).fetchall()
-    # Apple Vision face detection is light: no AI duty cycle, and a few batches run at once
-    # (thermal and battery pauses still apply; M9 speed-up, owner's OK 2026-11-16).
-    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
+    # Apple Vision runs a few batches at once; since M11 the owner's share applies (rounds of batches with a
+    # rest after each), thermal and battery pauses too.
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
     done = 0
     chunks = [rows[i:i + BATCH] for i in range(0, len(rows), BATCH)]
     from concurrent.futures import ThreadPoolExecutor
-    pool = ThreadPoolExecutor(FACE_WORKERS)
-    try:
-        futures = [pool.submit(_run, 'faces', [c['path'] for c in chunk]) for chunk in chunks]
-    except Exception:
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    for i, (chunk, fut) in enumerate(zip(chunks, futures)):
-        if cancelled():
-            pool.shutdown(wait=False, cancel_futures=True)
-            break
+
+    def measure(chunk):
+        try:
+            return {r['path']: r for r in _run('faces', [c['path'] for c in chunk])}
+        except Exception:
+            return {}
+    for i, (chunk, res) in enumerate(throttled_map(measure, chunks, throttle, FACE_WORKERS, ThreadPoolExecutor)):
         if progress:
             progress('Faces (Apple Vision)', i * BATCH, len(rows))
-        try:
-            res = {r['path']: r for r in fut.result()}
-        except Exception:
-            res = {}
-        busy = 0.0
         with conn:
             for c in chunk:
                 r = res.get(c['path'])
@@ -299,8 +301,6 @@ def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callab
                              (c['sha256'], len(faces), json.dumps(faces), json.dumps(vision), now_iso()))
                 conn.execute('DELETE FROM subject_focus WHERE sha256 = ?', (c['sha256'],))
                 done += 1
-        throttle.after_work(busy)
-    pool.shutdown(wait=False, cancel_futures=True)
     return {'analysed': done}
 
 

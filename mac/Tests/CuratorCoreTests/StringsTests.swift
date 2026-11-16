@@ -20,7 +20,9 @@ import Testing
         for m in src.matches(of: quoted) { keys.insert(String(m.output[1].substring!)); keys.insert(String(m.output[2].substring!)) }
     }
     keys.subtract(["phase_", "sort_", "tier_", "w_", "key", "ownerFrom_", "step_", "stepTitle_", "action_", "nextText_",
-                   "funnel_", "funnelHelp_", "exportKind_", "exportKindText_", "folders_", "names_", "review_", "why2_"])
+                   "funnel_", "funnelHelp_", "exportKind_", "exportKindText_", "folders_", "names_", "review_", "why2_",
+                   "strict_", "strictText_"])
+    keys.formUnion(EngineSettings.strictnessLevels.flatMap { ["strict_" + $0, "strictText_" + $0] })
     for s in GuideStep.allCases { keys.formUnion(["step_", "stepTitle_", "action_", "nextText_"].map { $0 + s.rawValue }) }
     keys.formUnion(["inAlbum", "extraFrames", "blurry", "leftOut"].flatMap { ["funnel_" + $0, "funnelHelp_" + $0] })
     keys.formUnion(ExportKind.allCases.flatMap { ["exportKind_" + $0.rawValue, "exportKindText_" + $0.rawValue] })

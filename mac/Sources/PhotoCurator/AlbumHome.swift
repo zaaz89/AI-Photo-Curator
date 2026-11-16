@@ -14,6 +14,7 @@ struct AlbumHome: View {
                     GuideEmpty(symbol: "sparkles", title: library.tr("nothingAnalysed"), text: library.tr("nothingAnalysedText"))
                 } else {
                     if library.analysing { AnalysisCard() } else { NextCard() }
+                    SettingsStrip()
                     if let f = library.overview?.funnel, f.taken > 0, !library.analysing { FunnelView(funnel: f) }
                     StepCards()
                     Highlights()

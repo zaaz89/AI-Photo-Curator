@@ -729,7 +729,7 @@ async function viewSettings() {
   const KW = ['faces', 'focus', 'look', 'resolution'];
   $('#main').innerHTML = `<div class="card"><div class="form">
       ${sel('setLang', t('language'), [['en', 'English'], ['sl', 'Slovenščina']], s.ui_language || 'en')}
-      ${sel('setGpu', t('aiLimit'), [['25', t('gentle')], ['30', t('def30')], ['50', t('faster')], ['100', t('noLimit')]], String(s.ai_gpu_share ?? 30))}
+      ${sel('setGpu', t('aiLimit'), [['25', t('gentle')], ['30', t('def30')], ['50', t('faster')], ['100', t('noLimit')]].concat([25, 30, 50, 100].includes(s.ai_gpu_share ?? 30) ? [] : [[String(s.ai_gpu_share), s.ai_gpu_share + ' %']]), String(s.ai_gpu_share ?? 30))}
       <div class="full"><label style="display:flex;gap:6px;align-items:center;color:var(--text)"><input type="checkbox" id="setBat" ${s.ai_pause_on_battery ? 'checked' : ''}> ${esc(t('pauseBattery'))}</label></div></div></div>
     <div class="card"><h3>${esc(t('keeperW'))}</h3><div class="weights">${KW.map(k => `<label for="kw-${k}">${esc(t('w_' + k))}</label><input type="range" id="kw-${k}" min="0" max="100" value="${kw[k]}"><span id="kwv-${k}">${kw[k]}</span>`).join('')}</div></div>
     <div class="card"><h3>${esc(t('aiModels'))}</h3><dl class="kv">
