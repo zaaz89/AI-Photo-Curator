@@ -234,6 +234,21 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL
     );
     """,
+    # 10: quality check v2 (M10b): Apple Vision aesthetics, utility flag and salient boxes per photo, and the
+    # sharpness of the subject (main faces or salient boxes) so a soft background (bokeh) is never a fault
+    """
+    ALTER TABLE faces ADD COLUMN vision_json TEXT;   -- {aesthetic, utility, salient}; NULL = older helper, redo
+    CREATE TABLE subject_focus (
+        sha256      TEXT PRIMARY KEY,
+        subject     TEXT NOT NULL,            -- faces | salient | none
+        sharpness   REAL,                     -- normalised Laplacian on the subject (NULL: no subject)
+        whole       REAL,                     -- the same measure on the whole photo
+        anisotropy  REAL,                     -- directional detail ratio on the subject (movement cue)
+        subject_px  INTEGER,                  -- subject size at the working resolution
+        eyes_json   TEXT NOT NULL DEFAULT '[]', -- per helper face: eye area / skin brightness (dark lenses)
+        computed_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

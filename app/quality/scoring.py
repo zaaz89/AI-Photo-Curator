@@ -172,7 +172,15 @@ def classify(region_s, q, blur_lo, sharp_hi, q_rescue):
 
 
 def focus_tiers(conn) -> dict:
-    """asset_id -> {tier, rescued, region_sharpness, override}."""
+    """asset_id -> {tier, auto_tier, rescued, region_sharpness, override, blur, blur_reason, subject,
+    subject_sharpness}.
+
+    M10b: when the subject (main faces or Apple Vision's salient boxes, app/quality/subject.py) was measured,
+    the automatic tier is the subject's verdict, so a soft background (bokeh) is never blurry. Without a
+    subject the whole-image tiers above still decide. The owner's override always wins (`tier`); `blur` is
+    the final tier and `blur_reason` (subject | movement | whole) is set only when the automatic verdict
+    is blurry too."""
+    from app.quality.subject import MOVEMENT_ANISO, lines, subject_rows, verdict
     rows = conn.execute(
         'SELECT a.id, a.sha256, q.region_sharpness, q.quick_quality, m.focus AS override FROM assets a '
         'JOIN quality q ON q.sha256 = a.sha256 LEFT JOIN marks m ON m.sha256 = a.sha256 '
@@ -181,11 +189,29 @@ def focus_tiers(conn) -> dict:
         return {}
     blur_lo, sharp_hi = thresholds([r['region_sharpness'] for r in rows])
     q_rescue = float(np.percentile([r['quick_quality'] for r in rows], 70))
+    subj = subject_rows(conn)
+    measured = {r['sha256']: subj[r['sha256']] for r in rows
+                if r['sha256'] in subj and subj[r['sha256']]['subject'] != 'none'
+                and subj[r['sha256']]['sharpness'] is not None}
+    blur_line, soft_line = lines([v['sharpness'] for v in measured.values()])
     out = {}
     for r in rows:
-        tier, rescued = classify(r['region_sharpness'], r['quick_quality'], blur_lo, sharp_hi, q_rescue)
-        out[r['id']] = {'tier': r['override'] or tier, 'auto_tier': tier, 'rescued': rescued,
-                        'region_sharpness': round(r['region_sharpness'], 1), 'override': r['override']}
+        s = measured.get(r['sha256'])
+        if s:
+            tier, reason = verdict(s, blur_line, soft_line)
+            rescued = False
+        else:
+            tier, rescued = classify(r['region_sharpness'], r['quick_quality'], blur_lo, sharp_hi, q_rescue)
+            whole = subj.get(r['sha256'])
+            reason = None
+            if tier == 'blurry':
+                reason = 'movement' if whole and (whole.get('anisotropy') or 1.0) >= MOVEMENT_ANISO else 'whole'
+        final = r['override'] or tier
+        out[r['id']] = {'tier': final, 'auto_tier': tier, 'rescued': rescued,
+                        'region_sharpness': round(r['region_sharpness'], 1), 'override': r['override'],
+                        'blur': final, 'blur_reason': reason if final == 'blurry' else None,
+                        'subject': s['subject'] if s else 'none',
+                        'subject_sharpness': round(s['sharpness'], 2) if s else None}
     return out
 
 

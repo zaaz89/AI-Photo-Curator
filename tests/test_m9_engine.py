@@ -208,8 +208,11 @@ def _face(box, **kw):
 
 def test_face_boxes_flip_to_top_left_and_flags():
     # Vision: origin bottom left. A face in the TOP-left corner has a large Vision y.
+    # M10b: a closed-looking eye on a turned head is "unsure", not closed.
     boxes = face_boxes([_face([0.1, 0.6, 0.2, 0.3], left_eye=0.05, yaw=0.9)])
-    assert boxes == [{'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': True}]
+    assert boxes == [{'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.3, 'eyes_closed': False, 'looking_away': True,
+                      'state': 'unsure', 'main': True}]
+    assert face_boxes([_face([0.1, 0.6, 0.2, 0.3], left_eye=0.05)])[0]['eyes_closed'] is True
     ok = face_boxes([_face([0.5, 0.2, 0.1, 0.1])])[0]
     assert ok['eyes_closed'] is False and ok['looking_away'] is False and ok['y'] == 0.7
 
@@ -233,5 +236,6 @@ def test_timeline_items_carry_boxes(client, H, album):
                      (sha, json.dumps(faces), 'now'))
     f = _timeline_item(client, H, slug, c)['faces']
     assert f['faces'] == 1 and f['eyes_closed'] == 1
-    assert f['boxes'] == [{'x': 0.2, 'y': 0.2, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': False}]
+    assert f['boxes'] == [{'x': 0.2, 'y': 0.2, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': False,
+                           'state': 'closed', 'main': True}]
     assert _timeline_item(client, H, slug, _id(conn, 'P.jpg'))['faces'] is None
