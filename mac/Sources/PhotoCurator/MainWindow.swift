@@ -46,6 +46,8 @@ struct MainWindow: View {
                 }
                 .quickLookPreview($library.quickLookURL, in: library.quickLookItems)
         }
+        // Under the quick review nothing else takes keys or clicks (a hidden page would act on its own photos).
+        .disabled(library.reviewFilter != nil)
         .overlay { AIGlow(active: library.job.running && library.job.phase.isAI) }
         .overlay {
             if let f = library.reviewFilter {

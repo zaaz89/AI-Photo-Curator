@@ -72,3 +72,10 @@ private func box(_ x: Double, _ y: Double, _ w: Double = 0.1, state: String? = n
     #expect(rows[1][1]?.x == 0.62 && rows[1][2] == nil)            // Bor: turned away in frame 2
     #expect(mainFaces([try box(0.1, 0.1, main: false), try box(0.5, 0.5)]).count == 1)
 }
+
+@Test func keepTooAndExactCopies() throws {
+    let extraKept = try photo(9, #""keep": true, "duplicate": {"group": 4, "category": "near", "keeper": false}"#)
+    #expect(extraKept.goesToAlbumDespiteFocus && !extraKept.favorite)          // in the album without 5 stars
+    let copy = try photo(10, #""duplicate": {"group": 7, "category": "exact", "keeper": false}"#)
+    #expect(!isMomentFrame(copy) && reviewQueue([copy], filter: .decisions).isEmpty)   // no question about copies
+}

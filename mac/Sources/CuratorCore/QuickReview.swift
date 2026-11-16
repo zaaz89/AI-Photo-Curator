@@ -93,10 +93,13 @@ public func reviewReasons(_ p: Photo) -> [String] {
 
 /// A photo with a real problem to decide on. "Eyes: can't tell" (sunglasses, profile, looking down) is shown
 /// as information but is no reason on its own to ask the owner.
-public func needsALook(_ p: Photo) -> Bool { reviewReasons(p).contains { $0 != "eyes_unsure" } }
+/// "Another frame of the same moment" is no reason on its own either: frames of a moment are asked about as
+/// moments (byte-identical copies not at all).
+public func needsALook(_ p: Photo) -> Bool { reviewReasons(p).contains { $0 != "eyes_unsure" && $0 != "extra_frame" } }
 
 /// One of several near-identical shots of the same moment (the keeper as well as the other frames).
-public func isMomentFrame(_ p: Photo) -> Bool { ["exact", "near"].contains(p.duplicate?.category ?? "") }
+/// Byte-identical copies (AirDrop, the same file twice) are not asked about: one copy is enough.
+public func isMomentFrame(_ p: Photo) -> Bool { p.duplicate?.category == "near" }
 
 /// A photo that needs the owner's yes or no.
 public func needsDecision(_ p: Photo) -> Bool { isMomentFrame(p) || needsALook(p) }

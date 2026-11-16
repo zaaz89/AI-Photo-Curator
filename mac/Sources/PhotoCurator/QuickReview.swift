@@ -15,6 +15,8 @@ struct QuickReviewView: View {
     @State private var flash: ReviewAction?
     @State private var slide: CGFloat = 0
     @State private var flashTask: Task<Void, Never>?
+    /// The session goes through a chosen subset (e.g. the skipped photos), not the filter's whole queue.
+    @State private var subset = false
     @FocusState private var focused: Bool
 
     var photo: Photo? { session.current.flatMap(library.photo) }
@@ -56,10 +58,11 @@ struct QuickReviewView: View {
         }
         .environment(\.colorScheme, .dark)
         .focusable().focusEffectDisabled().focused($focused)
-        .onKeyPress(.rightArrow) { decide(.keep); return .handled }
-        .onKeyPress(.leftArrow) { decide(.leaveOut); return .handled }
-        .onKeyPress(.space) { decide(.skip); return .handled }
-        .onKeyPress(keys: [.delete, .deleteForward, KeyEquivalent("\u{8}"), KeyEquivalent("\u{7F}")]) { _ in back(); return .handled }
+        // One decision per press: a held key does not repeat (it would decide photos the owner never saw).
+        .onKeyPress(.rightArrow, phases: .down) { _ in decide(.keep); return .handled }
+        .onKeyPress(.leftArrow, phases: .down) { _ in decide(.leaveOut); return .handled }
+        .onKeyPress(.space, phases: .down) { _ in decide(.skip); return .handled }
+        .onKeyPress(keys: [.delete, .deleteForward, KeyEquivalent("\u{8}"), KeyEquivalent("\u{7F}")], phases: .down) { _ in back(); return .handled }
         .onKeyPress(.escape) { if showKeys { showKeys = false } else { close() }; return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "fF")) { _ in favourite(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "eE")) { _ in showFaces.toggle(); return .handled }
@@ -85,7 +88,9 @@ struct QuickReviewView: View {
             default: break
             }
         }
-        .onChange(of: library.loadedTripId) { _, _ in close() }       // another album: the ids mean something else
+        // Another album: the ids mean something else. Close without touching any bookmark.
+        .onChange(of: library.loadedTripId) { _, _ in library.reviewFilter = nil }
+        .onChange(of: library.reviewFilter) { _, f in if let f, f != filter { begin(f, ids: nil) } }
     }
 
     // MARK: layout
@@ -93,7 +98,7 @@ struct QuickReviewView: View {
     var topBar: some View {
         HStack(spacing: 14) {
             Button { close() } label: { Label(library.tr("done"), systemImage: "xmark") }
-                .buttonStyle(.glass).keyboardShortcut(.cancelAction)
+                .buttonStyle(.glass)      // Escape is handled by the view: it closes the keys card first
             Picker("", selection: Binding(get: { filter }, set: { begin($0, ids: nil) })) {
                 ForEach(ReviewFilter.allCases) { f in Text(library.tr("review_" + f.rawValue)).tag(f) }
             }
@@ -109,8 +114,10 @@ struct QuickReviewView: View {
             VStack(alignment: .trailing, spacing: 1) {
                 Text("\(min(session.index + 1, session.queue.count)) / \(session.queue.count)")
                     .font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(.white)
-                if filter == .decisions {
-                    Text(String(format: library.tr("reviewRestStays"), library.photos.count - session.queue.count))
+                if filter == .decisions && !subset {
+                    let inQueue = Set(session.queue)
+                    Text(String(format: library.tr("reviewRestStays"),
+                                library.photos.filter { !inQueue.contains($0.id) && $0.goesToAlbumDespiteFocus }.count))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -209,6 +216,7 @@ struct QuickReviewView: View {
     func begin(_ f: ReviewFilter, ids: [Int]?) {
         filter = f
         let queue = ids ?? reviewQueue(library.photos, filter: f)
+        subset = ids != nil
         let start = ids == nil ? library.reviewBookmark(f) : nil
         session = ReviewSession(queue: queue, startAt: start)
         started = true

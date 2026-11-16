@@ -111,8 +111,13 @@ struct MomentsPanel: View {
                 Button(library.tr("acceptRest")) { acceptRest() }.buttonStyle(.glass).controlSize(.large)
                     .help(library.tr("acceptRestHelp"))
             }
-            let faceRows = matchFaces(g.members.map { library.photo($0.id)?.faces?.boxes ?? [] },
-                                      reference: g.members.firstIndex { $0.id == g.keeperId } ?? 0)
+            let frameBoxes = g.members.map { library.photo($0.id)?.faces?.boxes ?? [] }
+            let keeperIndex = g.members.firstIndex { $0.id == g.keeperId } ?? 0
+            // The keeper is the reference unless it shows no main face; then the frame with the most faces.
+            let reference = mainFaces(frameBoxes[keeperIndex]).isEmpty
+                ? (frameBoxes.indices.max { mainFaces(frameBoxes[$0]).count < mainFaces(frameBoxes[$1]).count } ?? keeperIndex)
+                : keeperIndex
+            let faceRows = matchFaces(frameBoxes, reference: reference)
             GeometryReader { geo in
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 16) {
@@ -155,7 +160,7 @@ struct MomentsPanel: View {
         groups = all.filter { !$0.clear } + all.filter(\.clear)
         if selected == nil || !groups.contains(where: { $0.id == selected }) { select(groups.first?.id) }
         loaded = true
-        focused = true
+        if library.reviewFilter == nil { focused = true }
     }
 
     func select(_ id: Int?) {
@@ -251,7 +256,7 @@ struct FrameColumn: View {
     let keepToo: () -> Void
 
     var isKeeper: Bool { member.id == group.keeperId }
-    var alsoKept: Bool { !isKeeper && photo?.favorite == true }
+    var alsoKept: Bool { !isKeeper && (photo?.keep == true || photo?.favorite == true) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -299,9 +304,9 @@ struct FrameColumn: View {
                 .disabled(isKeeper)
                 if !isKeeper {
                     Button(action: keepToo) {
-                        Label(library.tr(alsoKept ? "keptToo" : "keepToo"), systemImage: alsoKept ? "heart.fill" : "heart")
+                        Label(library.tr(alsoKept ? "keptToo" : "keepToo"), systemImage: alsoKept ? "plus.circle.fill" : "plus.circle")
                     }
-                    .buttonStyle(.glass).tint(alsoKept ? .pink : nil)
+                    .buttonStyle(.glass).tint(alsoKept ? .green : nil)
                     .help(library.tr("keepTooHelp"))
                 }
             }

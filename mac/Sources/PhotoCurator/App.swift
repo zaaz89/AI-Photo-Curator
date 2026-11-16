@@ -83,11 +83,14 @@ struct AppCommands: Commands {
         }
         CommandGroup(replacing: .undoRedo) {
             // In the quick review ⌘Z is Back: it shows the photo again and undoes its decision.
-            Button(library.reviewFilter != nil ? library.tr("back") : (library.undoManager?.undoMenuItemTitle ?? library.tr("undo"))) {
-                if library.reviewFilter != nil { library.reviewUndoRequest += 1 } else { library.undoManager?.undo() }
+            // Otherwise Undo and Redo go through the responder chain as usual, so a text field, a sheet or the
+            // Classic window undoes its own change, never the main window's last mark by mistake.
+            Button(library.reviewFilter != nil ? library.tr("back") : library.tr("undo")) {
+                if library.reviewFilter != nil { library.reviewUndoRequest += 1 }
+                else { NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) }
             }
             .keyboardShortcut("z")
-            Button(library.undoManager?.redoMenuItemTitle ?? library.tr("redo")) { library.undoManager?.redo() }
+            Button(library.tr("redo")) { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(library.reviewFilter != nil)
         }
