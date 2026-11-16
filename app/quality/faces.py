@@ -25,7 +25,7 @@ from typing import Callable, Optional
 from app.collections import data_dir, now_iso
 
 EYE_CLOSED = 0.12        # eye contour height / width; below this the eye is treated as closed
-EYE_OPEN = 0.18
+EYE_OPEN = 0.25        # calibrated 2026-11-16 on the owner's 236 photos: 0.18-0.24 included half-closed and looking-down eyes
 LOOK_AWAY_RAD = 0.6      # about 35 degrees of head turn
 BATCH = 12
 FACE_WORKERS = 3
