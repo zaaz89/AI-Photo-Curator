@@ -106,7 +106,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
     }
     from app.quality.scoring import focus_tiers
     tiers = focus_tiers(conn)
-    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded, favorite, rejected FROM marks')}
+    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded, favorite, rejected, keep FROM marks')}
     from app.quality.faces import summaries, vision_info
     face_map = summaries(conn)
     vision = vision_info(conn)
@@ -119,6 +119,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
         i['excluded'] = bool(m['excluded']) if m else False
         i['favorite'] = bool(m['favorite']) if m else False
         i['rejected'] = bool(m['rejected']) if m else False
+        i['keep'] = bool(m['keep']) if m else False
         i['faces'] = face_map.get(sha_of.get(i['id']))
         i['quality'] = _quality(i, i['focus'], i['faces'], vision.get(sha_of.get(i['id'])))
         v = videos.get(sha_of.get(i['id']))

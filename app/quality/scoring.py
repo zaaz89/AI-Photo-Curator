@@ -258,7 +258,8 @@ def set_mark(conn, asset_id: int, **fields) -> dict:
     if not row:
         raise ValueError('unknown photo')
     allowed = {'focus': (None, 'sharp', 'soft', 'blurry'), 'wallpaper': (True, False, 0, 1),
-               'excluded': (True, False, 0, 1), 'favorite': (True, False, 0, 1), 'rejected': (True, False, 0, 1)}
+               'excluded': (True, False, 0, 1), 'favorite': (True, False, 0, 1), 'rejected': (True, False, 0, 1),
+               'keep': (True, False, 0, 1)}
     clean = {}
     for k, v in fields.items():
         if k not in allowed or v not in allowed[k]:
@@ -268,7 +269,7 @@ def set_mark(conn, asset_id: int, **fields) -> dict:
         conn.execute('INSERT OR IGNORE INTO marks (sha256, updated_at) VALUES (?, ?)', (row['sha256'], now_iso()))
         for k, v in clean.items():
             conn.execute(f'UPDATE marks SET {k} = ?, updated_at = ? WHERE sha256 = ?', (v, now_iso(), row['sha256']))
-    r = conn.execute('SELECT focus, wallpaper, excluded, favorite, rejected FROM marks WHERE sha256 = ?',
+    r = conn.execute('SELECT focus, wallpaper, excluded, favorite, rejected, keep FROM marks WHERE sha256 = ?',
                      (row['sha256'],)).fetchone()
     return dict(r)
 

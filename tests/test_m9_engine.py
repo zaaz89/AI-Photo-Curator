@@ -239,3 +239,41 @@ def test_timeline_items_carry_boxes(client, H, album):
     assert f['boxes'] == [{'x': 0.2, 'y': 0.2, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': False,
                            'state': 'closed', 'main': True}]
     assert _timeline_item(client, H, slug, _id(conn, 'P.jpg'))['faces'] is None
+
+
+def test_keep_too_exports_an_extra_frame_without_making_it_a_favourite(album):
+    """M10 review: "Yes" on another frame of a moment keeps it (mark `keep`), but no 5 stars in the export."""
+    conn, _ = album
+    nk = _non_keeper(conn)
+    assert nk not in {e['asset_id'] for e in plan_export(conn, **google_photos_options())['entries']}
+    set_mark(conn, nk, keep=True)
+    plan = plan_export(conn, **google_photos_options())
+    entry = next(e for e in plan['entries'] if e['asset_id'] == nk)
+    assert 'favorite' not in entry['meta']
+    o = overview(conn)
+    assert o['funnel']['extra_frames'] == 0 and o['funnel']['in_album'] == plan['photo_counts']['in_album']
+
+
+def test_helper_measures_again_only_when_newer(album, monkeypatch):
+    import app.quality.faces as F
+    conn, _ = album
+    calls = []
+
+    def fake_run(mode, paths, extra=None, timeout=600):
+        calls.append(len(paths))
+        return [{'path': p, 'faces': [], 'aesthetic': 0.1, 'utility': False} for p in paths]
+
+    monkeypatch.setattr(F, '_run', fake_run)
+    monkeypatch.setattr(F, 'helper_available', lambda: True)
+    monkeypatch.setattr(F, '_HELPER_VERSION', 1)
+    F._compute_helper(conn)
+    assert sum(calls) == 6                                             # first measurement by helper 1
+    calls.clear()
+    F._compute_helper(conn)
+    assert calls == []                                                 # an old helper never re-measures
+    monkeypatch.setattr(F, '_HELPER_VERSION', 2)
+    F._compute_helper(conn)
+    assert sum(calls) == 6                                             # the six photos, once
+    calls.clear()
+    F._compute_helper(conn)
+    assert calls == []                                                 # and not again

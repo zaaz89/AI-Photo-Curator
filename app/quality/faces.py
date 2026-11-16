@@ -232,13 +232,31 @@ def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable
     return res
 
 
+_HELPER_VERSION: Optional[int] = None
+
+
+def helper_version() -> int:
+    """The installed helper's version (1 for the first helper, which has no version command)."""
+    global _HELPER_VERSION
+    if _HELPER_VERSION is None:
+        try:
+            out = _run('version', [], timeout=20)
+            _HELPER_VERSION = int((out[0] if out else {}).get('version') or 1)
+        except Exception:
+            _HELPER_VERSION = 1
+    return _HELPER_VERSION
+
+
 def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
     from app.ai.throttle import Throttle
+    hv = helper_version()
+    # A photo is measured again only when the installed helper is newer than the one that measured it
+    # (rows without a version came from helper 1); an old helper never causes endless re-measuring.
     rows = conn.execute(
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
-        # rows from the older helper (no vision_json) are measured again once (M10b)
-        'AND a.sha256 NOT IN (SELECT sha256 FROM faces WHERE vision_json IS NOT NULL) GROUP BY a.sha256').fetchall()
+        'AND a.sha256 NOT IN (SELECT sha256 FROM faces WHERE vision_json IS NOT NULL '
+        "AND COALESCE(json_extract(vision_json, '$.v'), 1) >= ?) GROUP BY a.sha256", (hv,)).fetchall()
     # Apple Vision face detection is light: no AI duty cycle, and a few batches run at once
     # (thermal and battery pauses still apply; M9 speed-up, owner's OK 2026-11-16).
     throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
@@ -268,7 +286,7 @@ def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callab
                 if r is None:
                     continue
                 faces = r.get('faces') or []
-                vision = {k: r[k] for k in ('aesthetic', 'utility', 'salient') if k in r}
+                vision = {'v': hv, **{k: r[k] for k in ('aesthetic', 'utility', 'salient') if k in r}}
                 conn.execute('INSERT OR REPLACE INTO faces (sha256, n_faces, faces_json, vision_json, computed_at) '
                              'VALUES (?, ?, ?, ?, ?)',
                              (c['sha256'], len(faces), json.dumps(faces), json.dumps(vision), now_iso()))

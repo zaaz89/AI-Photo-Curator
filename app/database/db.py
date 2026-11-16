@@ -249,6 +249,11 @@ MIGRATIONS = [
         computed_at TEXT NOT NULL
     );
     """,
+    # 11: "keep too" (M10 review): an extra frame of a moment the owner keeps as well, without making it a
+    # favourite (favourites get 5 stars in the export).
+    """
+    ALTER TABLE marks ADD COLUMN keep INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

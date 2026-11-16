@@ -92,9 +92,11 @@ def subject_boxes(faces: list, salient: Optional[list]) -> tuple:
 
 
 def load_gray(path: str):
-    """Grey image as displayed (EXIF orientation applied), long side at most WORK_LONG."""
+    """Grey image as displayed (EXIF orientation applied), long side at most WORK_LONG. Decoded at full size
+    first, so photos from different devices are measured at the same working size (a reduced decode would
+    halve small images and make them look sharper than they are)."""
     from raw_loader import imread_gray
-    g = imread_gray(path, reduced=True)
+    g = imread_gray(path, reduced=False)
     if g is None:
         return None
     h, w = g.shape[:2]
