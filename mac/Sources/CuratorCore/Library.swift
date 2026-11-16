@@ -116,3 +116,35 @@ public func rangeSelect(from: Int, to: Int, in ids: [Int]) -> Set<Int> {
     guard a <= b else { return [] }
     return Set(ids[a...b])
 }
+
+/// How the frames of one moment are laid out in the compare view.
+public struct FrameLayout: Equatable, Sendable {
+    public let columns: Int
+    public let rows: Int
+    public let frameWidth: Double
+    /// All frames are visible without scrolling. When false the grid scrolls down, never sideways.
+    public let fits: Bool
+}
+
+/// Lays `count` frames out so all of them are visible at once and as large as possible: tries every
+/// number of columns, wraps into rows, and keeps each photo (with `below` points of details under it)
+/// inside the space. Only when even that would make frames smaller than `minWidth` does it fall back
+/// to rows that scroll down.
+public func frameLayout(count: Int, ratio: Double, width: Double, height: Double, below: Double,
+                        spacing: Double = 16, minWidth: Double = 180) -> FrameLayout {
+    let n = max(1, count), r = max(0.2, ratio)
+    var best: FrameLayout?
+    for cols in 1...n {
+        let rows = (n + cols - 1) / cols
+        let byWidth = (width - spacing * Double(cols - 1)) / Double(cols)
+        let rowHeight = (height - spacing * Double(rows - 1)) / Double(rows)
+        let w = min(byWidth, (rowHeight - below) * r)
+        if w >= minWidth, w > (best?.frameWidth ?? 0) + 0.5 {
+            best = FrameLayout(columns: cols, rows: rows, frameWidth: w, fits: true)
+        }
+    }
+    if let best { return best }
+    let cols = max(1, min(n, Int((width + spacing) / (minWidth + spacing))))
+    let w = (width - spacing * Double(cols - 1)) / Double(cols)
+    return FrameLayout(columns: cols, rows: (n + cols - 1) / cols, frameWidth: w, fits: false)
+}

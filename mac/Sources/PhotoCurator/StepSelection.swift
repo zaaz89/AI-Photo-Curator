@@ -119,19 +119,9 @@ struct MomentsPanel: View {
                 : keeperIndex
             let faceRows = matchFaces(frameBoxes, reference: reference)
             GeometryReader { geo in
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        ForEach(Array(g.members.enumerated()), id: \.element.id) { i, m in
-                            FrameColumn(member: m, photo: library.photo(m.id), group: g, highlighted: i == frame,
-                                        matched: faceRows.map { $0[i] },
-                                        keep: { frame = i; keepAndNext() }, keepToo: { frame = i; keepToo() })
-                                .frame(width: frameWidth(g, geo.size))
-                                .onTapGesture { frame = i; focused = true }
-                        }
-                    }
-                    .padding(4)
-                }
-                .scrollIndicators(g.members.count > 3 ? .automatic : .never)
+                // Every frame of the moment is visible at once: they wrap into rows instead of
+                // scrolling sideways (owner, 2026-11-16). Only extreme moments scroll down.
+                frameGrid(g, faceRows: faceRows, layout: frameLayout(for: g, faceRows: faceRows.count, in: geo.size))
             }
             .frame(minHeight: 0, maxHeight: .infinity)
             .id(g.id)
@@ -143,14 +133,45 @@ struct MomentsPanel: View {
         .animation(.snappy(duration: 0.25), value: g.id)
     }
 
-    /// Up to three frames share the width; more scroll sideways. The photo also has to fit the height
-    /// left for it (time, faces and buttons take about 150 points below it).
-    func frameWidth(_ g: MomentGroup, _ size: CGSize) -> CGFloat {
-        let n = CGFloat(min(3, max(1, g.members.count)))
-        let byWidth = (size.width - 8 - 16 * (n - 1)) / n
-        let ratio = g.members.map { CGFloat($0.width ?? 3) / CGFloat(max($0.height ?? 2, 1)) }.max() ?? 1.5
-        let byHeight = max(120, size.height - 160) * ratio
-        return max(220, min(byWidth, byHeight))
+    func frameGrid(_ g: MomentGroup, faceRows: [[Photo.Faces.Box?]], layout: FrameLayout) -> some View {
+        let width = CGFloat(layout.frameWidth)
+        let columns = Array(repeating: GridItem(.fixed(width), spacing: 16, alignment: .top), count: layout.columns)
+        let members = Array(g.members.enumerated())
+        return ScrollView(.vertical) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                ForEach(members, id: \.element.id) { item in
+                    frameCell(g, index: item.offset, member: item.element, faceRows: faceRows, width: width)
+                }
+            }
+            .padding(4)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollDisabled(layout.fits)
+        .scrollIndicators(layout.fits ? .never : .automatic)
+    }
+
+    func frameCell(_ g: MomentGroup, index i: Int, member m: MomentGroup.Member, faceRows: [[Photo.Faces.Box?]], width: CGFloat) -> some View {
+        FrameColumn(member: m, photo: library.photo(m.id), group: g, highlighted: i == frame,
+                    matched: faceRows.map { $0[i] },
+                    keep: { frame = i; keepAndNext() }, compact: width < 300, keepToo: { frame = i; keepToo() })
+            .frame(width: width)
+            .onTapGesture { frame = i; focused = true }
+    }
+
+    /// All frames on screen at once, as large as they can be (see `frameLayout` in CuratorCore).
+    /// Below each photo: time and focus (about 30 points), the faces row (86), the buttons (44).
+    func frameLayout(for g: MomentGroup, faceRows: Int, in size: CGSize) -> FrameLayout {
+        let ratio = g.members.map { Double($0.width ?? 3) / Double(max($0.height ?? 2, 1)) }.max() ?? 1.5
+        func layout(compact: Bool) -> FrameLayout {
+            // Time and focus ~30, faces row (76 or 56 in narrow cells) + gap, buttons ~44 (or ~34).
+            let below: Double = (faceRows > 0 ? (compact ? 66 : 86) : 0) + (compact ? 96 : 74) + 20
+            return CuratorCore.frameLayout(count: g.members.count, ratio: ratio, width: size.width - 8,
+                                           height: size.height - 8, below: below)
+        }
+        // Narrow cells need less room below the photo, which can make the photos larger.
+        let wide = layout(compact: false)
+        let narrow = layout(compact: true)
+        return narrow.frameWidth < 300 && narrow.frameWidth > wide.frameWidth ? narrow : wide
     }
 
     func load() async {
@@ -253,6 +274,7 @@ struct FrameColumn: View {
     /// This frame's faces in the same order as in the other frames (one per person; nil: not found here).
     var matched: [Photo.Faces.Box?] = []
     let keep: () -> Void
+    var compact = false                     // narrow cell: icon buttons, smaller face crops
     let keepToo: () -> Void
 
     var isKeeper: Bool { member.id == group.keeperId }
@@ -281,10 +303,10 @@ struct FrameColumn: View {
                 HStack(spacing: 10) {
                     ForEach(matched.indices, id: \.self) { r in
                         if let b = matched[r] {
-                            FaceCrop(url: URL(fileURLWithPath: member.path), box: b, size: 76)
+                            FaceCrop(url: URL(fileURLWithPath: member.path), box: b, size: compact ? 56 : 76)
                         } else {
                             Circle().strokeBorder(.tertiary, style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                                .frame(width: 76, height: 76)
+                                .frame(width: compact ? 56 : 76, height: compact ? 56 : 76)
                                 .overlay { Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(.tertiary) }
                                 .help(library.tr("faceNotFound"))
                         }
@@ -296,25 +318,40 @@ struct FrameColumn: View {
                     chip(f.lookingAway > 0 ? "lookingAway" : "lookingAtCamera", warn: f.lookingAway > 0)
                 }
             }
-            HStack(spacing: 8) {
-                Button(action: keep) {
-                    Label(library.tr(isKeeper ? "chosenForAlbum" : "keepThisOne"), systemImage: isKeeper ? "checkmark.circle.fill" : "circle")
-                }
-                .buttonStyle(.glass).tint(isKeeper ? .green : nil)
-                .disabled(isKeeper)
-                if !isKeeper {
-                    Button(action: keepToo) {
-                        Label(library.tr(alsoKept ? "keptToo" : "keepToo"), systemImage: alsoKept ? "plus.circle.fill" : "plus.circle")
-                    }
-                    .buttonStyle(.glass).tint(alsoKept ? .green : nil)
-                    .help(library.tr("keepTooHelp"))
-                }
+            // Full labels when they fit; in narrow cells the same buttons with icons only (help shows the text).
+            // Side by side when they fit; in narrow cells one under the other, still with words.
+            ViewThatFits(in: .horizontal) {
+                buttons(iconsOnly: false, stacked: false)
+                buttons(iconsOnly: false, stacked: true)
+                buttons(iconsOnly: true, stacked: false)
             }
-            .controlSize(.large)
+            .controlSize(compact ? .regular : .large)
         }
         .contentShape(.rect)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(highlighted ? .isSelected : [])
+    }
+
+    func buttons(iconsOnly: Bool, stacked: Bool) -> some View {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
+            Button(action: keep) {
+                Label(library.tr(isKeeper ? "chosenForAlbum" : "keepThisOne"), systemImage: isKeeper ? "checkmark.circle.fill" : "circle")
+                    .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
+            }
+            .buttonStyle(.glass).tint(isKeeper ? .green : nil)
+            .disabled(isKeeper)
+            .help(library.tr(isKeeper ? "chosenForAlbum" : "keepThisOne"))
+            if !isKeeper {
+                Button(action: keepToo) {
+                    Label(library.tr(alsoKept ? "keptToo" : "keepToo"), systemImage: alsoKept ? "plus.circle.fill" : "plus.circle")
+                        .labelStyle(iconsOnly ? AnyLabelStyle(.iconOnly) : AnyLabelStyle(.titleAndIcon))
+                }
+                .buttonStyle(.glass).tint(alsoKept ? .green : nil)
+                .help(library.tr("keepTooHelp"))
+            }
+        }
+        .fixedSize()
     }
 
     @ViewBuilder var badge: some View {
@@ -407,4 +444,11 @@ struct ToggleGrid: View {
         case .leftOut: ids = library.photos.filter(\.rejected).map(\.id)
         }
     }
+}
+
+/// Lets one button switch between full and icon-only labels.
+struct AnyLabelStyle: LabelStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: LabelStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
