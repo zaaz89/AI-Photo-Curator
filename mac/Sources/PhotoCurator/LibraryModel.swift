@@ -5,10 +5,10 @@ import SwiftUI
 
 /// Sidebar destinations.
 enum Destination: Hashable {
-    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search
-    /// The guide's pages (album home, the steps, people and clocks), not a photo grid.
+    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search, settings
+    /// The guide's pages (album home, the steps, people and clocks, settings), not a photo grid.
     var isGuide: Bool {
-        switch self { case .home, .step, .people: true; default: false }
+        switch self { case .home, .step, .people, .settings: true; default: false }
     }
 }
 
@@ -87,6 +87,8 @@ enum AssistantSheet: String, Identifiable {
     @Published private(set) var searchResult: SearchResult? { didSet { recompute() } }
     @Published private(set) var searching = false
     @Published var settings: EngineSettings?
+    /// The measured speed of this Mac for the time estimate (nil before the first analysis).
+    @Published var speed: EngineSpeed?
     @Published var message: String?                     // transient error or info for the user
     @Published private(set) var job = JobStatus(running: false, status: "")
     @Published private(set) var loading = false
@@ -176,7 +178,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return .leftOut
         case .videos: return .videos
         case .blurry: return .blurry
-        case .home, .step, .people: return .all
+        case .home, .step, .people, .settings: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -196,7 +198,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
         case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
-        case .home, .step, .people: return 0
+        case .home, .step, .people, .settings: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -453,6 +455,7 @@ enum AssistantSheet: String, Identifiable {
             case "export": destination = .step(.export)
             case "people": destination = .people
             case "all": destination = .all
+            case "settings": destination = .settings
             default: destination = .leftOut
             }
         case .album(let id): if trips.contains(where: { $0.id == id }) { tripId = id }
@@ -723,9 +726,23 @@ enum AssistantSheet: String, Identifiable {
 
     // MARK: settings
 
-    func save(_ changes: [String: Any]) {
+    func save(_ changes: [String: Any], then: (() async -> Void)? = nil) {
         guard let json = try? JSONSerialization.data(withJSONObject: changes) else { return }
-        Task { do { settings = try await api.saveSettings(json: json) } catch { message = describe(error) } }
+        Task {
+            do { settings = try await api.saveSettings(json: json); await then?() } catch { message = describe(error) }
+        }
+    }
+
+    func loadSettings() async {
+        if let s = try? await api.settings() { settings = s }
+        speed = try? await api.speed()
+    }
+
+    /// The quality check's strictness changes the verdicts at once; the album is read again to show them.
+    func setStrictness(_ level: String) {
+        guard EngineSettings.strictnessLevels.contains(level), level != settings?.qualityStrictness else { return }
+        settings?.qualityStrictness = level
+        save(["quality_strictness": level]) { [weak self] in await self?.reload() }
     }
 
     func describe(_ error: Error) -> String {

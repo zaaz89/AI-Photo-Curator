@@ -35,8 +35,6 @@ not yet checked against the owner's own marks (plan: about 60 marked photos).
 from __future__ import annotations
 
 import json
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
 from typing import Callable, Optional
 
 import cv2
@@ -196,8 +194,8 @@ def _safe(args):
 def compute_subject_focus(conn, progress: Optional[Callable] = None,
                           cancelled: Callable[[], bool] = lambda: False) -> dict:
     """Measure every photo that has helper results (faces table) and no subject_focus row yet."""
-    from app.ai.throttle import Throttle
-    from app.quality.scoring import PARALLEL_FROM, WORKERS
+    from app.ai.throttle import Throttle, throttled_map
+    from app.quality.scoring import PARALLEL_FROM, WORKERS, process_pool
     rows = conn.execute(
         "SELECT f.sha256, f.faces_json, f.vision_json, MIN(s.path || '/' || a.rel_path) AS path FROM faces f "
         "JOIN assets a ON a.sha256 = f.sha256 JOIN sources s ON s.id = a.source_id "
@@ -211,30 +209,19 @@ def compute_subject_focus(conn, progress: Optional[Callable] = None,
         faces = json.loads(r['faces_json'] or '[]')
         kind, boxes = subject_boxes(faces, vision.get('salient'))
         jobs.append((r['path'], kind, boxes, faces))
-    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None, share=100)
+    throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
     if progress:
         progress('Subject sharpness', 0, len(rows))
-    ex = None
-    if len(jobs) < PARALLEL_FROM or WORKERS == 1:
-        results = (_safe(j) for j in jobs)
-    else:
-        ex = ProcessPoolExecutor(WORKERS, mp_context=get_context('spawn'))
-        results = ex.map(_safe, jobs, chunksize=2)
+    parallel = len(jobs) >= PARALLEL_FROM and WORKERS > 1
+    results = throttled_map(_safe, jobs, throttle, WORKERS if parallel else 1,
+                            process_pool if parallel else None, chunksize=2)
     done = 0
-    try:
-        for i, (r, res) in enumerate(zip(rows, results)):
-            if progress:
-                progress('Subject sharpness', i + 1, len(rows))
-            if res is not None:
-                store(conn, r['sha256'], res)
-                done += 1
-            if cancelled():
-                break
-            if i < len(rows) - 1:
-                throttle.after_work(0.0)
-    finally:
-        if ex is not None:
-            ex.shutdown(wait=False, cancel_futures=True)
+    for i, (r, (_, res)) in enumerate(zip(rows, results)):
+        if progress:
+            progress('Subject sharpness', i + 1, len(rows))
+        if res is not None:
+            store(conn, r['sha256'], res)
+            done += 1
     return {'measured': done}
 
 
@@ -255,15 +242,19 @@ def subject_rows(conn) -> dict:
         return {}
 
 
-def lines(values: list) -> tuple:
-    """(blurry line, soft line) from the album's subject sharpness values."""
+def lines(values: list, factor: Optional[float] = None) -> tuple:
+    """(blurry line, soft line) from the album's subject sharpness values, moved by the owner's strictness
+    (`factor`, default: the current setting; above 1 more photos fall under the lines)."""
+    if factor is None:
+        from app.quality.strictness import current
+        factor = current()['blur']
     values = [v for v in values if v is not None]
     if len(values) < MIN_ALBUM:
-        return DEFAULT_BLUR, DEFAULT_SOFT
+        return DEFAULT_BLUR * factor, DEFAULT_SOFT * factor
     m = float(np.median(values))
     blur = min(BLUR_CAP, max(BLUR_FLOOR, BLUR_SHARE * m))
     soft = min(SOFT_CAP, max(SOFT_FLOOR, SOFT_SHARE * m, 1.6 * blur))
-    return blur, soft
+    return blur * factor, soft * factor
 
 
 def verdict(row: dict, blur_line: float, soft_line: float) -> tuple:

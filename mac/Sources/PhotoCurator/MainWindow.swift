@@ -63,6 +63,7 @@ struct MainWindow: View {
         case .home: "home"
         case .step(let s): s.rawValue
         case .people: "people"
+        case .settings: "settings"
         default: "grid"
         }
     }
@@ -124,6 +125,7 @@ struct MainWindow: View {
         case .home: return library.albumName
         case .step(let s): return library.tr("step_" + s.rawValue)
         case .people: return library.tr("step_photos")
+        case .settings: return library.tr("settings")
         case .blurry: return library.tr("blurryNav")
         case .all: return library.tr("allPhotos")
         case .favourites: return library.tr("favourites")
@@ -136,6 +138,7 @@ struct MainWindow: View {
     var subtitle: String {
         if case .step(let s) = library.destination { return String(format: library.tr("stepOfThree"), s.number) + " · " + library.albumName }
         if library.destination == .people { return library.albumName }
+        if library.destination == .settings { return library.tr("aiLimitHint") }
         if library.destination == .home { return library.tr("albumHome") }
         let n = library.flat.count
         var s = Strings.photos(n, library.lang)
@@ -189,7 +192,19 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .top) { TripPicker().padding(.horizontal, 10).padding(.bottom, 6) }
-        .safeAreaInset(edge: .bottom) { FinishAlbumButton().padding(12) }
+        .safeAreaInset(edge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Button { library.reviewFilter = nil; library.destination = .settings } label: {
+                    Label(library.tr("settings"), systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(library.destination == .settings ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .font(.callout)
+                .help(library.tr("settings") + "  (⌘,)")
+                FinishAlbumButton()
+            }
+            .padding(12)
+        }
     }
 
     func row(_ d: Destination, _ icon: String, _ title: String) -> some View {
@@ -299,6 +314,7 @@ struct DetailPage: View {
         case .step(.story): StepStory()
         case .step(.export): StepExport()
         case .people: StepPhotos()
+        case .settings: SettingsPage()
         default: PhotoGrid()
         }
     }

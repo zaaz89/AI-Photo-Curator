@@ -115,6 +115,12 @@ public final class APIClient: Sendable {
         return try await get("api/settings", as: R.self).settings
     }
 
+    /// The measured speed of this Mac, nil before the first analysis.
+    public func speed() async throws -> EngineSpeed? {
+        struct R: Decodable { let speed: EngineSpeed? }
+        return try await get("api/settings", as: R.self).speed
+    }
+
     /// All settings as raw JSON (for values the app does not model, e.g. device_owners).
     public func settingsRaw() async throws -> [String: Any] {
         let (data, _) = try await session.data(from: url("api/settings"))

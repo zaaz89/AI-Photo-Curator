@@ -6,9 +6,8 @@ import json
 from app.collections import data_dir
 
 DEFAULTS = {
-    # Share of time the local AI may keep the GPU busy during long jobs.
-    # 100 = no limit. Implemented as pauses between photos (macOS has no
-    # per-process GPU cap).
+    # Share of time the analysis and the search index may keep the Mac busy (10-100, owner's slider M11).
+    # 100 = no limit. Implemented as pauses between rounds of work (macOS has no per-process GPU cap).
     'ai_gpu_share': 30,
     # Pause long AI jobs while the Mac runs on battery.
     'ai_pause_on_battery': False,
@@ -21,8 +20,12 @@ DEFAULTS = {
     'keeper_weights': {'faces': 40, 'focus': 30, 'look': 20, 'resolution': 10},
     # Which person a camera or phone belongs to, remembered between albums (only on this Mac).
     'device_owners': {},
+    # How strictly photos count as blurry and eyes as closed (M11): lenient | normal | strict.
+    # Applied when results are read, so a change needs no new analysis.
+    'quality_strictness': 'normal',
 }
-CHOICES = {'ai_gpu_share': (25, 30, 50, 100), 'ui_language': ('en', 'sl')}
+CHOICES = {'ui_language': ('en', 'sl'), 'quality_strictness': ('lenient', 'normal', 'strict')}
+RANGES = {'ai_gpu_share': (10, 100)}
 
 
 def _path():
@@ -45,6 +48,11 @@ def save(changes: dict) -> dict:
             raise ValueError(f'unknown setting {k}')
         if k in CHOICES and v not in CHOICES[k]:
             raise ValueError(f'{k} must be one of {CHOICES[k]}')
+        if k in RANGES:
+            lo, hi = RANGES[k]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+                raise ValueError(f'{k} must be a number from {lo} to {hi}')
+            v = int(round(v))
         if isinstance(DEFAULTS[k], bool):
             v = bool(v)
         if k == 'keeper_weights':
