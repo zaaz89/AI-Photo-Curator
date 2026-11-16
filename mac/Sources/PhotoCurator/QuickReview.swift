@@ -14,6 +14,7 @@ struct QuickReviewView: View {
     @State private var showKeys = false
     @State private var flash: ReviewAction?
     @State private var slide: CGFloat = 0
+    @State private var flashTask: Task<Void, Never>?
     @FocusState private var focused: Bool
 
     var photo: Photo? { session.current.flatMap(library.photo) }
@@ -69,6 +70,21 @@ struct QuickReviewView: View {
         }
         .onAppear { begin(filter, ids: nil); focused = true }
         .onChange(of: library.reviewUndoRequest) { _, _ in back() }
+        .onChange(of: library.automationKeyTick) { _, _ in
+            switch library.automationKey {
+            case "right": decide(.keep)
+            case "left": decide(.leaveOut)
+            case "back": back()
+            case "skip": decide(.skip)
+            case "favourite": favourite()
+            case "faces": showFaces.toggle()
+            case "zoom": zoom = true
+            case "unzoom": zoom = false
+            case "keys": showKeys.toggle()
+            case "esc": if showKeys { showKeys = false } else { close() }
+            default: break
+            }
+        }
         .onChange(of: library.loadedTripId) { _, _ in close() }       // another album: the ids mean something else
     }
 
@@ -207,14 +223,18 @@ struct QuickReviewView: View {
         case .leaveOut: library.setInAlbum([p.id], false)
         case .skip: break
         }
-        withAnimation(.snappy(duration: 0.12)) { flash = action; slide = action == .keep ? 40 : (action == .leaveOut ? -40 : 0) }
-        Task {
-            try? await Task.sleep(for: .milliseconds(140))
-            withAnimation(.snappy(duration: 0.15)) {
-                session.record(action, previous: previous)
-                flash = nil; slide = 0; zoom = false
-            }
-            library.setReviewBookmark(filter, session.current)
+        // The decision is recorded and the next photo shown at once, so fast or held keys never land twice on
+        // the same photo or skip one; the flash is only a short visual confirmation.
+        withAnimation(.snappy(duration: 0.15)) {
+            session.record(action, previous: previous)
+            zoom = false
+            flash = action
+        }
+        library.setReviewBookmark(filter, session.current)
+        flashTask?.cancel()
+        flashTask = Task {
+            try? await Task.sleep(for: .milliseconds(260))
+            if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { flash = nil } }
         }
     }
 

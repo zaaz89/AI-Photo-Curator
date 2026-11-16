@@ -426,6 +426,40 @@ enum AssistantSheet: String, Identifiable {
     @Published var reviewFilter: ReviewFilter?
     /// ⌘Z during the quick review means Back (the review restores the photo and shows it again).
     @Published var reviewUndoRequest = 0
+    // MARK: background control (development and checks; off unless the "automation" default is true)
+
+    /// The last key sent to the quick review through the background channel, and a counter that changes each time.
+    private(set) var automationKey: String?
+    @Published private(set) var automationKeyTick = 0
+
+    func handleAutomation(_ url: URL) {
+        guard UserDefaults.standard.bool(forKey: "automation"), let cmd = AutomationCommand(url: url) else { return }
+        switch cmd {
+        case .go(let page):
+            reviewFilter = nil
+            switch page {
+            case "home": destination = .home
+            case "selection": destination = .step(.selection)
+            case "story": destination = .step(.story)
+            case "export": destination = .step(.export)
+            case "people": destination = .people
+            case "all": destination = .all
+            default: destination = .leftOut
+            }
+        case .album(let id): if trips.contains(where: { $0.id == id }) { tripId = id }
+        case .review(let f): startReview(f)
+        case .closeReview: reviewFilter = nil
+        case .key(let k): automationKey = k; automationKeyTick += 1
+        case .window(let w, let h):
+            // Resize in place without bringing the app to the front.
+            if let win = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.frame.height > 300 }) {
+                var f = win.frame; f.origin.y += f.height - h; f.size = NSSize(width: w, height: h)
+                win.setFrame(f, display: true)
+            }
+        case .reload: Task { await reload() }
+        }
+    }
+
     /// How many photos need a yes or no (the quick review's default).
     var decisionsCount: Int { photos.filter(needsDecision).count }
     func startReview(_ f: ReviewFilter = .decisions) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }

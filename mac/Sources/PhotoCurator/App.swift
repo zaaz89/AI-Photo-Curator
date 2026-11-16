@@ -34,6 +34,7 @@ struct PhotoCuratorApp: App {
         }
         .defaultSize(width: 1440, height: 900)
         .windowToolbarStyle(.unified)
+        .handlesExternalEvents(matching: ["photocurator"])     // the background channel goes to this window, never a new one
         .commands { AppCommands(library: library, engine: engine) }
 
         Window(library.tr("classicView"), id: "classic") {
@@ -110,6 +111,7 @@ struct RootView: View {
         case .ready:
             MainWindow()
                 .task { library.undoManager = undoManager; await library.start() }
+                .onOpenURL { library.handleAutomation($0) }
                 .onChange(of: undoManager) { _, um in library.undoManager = um }
         case .starting:
             VStack(spacing: 18) {
