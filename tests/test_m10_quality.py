@@ -198,6 +198,15 @@ def test_eye_states_open_closed_unsure():
     assert eye_state(_f(left_eye=0.05), lens=0.2) == ('unsure', 'sunglasses')
 
 
+def test_level_head_decides_between_open_and_unsure():
+    # Calibrated on the owner's photos: a smiling selfie with the head level reads 0.18-0.25 and is open;
+    # the same value with the head tipped down (downcast or half-closed eyes) stays unsure.
+    assert eye_state(_f(left_eye=0.21, right_eye=0.22, pitch=0.0)) == ('open', None)
+    assert eye_state(_f(left_eye=0.21, right_eye=0.22, pitch=0.12))[0] == 'unsure'
+    assert eye_state(_f(left_eye=0.15, right_eye=0.15, pitch=0.0)) == ('unsure', 'between')   # still too low
+    assert eye_state(_f(left_eye=0.30), lens=0.47) == ('unsure', 'sunglasses')                # darker lens line
+
+
 def test_small_faces_are_unsure():
     small = vision_face((0.4, 0.4, 0.03, 0.03), left_eye=0.05, right_eye=0.05)
     assert eye_state(small, dims=(4000, 3000)) == ('unsure', 'small')       # about 104 px: below 128

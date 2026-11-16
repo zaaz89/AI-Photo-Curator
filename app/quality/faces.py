@@ -26,6 +26,11 @@ from app.collections import data_dir, now_iso
 
 EYE_CLOSED = 0.12        # eye contour height / width; below this the eye is treated as closed
 EYE_OPEN = 0.25        # calibrated 2026-11-16 on the owner's 236 photos: 0.18-0.24 included half-closed and looking-down eyes
+# Between the two, a level head decides (calibrated 2026-11-16 on the owner's phone and professional photos):
+# smiling phone selfies with open eyes measure 0.18-0.25 with the head level, while half-closed or downcast
+# eyes in that range come with the head tipped down. Level and at least EYE_LEVEL_OPEN counts as open.
+EYE_LEVEL_OPEN = 0.18
+PITCH_LEVEL = 0.05
 LOOK_AWAY_RAD = 0.6      # about 35 degrees of head turn
 BATCH = 12
 FACE_WORKERS = 3
@@ -86,7 +91,7 @@ SMALL_FACE_AREA = 0.0025  # the same floor as a share of the image when the pixe
 EYE_SHUT = 0.08          # below this the eye is shut even if the face never looks better in the moment
 LANDMARKS_MIN = 0.7      # Vision landmarks confidence below this: unsure
 EYE_PRECISION_MAX = 0.02  # mean eye-contour position error (helper v2) above this: unsure (turned or hidden eyes)
-DARK_LENS = 0.45         # eye area brightness / cheek brightness below this: dark sunglasses, unsure
+DARK_LENS = 0.48         # eye area / cheek brightness below this: dark sunglasses, unsure (calibrated 2026-11-16 on phone selfies: glasses up to 0.47, bare eyes from 0.46)
 PITCH_DOWN = 0.15        # head tilted down (Vision pitch > 0, about 9 degrees): a flat eye contour is not proof
 REL_CLOSED = 0.65        # within a moment: closed when at most this share of the same face's best openness
 REL_MAX = 0.20           # ... and below this openness (a normal eye next to wide-open eyes is not closed)
@@ -128,6 +133,8 @@ def eye_state(f: dict, dims: Optional[tuple] = None, lens: Optional[float] = Non
     if lens is not None and lens < DARK_LENS:
         return 'unsure', 'sunglasses'
     if o >= EYE_OPEN:
+        return 'open', None
+    if o >= EYE_LEVEL_OPEN and (f.get('pitch') or 0.0) < PITCH_LEVEL:
         return 'open', None
     if (f.get('pitch') or 0.0) > PITCH_DOWN:
         return 'unsure', 'looking_down'        # looking down flattens the eye contour
