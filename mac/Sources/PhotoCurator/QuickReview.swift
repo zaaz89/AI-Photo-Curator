@@ -20,14 +20,31 @@ struct QuickReviewView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.94).ignoresSafeArea()
+            Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
                 topBar.padding(.horizontal, 22).padding(.top, 14)
                 if session.finished && started {
                     EndCard(session: session, filter: filter, again: { f, ids in begin(f, ids: ids) }, close: close)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let p = photo {
-                    stage(p).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    HStack(alignment: .top, spacing: 0) {
+                        stage(p).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        if let siblings = momentFrames(p), siblings.count > 1 {
+                            // The same people in every frame of this moment, enlarged, next to each other.
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(String(format: library.tr("compareFrames"), siblings.count))
+                                    .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                                ScrollView([.vertical, .horizontal]) {
+                                    FaceComparison(frames: siblings, current: p.id, faceSize: showFaces ? 132 : 104) { f in jump(to: f.id) }
+                                }
+                                .scrollIndicators(.never)
+                            }
+                            .padding(16)
+                            .frame(maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
+                            .background(.white.opacity(0.05), in: .rect(cornerRadius: 18))
+                            .padding(.trailing, 22).padding(.vertical, 6)
+                        }
+                    }
                     bottom(p).padding(.horizontal, 22).padding(.bottom, 18)
                 } else if started {
                     GuideEmpty(symbol: "checkmark.circle", title: library.tr("reviewNothing"), text: library.tr("reviewNothingText"))
@@ -152,17 +169,6 @@ struct QuickReviewView: View {
                 Spacer()
                 Text("\(p.clock) · \(p.owner)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
-            if let siblings = momentFrames(p), siblings.count > 1 {
-                HStack(spacing: 6) {
-                    Text(library.tr("sameMoment")).font(.caption).foregroundStyle(.secondary)
-                    ForEach(siblings) { s in
-                        PhotoCover(photo: s, side: 260, radius: 6).frame(width: 64, height: 44)
-                            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(s.id == p.id ? Color.white : .clear, lineWidth: 2) }
-                            .opacity(s.goesToAlbumDespiteFocus ? 1 : 0.45)
-                    }
-                    Spacer()
-                }
-            }
             GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
                     Button { decide(.leaveOut) } label: {
@@ -220,6 +226,13 @@ struct QuickReviewView: View {
     }
 
     func favourite() { if let p = photo { library.toggleFavourite(p.id) } }
+
+    /// Click a frame in the comparison: show that frame (no decision is recorded for the one left).
+    func jump(to id: Int) {
+        guard session.queue.contains(id) else { return }
+        session.jump(to: id)
+        library.setReviewBookmark(filter, session.current)
+    }
 
     func close() {
         if session.finished { library.setReviewBookmark(filter, nil) }

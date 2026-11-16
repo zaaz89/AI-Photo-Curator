@@ -111,11 +111,14 @@ struct MomentsPanel: View {
                 Button(library.tr("acceptRest")) { acceptRest() }.buttonStyle(.glass).controlSize(.large)
                     .help(library.tr("acceptRestHelp"))
             }
+            let faceRows = matchFaces(g.members.map { library.photo($0.id)?.faces?.boxes ?? [] },
+                                      reference: g.members.firstIndex { $0.id == g.keeperId } ?? 0)
             GeometryReader { geo in
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 16) {
                         ForEach(Array(g.members.enumerated()), id: \.element.id) { i, m in
                             FrameColumn(member: m, photo: library.photo(m.id), group: g, highlighted: i == frame,
+                                        matched: faceRows.map { $0[i] },
                                         keep: { frame = i; keepAndNext() }, keepToo: { frame = i; keepToo() })
                                 .frame(width: frameWidth(g, geo.size))
                                 .onTapGesture { frame = i; focused = true }
@@ -242,6 +245,8 @@ struct FrameColumn: View {
     let photo: Photo?
     let group: MomentGroup
     let highlighted: Bool
+    /// This frame's faces in the same order as in the other frames (one per person; nil: not found here).
+    var matched: [Photo.Faces.Box?] = []
     let keep: () -> Void
     let keepToo: () -> Void
 
@@ -267,12 +272,18 @@ struct FrameColumn: View {
                 Spacer()
                 if let t = photo?.focus?.tier { chip("tier_" + t, warn: t != "sharp") }
             }
-            if let boxes = photo?.faces?.boxes, !boxes.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(Array(boxes.prefix(4).enumerated()), id: \.offset) { _, b in
-                        FaceCrop(url: URL(fileURLWithPath: member.path), box: b, size: 54)
+            if !matched.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(matched.indices, id: \.self) { r in
+                        if let b = matched[r] {
+                            FaceCrop(url: URL(fileURLWithPath: member.path), box: b, size: 76)
+                        } else {
+                            Circle().strokeBorder(.tertiary, style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                                .frame(width: 76, height: 76)
+                                .overlay { Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(.tertiary) }
+                                .help(library.tr("faceNotFound"))
+                        }
                     }
-                    if boxes.count > 4 { Text("+\(boxes.count - 4)").font(.callout).foregroundStyle(.secondary) }
                 }
             } else if let f = photo?.faces {
                 HStack(spacing: 6) {

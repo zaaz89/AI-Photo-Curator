@@ -457,5 +457,7 @@ public enum Strings {
         "reviewYes": ("Yes, keep", "Da, obdrži"),
         "reviewNo": ("No, leave out", "Ne, izpusti"),
         "reviewRestStays": ("the other %d stay in the album", "ostalih %d ostane v albumu"),
+        "compareFrames": ("The same people in all %d frames of this moment", "Iste osebe v vseh %d posnetkih tega trenutka"),
+        "faceNotFound": ("This face is not visible in this frame (turned away or hidden)", "Ta obraz v tem posnetku ni viden (obrnjen stran ali zakrit)"),
     ]
 }
