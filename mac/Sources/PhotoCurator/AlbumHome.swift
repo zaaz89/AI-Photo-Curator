@@ -117,7 +117,9 @@ struct NextCard: View {
     @EnvironmentObject var library: LibraryModel
 
     var body: some View {
-        if let step = library.next {
+        if library.clocksWaiting > 0 {
+            ClocksNextCard()
+        } else if let step = library.next {
             HStack(alignment: .center, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(String(format: library.tr("nextOf"), step.number), systemImage: "sparkles")
@@ -144,9 +146,6 @@ struct NextCard: View {
     func title(_ s: GuideStep) -> String {
         let l = library.lang, o = library.overview
         switch s {
-        case .photos:
-            if let n = o?.clocks.pending, n > 0 { return String(format: library.tr("nextClocks"), n) }
-            return library.tr("nextPhotos")
         case .selection:
             if let n = o?.moments.needYou, n > 0 { return String(format: library.tr("nextMoments"), Strings.count(n, .moment, l)) }
             return library.tr("nextSelection")
@@ -164,11 +163,6 @@ struct NextCard: View {
 @MainActor func stepPhotos(_ s: GuideStep, _ library: LibraryModel) -> [Photo] {
     let kept = library.photos.filter { !$0.rejected && !$0.isVideo }
     switch s {
-    case .photos:
-        // One photo of each person first.
-        var seen = Set<Int>(), out: [Photo] = []
-        for p in kept where seen.insert(p.sourceId).inserted { out.append(p) }
-        return out + kept.filter { !out.contains($0) }.prefix(3)
     case .selection:
         let groups = kept.filter { $0.duplicate != nil && $0.duplicate?.category != "similar_scene" }
         return groups.isEmpty ? Array(kept.prefix(3)) : groups
@@ -176,6 +170,32 @@ struct NextCard: View {
         return library.events.compactMap { e in coverPhoto(kept.filter { $0.eventId == e.id }) }
     case .export:
         return (library.overview?.highlights ?? []).compactMap(library.photo) + kept.filter(\.favorite)
+    }
+}
+
+/// Before the steps: a camera clock disagrees with the others and the owner has not looked at it yet.
+struct ClocksNextCard: View {
+    @EnvironmentObject var library: LibraryModel
+    var body: some View {
+        HStack(alignment: .center, spacing: 24) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(library.tr("firstCheck"), systemImage: "clock.badge.exclamationmark")
+                    .font(.callout.weight(.semibold)).foregroundStyle(.teal)
+                Text(String(format: library.tr("nextClocks"), library.clocksWaiting)).font(.system(size: 26, weight: .bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(library.tr("nextText_clocks")).font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button { withAnimation(.snappy) { library.destination = .people } } label: {
+                    Label(library.tr("checkClocks"), systemImage: "arrow.right").labelStyle(TrailingIconLabel()).padding(.horizontal, 8)
+                }
+                .buttonStyle(.glassProminent).controlSize(.extraLarge).tint(.teal)
+                .padding(.top, 6)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "clock.arrow.2.circlepath").font(.system(size: 90, weight: .thin)).foregroundStyle(.teal.gradient)
+                .padding(.trailing, 30)
+        }
+        .padding(24)
+        .card(radius: 26, highlight: .teal)
     }
 }
 
@@ -271,7 +291,7 @@ struct StepCards: View {
         let states = library.stepStates
         VStack(alignment: .leading, spacing: 14) {
             SectionTitle(title: library.tr("guideTitle"), detail: library.tr("guideLead"))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: GuideStep.allCases.count), spacing: 16) {
                 ForEach(GuideStep.allCases) { s in
                     let st = states[s] ?? StepState(done: false, waiting: 0)
                     Button { withAnimation(.snappy) { library.destination = .step(s) } } label: {
@@ -309,10 +329,6 @@ struct StepCards: View {
         let l = library.lang
         guard let o = library.overview, !library.analysing else { return library.tr("stillAnalysing") }
         switch s {
-        case .photos:
-            let people = Strings.count(library.sources.count, .person, l)
-            if o.clocks.pending > 0 { return people + " · " + String(format: library.tr("clocksPendingShort"), o.clocks.pending) }
-            return people + " · " + library.tr(o.clocks.devices > 1 ? "clocksAligned" : "clocksOne")
         case .selection:
             if o.moments.needYou > 0 { return String(format: library.tr("momentsWait"), Strings.count(o.moments.needYou, .moment, l)) }
             return String(format: library.tr("momentsChosen"), Strings.count(o.moments.total, .moment, l))
@@ -372,7 +388,13 @@ struct PeopleRow: View {
     var body: some View {
         if let people = library.overview?.people, people.count > 0, !library.analysing {
             VStack(alignment: .leading, spacing: 14) {
-                SectionTitle(title: library.tr("peopleTitle"), detail: library.tr("peopleLead"))
+                HStack(alignment: .firstTextBaseline) {
+                    SectionTitle(title: library.tr("peopleTitle"), detail: library.tr("peopleLead"))
+                    Button { withAnimation(.snappy) { library.destination = .people } } label: {
+                        Label(library.tr("editPeople"), systemImage: "pencil")
+                    }
+                    .buttonStyle(.glass)
+                }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
                     ForEach(Array(people.enumerated()), id: \.element.id) { i, p in
                         let index = library.sources.firstIndex { $0.id == p.sourceId } ?? i

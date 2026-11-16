@@ -5,10 +5,10 @@ import SwiftUI
 
 /// Sidebar destinations.
 enum Destination: Hashable {
-    case home, step(GuideStep), all, favourites, leftOut, videos, blurry, day(String), search
-    /// The guide's pages (album home and the four steps), not a photo grid.
+    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search
+    /// The guide's pages (album home, the steps, people and clocks), not a photo grid.
     var isGuide: Bool {
-        switch self { case .home, .step: true; default: false }
+        switch self { case .home, .step, .people: true; default: false }
     }
 }
 
@@ -74,6 +74,8 @@ enum AssistantSheet: String, Identifiable {
         return s
     }
     var next: GuideStep? { nextStep(stepStates) }
+    /// Clock suggestions nobody answered yet: they come before the steps on the album home.
+    var clocksWaiting: Int { CuratorCore.clocksWaiting(overview, marked: steps, analysing: analysing) }
     @Published var selectionView: SelectionView = .moments
     @Published var destination: Destination = .home { didSet { if destination != oldValue { clearSelection(); recompute() } } }
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
@@ -168,7 +170,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return .leftOut
         case .videos: return .videos
         case .blurry: return .blurry
-        case .home, .step: return .all
+        case .home, .step, .people: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -188,7 +190,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
         case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
-        case .home, .step: return 0
+        case .home, .step, .people: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -419,8 +421,11 @@ enum AssistantSheet: String, Identifiable {
     func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) {
         let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
         if inAlbum {
-            let needsMark = items.filter { $0.focus?.tier == "blurry" && !$0.favorite }
-            let plain = items.filter { !needsMark.contains($0) }
+            // An extra frame of a moment only goes in as a favourite ("keep too"); a blurry one needs the focus mark.
+            let extra = items.filter { $0.isExtraFrame && !$0.favorite }
+            let needsMark = items.filter { !extra.contains($0) && $0.focus?.tier == "blurry" && !$0.favorite }
+            let plain = items.filter { !extra.contains($0) && !needsMark.contains($0) }
+            mark(extra, ["rejected": .bool(false), "favorite": .bool(true)], name: tr("keep"))
             mark(needsMark, ["rejected": .bool(false), "focus": .string("soft")], name: tr("keep"))
             mark(plain, ["rejected": .bool(false)], name: tr("keep"))
         } else {
@@ -461,6 +466,17 @@ enum AssistantSheet: String, Identifiable {
             overview = (try? await api.overview(trip: tripId)) ?? overview
         }
         destination = step.next.map { .step($0) } ?? .home
+    }
+
+    /// Done on the People & clocks page: the owner has seen the clocks; back to the album.
+    func finishPeople() {
+        guard let tripId else { return }
+        for w in ["import", "times"] { steps[w] = true }
+        Task {
+            for w in ["import", "times"] { try? await api.setStep(trip: tripId, step: w, done: true) }
+            overview = (try? await api.overview(trip: tripId)) ?? overview
+        }
+        destination = .home
     }
 
     // MARK: events
@@ -529,6 +545,11 @@ enum AssistantSheet: String, Identifiable {
     @Published private(set) var lastExport: (folder: String, ok: Bool)?
     func clearLastExport() { lastExport = nil }
     private func jobFinished() {
+        if let p = pendingSearch, p.trip == tripId, job.error == nil {
+            pendingSearch = nil
+            searchText = p.query
+            runSearch()
+        }
         if let f = job.exportFolder, job.collection == tripId {
             lastExport = (f, job.exportOK ?? false)
             if job.exportOK == true { markStep("export") }
@@ -553,6 +574,9 @@ enum AssistantSheet: String, Identifiable {
 
     // MARK: search
 
+    /// A search that waits for the search index (first search of the album); it runs again when the index is ready.
+    private var pendingSearch: (trip: String, query: String)?
+
     func runSearch() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard let tripId, !q.isEmpty else { return }
@@ -560,7 +584,15 @@ enum AssistantSheet: String, Identifiable {
         Task {
             defer { searching = false }
             do {
-                searchResult = try await api.search(trip: tripId, query: q)
+                let r = try await api.search(trip: tripId, query: q)
+                if r.preparing == true {
+                    pendingSearch = (tripId, q)
+                    message = tr("preparingSearch")
+                    await pollOnce()
+                    return
+                }
+                pendingSearch = nil
+                searchResult = r
                 destination = .search
             } catch { message = describe(error) }
         }

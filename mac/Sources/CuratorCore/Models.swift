@@ -139,9 +139,14 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
     public var isVideo: Bool { kind == "video" }
     /// The app found it blurry (whatever the owner decided since).
     public var foundBlurry: Bool { focus?.autoTier == "blurry" || focus?.tier == "blurry" }
-    /// The Google Photos export takes it: not left out, and not blurry unless it is a favourite or the
-    /// owner marked its focus as acceptable (same rule as the engine's export plan).
-    public var goesToAlbumDespiteFocus: Bool { !rejected && (favorite || focus?.tier != "blurry") }
+    /// Another frame of a moment whose best frame was chosen (the export skips it unless it is a favourite).
+    public var isExtraFrame: Bool {
+        guard let d = duplicate, ["exact", "near"].contains(d.category) else { return false }
+        return d.keeper == false
+    }
+    /// The Google Photos export takes it (same rule as the engine's export plan): not left out, and, unless it
+    /// is a favourite, neither blurry (by the owner's focus mark when there is one) nor an extra frame.
+    public var goesToAlbumDespiteFocus: Bool { !rejected && (favorite || (focus?.tier != "blurry" && !isExtraFrame)) }
     public var fileURL: URL { URL(fileURLWithPath: path) }
 }
 
@@ -194,4 +199,6 @@ public struct SearchResult: Decodable, Sendable {
     public let english: String?
     public let results: [Hit]
     public let note: String?
+    /// The first search of an album builds the search index in the background (M9); search again after it.
+    public let preparing: Bool?
 }

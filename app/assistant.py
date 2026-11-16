@@ -6,6 +6,7 @@ GeoNames index. The overview summarises what still needs the owner's decision.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 from collections import Counter
@@ -214,6 +215,7 @@ def _safe_album_summary(conn, plan) -> dict:
     try:
         return _album_summary(conn, plan)
     except Exception:
+        logging.getLogger(__name__).exception('album summary failed; the overview shows an empty funnel')
         return {'funnel': dict(EMPTY_SUMMARY), 'people': [], 'cover_id': None, 'highlights': []}
 
 

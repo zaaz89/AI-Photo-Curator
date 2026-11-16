@@ -14,16 +14,7 @@ struct MainWindow: View {
             Sidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            Group {
-                switch library.destination {
-                case .home: AlbumHome()
-                case .step(.photos): StepPhotos()
-                case .step(.selection): StepSelection()
-                case .step(.story): StepStory()
-                case .step(.export): StepExport()
-                default: PhotoGrid()
-                }
-            }
+            DetailPage()
                 .id(guidePage)
                 .transition(.opacity)
                 .animation(.snappy(duration: 0.25), value: guidePage)
@@ -63,6 +54,7 @@ struct MainWindow: View {
         switch library.destination {
         case .home: "home"
         case .step(let s): s.rawValue
+        case .people: "people"
         default: "grid"
         }
     }
@@ -119,6 +111,7 @@ struct MainWindow: View {
         switch library.destination {
         case .home: return library.albumName
         case .step(let s): return library.tr("step_" + s.rawValue)
+        case .people: return library.tr("step_photos")
         case .blurry: return library.tr("blurryNav")
         case .all: return library.tr("allPhotos")
         case .favourites: return library.tr("favourites")
@@ -129,7 +122,8 @@ struct MainWindow: View {
         }
     }
     var subtitle: String {
-        if case .step(let s) = library.destination { return String(format: library.tr("stepOfFour"), s.number) + " · " + library.albumName }
+        if case .step(let s) = library.destination { return String(format: library.tr("stepOfThree"), s.number) + " · " + library.albumName }
+        if library.destination == .people { return library.albumName }
         if library.destination == .home { return library.tr("albumHome") }
         let n = library.flat.count
         var s = Strings.photos(n, library.lang)
@@ -168,6 +162,9 @@ struct Sidebar: View {
                 }
             }
             Section(library.tr("library")) {
+                Label(library.tr("step_photos"), systemImage: "person.2")
+                    .badge(library.clocksWaiting)
+                    .tag(Destination.people)
                 row(.all, "photo.on.rectangle", library.tr("allPhotos"))
                 if library.count(.blurry) > 0 { row(.blurry, "camera.aperture", library.tr("blurryNav")) }
                 row(.leftOut, "eye.slash", library.tr("leftOut"))
@@ -277,4 +274,20 @@ func formatDay(_ day: String, _ lang: Lang, style: DayStyle) -> String {
     o.locale = Locale(identifier: lang == .sl ? "sl_SI" : "en_GB")
     o.setLocalizedDateFormatFromTemplate(style == .short ? "EEEdMMM" : "EEEEdMMMMyyyy")
     return o.string(from: date)
+}
+
+
+/// The page the sidebar points at: the album home, a step, people and clocks, or a photo grid.
+struct DetailPage: View {
+    @EnvironmentObject var library: LibraryModel
+    var body: some View {
+        switch library.destination {
+        case .home: AlbumHome()
+        case .step(.selection): StepSelection()
+        case .step(.story): StepStory()
+        case .step(.export): StepExport()
+        case .people: StepPhotos()
+        default: PhotoGrid()
+        }
+    }
 }

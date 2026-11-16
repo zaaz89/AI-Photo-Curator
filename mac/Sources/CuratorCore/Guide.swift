@@ -2,16 +2,16 @@ import Foundation
 
 // MARK: M9 album guide: four steps, what is next, the funnel
 
-/// The four steps of the album guide, in order.
+/// The three steps of the album guide, in order (M9: people and clocks moved out of the steps; they come
+/// up on their own only when a camera clock needs a decision).
 public enum GuideStep: String, CaseIterable, Identifiable, Hashable, Sendable {
-    case photos, selection, story, export
+    case selection, story, export
     public var id: String { rawValue }
     public var number: Int { (Self.allCases.firstIndex(of: self) ?? 0) + 1 }
     public var next: GuideStep? { Self.allCases.dropFirst(number).first }
     public var previous: GuideStep? { number > 1 ? Self.allCases[number - 2] : nil }
     public var symbol: String {
         switch self {
-        case .photos: "person.2.crop.square.stack"
         case .selection: "square.stack.3d.up"
         case .story: "book.pages"
         case .export: "square.and.arrow.up"
@@ -20,7 +20,6 @@ public enum GuideStep: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// The engine's checklist steps this guide step covers (marked done together).
     public var workflowSteps: [String] {
         switch self {
-        case .photos: ["import", "times"]
         case .selection: ["duplicates", "blurry"]
         case .story: ["events"]
         case .export: ["export"]
@@ -43,16 +42,19 @@ public func stepStates(_ o: Overview?, marked: [String: Bool], analysing: Bool) 
     for s in GuideStep.allCases { out[s] = StepState(done: false, waiting: 0) }
     guard let o else { return out }
     let busy = analysing || o.analysing
-    let pendingClocks = busy ? 0 : o.clocks.pending
-    // Done when no clock waits, or when the owner moved on (Next) without answering a suggestion.
-    out[.photos] = StepState(done: !busy && o.facts.photos > 0 && (pendingClocks == 0 || marked["times"] == true),
-                             waiting: pendingClocks)
     let moments = busy ? 0 : o.moments.needYou
     out[.selection] = StepState(done: !busy && (moments == 0 || marked["duplicates"] == true), waiting: moments)
     // The story is the owner's to judge: done once the owner moved on from it (Next marks "events").
     out[.story] = StepState(done: !busy && marked["events"] == true, waiting: 0)
     out[.export] = StepState(done: o.export.done, waiting: 0)
     return out
+}
+
+/// Camera clocks that wait for the owner (a suggested shift nobody answered), shown before the steps.
+/// Zero while analysing, and once the owner looked at the clocks and moved on.
+public func clocksWaiting(_ o: Overview?, marked: [String: Bool], analysing: Bool) -> Int {
+    guard let o, !analysing, !o.analysing, marked["times"] != true else { return 0 }
+    return o.clocks.pending
 }
 
 /// The one thing to do next: the first step that is not done, in order.

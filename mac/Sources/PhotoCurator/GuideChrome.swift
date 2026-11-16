@@ -8,7 +8,6 @@ import SwiftUI
 extension GuideStep {
     var tint: Color {
         switch self {
-        case .photos: .teal
         case .selection: .blue
         case .story: .purple
         case .export: .green
@@ -170,7 +169,8 @@ struct StepBar: View {
 /// bar at the bottom with back, what is still open and Next.
 struct StepPage<Content: View>: View {
     @EnvironmentObject var library: LibraryModel
-    let step: GuideStep
+    /// nil: the People & clocks page, which is not one of the steps (no step bar; Done goes back to the album).
+    let step: GuideStep?
     var lead: String
     var status: String? = nil
     var scrolls = true
@@ -195,11 +195,12 @@ struct StepPage<Content: View>: View {
 
     var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StepBar(current: step)
+            if step != nil { StepBar(current: step) }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Image(systemName: step.symbol).font(.title.weight(.semibold)).foregroundStyle(step.tint.gradient)
+                Image(systemName: step?.symbol ?? "person.2.crop.square.stack").font(.title.weight(.semibold))
+                    .foregroundStyle((step?.tint ?? .teal).gradient)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(library.tr("stepTitle_" + step.rawValue)).font(.system(size: 30, weight: .bold))
+                    Text(step.map { library.tr("stepTitle_" + $0.rawValue) } ?? library.tr("stepTitle_photos")).font(.system(size: 30, weight: .bold))
                     Text(lead).font(.title3).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
@@ -212,9 +213,9 @@ struct StepPage<Content: View>: View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 12) {
                 Button {
-                    withAnimation(.snappy) { library.destination = step.previous.map { .step($0) } ?? .home }
+                    withAnimation(.snappy) { library.destination = step?.previous.map { .step($0) } ?? .home }
                 } label: {
-                    Label(step.previous.map { library.tr("step_" + $0.rawValue) } ?? library.tr("albumHome"), systemImage: "chevron.left")
+                    Label(step?.previous.map { library.tr("step_" + $0.rawValue) } ?? library.tr("albumHome"), systemImage: "chevron.left")
                         .padding(.horizontal, 4)
                 }
                 .buttonStyle(.glass).controlSize(.large)
@@ -224,10 +225,10 @@ struct StepPage<Content: View>: View {
                         .contentTransition(.numericText())
                 }
                 Button {
-                    withAnimation(.snappy) { library.finishStep(step) }
+                    withAnimation(.snappy) { if let step { library.finishStep(step) } else { library.finishPeople() } }
                 } label: {
-                    Label(step.next.map { String(format: library.tr("nextStep"), library.tr("step_" + $0.rawValue)) } ?? library.tr("backToAlbum"),
-                          systemImage: step.next == nil ? "house" : "chevron.right")
+                    Label(step?.next.map { String(format: library.tr("nextStep"), library.tr("step_" + $0.rawValue)) } ?? library.tr("backToAlbum"),
+                          systemImage: step?.next == nil ? "house" : "chevron.right")
                         .labelStyle(TrailingIconLabel())
                         .padding(.horizontal, 6)
                 }
