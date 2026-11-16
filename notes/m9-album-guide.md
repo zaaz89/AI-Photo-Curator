@@ -36,8 +36,8 @@ Header with the step bar (1–4, click to jump), a title and one sentence of wha
 
 1. **Photos & clocks.** One card per folder: the person's name editable, folder, count, devices, reveal in Finder; "Add folder" (adds and analyses). Clocks as lanes: one lane per camera over the album's time span with a dot per photo; a suggested shift shows where the dots would move, with Align / No; applied shifts can be undone; manual nudge in a popover.
 2. **Selection.** Segments: Moments, Blurry, Left out. Moments inline (not a sheet): a list of moments on the left (needs you / decided / yours), the frames large side by side, face crops under each frame with eyes open or closed, the reason in plain words, "Keep this one" and "Keep this one too" (more than one frame of a moment goes to the album), ← → ↑ ↓ Return F, "Accept the rest". Blurry: a grid where one click keeps or leaves out.
-3. **Story.** Days as sections, events as chapters: cover, name editable in place, time and place, photo strip; merge with the previous chapter; open a chapter to see its photos with descriptions, edit a description, start a new chapter at a photo. A card for the AI descriptions (how many, time left, start).
-4. **Export.** Three choices as large cards: the whole album for Google Photos (default, with descriptions, time and place in the copies), the best N to share, folders for an archive (by day, event or place; name pattern). A preview of exactly what goes out, then choose a folder, progress, result, Show in Finder, open Google Photos.
+3. **Story.** Days as sections, events as chapters: cover, name editable in place, time and place, photo strip; merge with the previous chapter; open a chapter to see its photos and start a new chapter at a photo. (Descriptions were removed on 2026-11-16: Google Photos writes its own.)
+4. **Export.** Three choices as large cards: the whole album for Google Photos (default, corrected time and place in the copies), the best N to share, folders for an archive (by day, event or place; name pattern). A preview of exactly what goes out, then choose a folder, progress, result, Show in Finder, open Google Photos.
 
 ### Look
 
@@ -46,10 +46,10 @@ Photo-first cards with large corner radius, cover images, bigger type, hover lif
 ## Engine contract (new in M9)
 
 1. `PATCH /api/collections/<cid>` `{"name": str}` renames the album (1–120 chars after trim). `GET /api/collections` shows the new name.
-2. `POST /api/collections/<cid>/assets/<aid>/description` `{"text": str}` sets the owner's description for the photo's content (sha256, survives re-indexing); empty text removes it and the AI text shows again. The owner's text wins everywhere a description is read: timeline `ai.description` (plus `ai.edited: true`), export metadata, search. Needs no AI model.
+2. ~~Owner's descriptions~~: built, then removed on 2026-11-16 with the whole descriptions feature (Google Photos writes its own). Migration 9's table stays, unused.
 3. Keep more than one frame: a frame of a moment that the owner marked favourite is exported even when it is not the keeper. Same rule in the overview counts.
 4. Overview gains:
-   - `funnel`: `{taken, left_out, blurry, extra_frames, in_album}` with `taken == left_out + blurry + extra_frames + in_album` always (paired files counted consistently), `in_album` equal to what "Export for Google Photos" copies.
+   - `funnel`: `{taken, left_out, blurry, extra_frames, in_album}` counted by photo (a Live Photo or RAW+JPEG pair is one photo), with `taken == left_out + blurry + extra_frames + in_album` always and `in_album` equal to the photos "Export for Google Photos" copies. The plan also keeps per-file `counts`.
    - `people`: `[{owner, source_id, taken, in_album}]`.
    - `cover_id`: a favourite with the best rank, else the best-ranked photo in the album; null when empty.
    - `highlights`: up to 12 asset ids in the album, best first by rank, at most 2 per event, then sorted by time.
