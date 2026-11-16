@@ -1,0 +1,286 @@
+import Foundation
+
+/// App language, chosen in Settings (engine setting `ui_language`), independent of the system language.
+public enum Lang: String, CaseIterable, Sendable { case en, sl }
+
+/// Every text of the native app in English and Slovenian.
+public enum Strings {
+    public static func text(_ key: String, _ lang: Lang) -> String {
+        guard let pair = table[key] else { return key }
+        return lang == .sl ? pair.1 : pair.0
+    }
+
+    public enum Word: Sendable { case photo, moment, person, day, event, video }
+
+    /// "3 moments" / "3 trenutki": English singular and plural, Slovenian singular, dual, 3–4 and plural.
+    public static func count(_ n: Int, _ word: Word, _ lang: Lang) -> String {
+        let forms: (en: (String, String), sl: (String, String, String, String)) = switch word {
+        case .photo: (("photo", "photos"), ("fotografija", "fotografiji", "fotografije", "fotografij"))
+        case .moment: (("moment", "moments"), ("trenutek", "trenutka", "trenutki", "trenutkov"))
+        case .person: (("person", "people"), ("oseba", "osebi", "osebe", "oseb"))
+        case .day: (("day", "days"), ("dan", "dneva", "dnevi", "dni"))
+        case .event: (("event", "events"), ("dogodek", "dogodka", "dogodki", "dogodkov"))
+        case .video: (("video", "videos"), ("video", "videa", "videi", "videov"))
+        }
+        if lang == .en { return "\(n) " + (n == 1 ? forms.en.0 : forms.en.1) }
+        switch n % 100 {
+        case 1: return "\(n) \(forms.sl.0)"
+        case 2: return "\(n) \(forms.sl.1)"
+        case 3, 4: return "\(n) \(forms.sl.2)"
+        default: return "\(n) \(forms.sl.3)"
+        }
+    }
+
+    /// "5 photos" / "5 fotografij" with the right Slovenian dual and plural forms.
+    public static func photos(_ n: Int, _ lang: Lang) -> String {
+        guard lang == .sl else { return n == 1 ? "1 photo" : "\(n) photos" }
+        switch n % 100 {
+        case 1: return "\(n) fotografija"
+        case 2: return "\(n) fotografiji"
+        case 3, 4: return "\(n) fotografije"
+        default: return "\(n) fotografij"
+        }
+    }
+
+    public static let table: [String: (String, String)] = [
+        // album assistant (phase 2)
+        "overview": ("Overview", "Pregled"),
+        "blurryNav": ("Blurry", "Zamegljene"),
+        "leaveOutAllBlurry": ("Leave Out All Blurry", "Izpusti vse zamegljene"),
+        "newAlbumTitle": ("New Album", "Nov album"),
+        "newAlbumLead": ("Drop everyone's folders for one trip or event. The app reads them and proposes the rest.",
+                         "Povleci mape vseh za eno potovanje ali dogodek. Aplikacija jih prebere in predlaga ostalo."),
+        "dropFolders": ("Drop folders here", "Povleci mape sem"),
+        "readingFolders": ("Reading the folders…", "Berem mape …"),
+        "chooseFolders": ("Choose Folders…", "Izberi mape …"),
+        "addFolders": ("Add", "Dodaj"),
+        "chooseFoldersMessage": ("Choose one folder per person. They are only read.", "Izberi mapo za vsako osebo. Mape se samo berejo."),
+        "whosePhotos": ("Whose photos", "Čigave fotografije"),
+        "ownerFrom_remembered": ("remembered from this device", "zapomnjeno po napravi"),
+        "ownerFrom_exif": ("from the photo data", "iz podatkov fotografij"),
+        "ownerFrom_folder": ("from the folder name", "iz imena mape"),
+        "removeFolder": ("Remove folder", "Odstrani mapo"),
+        "problem_not found": ("not found", "ne obstaja"),
+        "problem_not a folder": ("not a folder, drop the folder that holds it", "ni mapa, povleci mapo, ki jo vsebuje"),
+        "problem_no photos or videos": ("no photos or videos in it", "v njej ni fotografij ali videov"),
+        "albumName": ("Album name", "Ime albuma"),
+        "albumNamePrompt": ("Tuscany, October 2026", "Toskana, oktober 2026"),
+        "albumNameHint": ("Proposed from the places and dates in the photos.", "Predlagano iz krajev in datumov na fotografijah."),
+        "readOnlyNote": ("Your folders are only read.", "Tvoje mape se samo berejo."),
+        "createAlbum": ("Create Album", "Ustvari album"),
+        "nothingAnalysed": ("Getting the album ready", "Pripravljam album"),
+        "nothingAnalysedText": ("The photos appear here as soon as they are read.", "Fotografije se pokažejo, ko jih preberem."),
+        "analysingHint": ("You can already look through the photos. Cards update as results arrive.",
+                          "Fotografije lahko že pregleduješ. Kartice se sproti posodabljajo."),
+        "stillAnalysing": ("Still analysing. This card fills in when the photos are read.", "Še analiziram. Kartica se izpolni, ko preberem fotografije."),
+        "cardClocks": ("Camera clocks", "Ure naprav"),
+        "clocksPending": ("Clocks that look off: %d. Check the suggested correction.", "Ure, ki ne držijo: %d. Preveri predlagani popravek."),
+        "clocksApplied": ("%d clock correction applied. The timeline is in order.", "Uporabljenih popravkov ure: %d. Časovnica je urejena."),
+        "clocksOK": ("No correction needed so far.", "Zaenkrat ni potreben noben popravek."),
+        "cardMoments": ("Best of each moment", "Najboljše iz trenutka"),
+        "momentsNone": ("No near-identical shots in this album.", "V tem albumu ni skoraj enakih posnetkov."),
+        "momentsNeed": ("Your decision: %@.", "Tvoja odločitev: %@."),
+        "momentsAuto": ("Decided automatically: %@ (eyes open, sharp, looking at the camera).", "Samodejno odločeno: %@ (odprte oči, ostrina, pogled v kamero)."),
+        "momentsDone": ("Decided: %@. You can still change any of them.", "Odločeno: %@. Vsakega lahko še spremeniš."),
+        "cardBlurry": ("Blurry photos", "Zamegljene fotografije"),
+        "blurryNone": ("No blurry photos.", "Ni zamegljenih fotografij."),
+        "blurrySome": ("Blurry: %@. Left out: %d. Keep the ones you like.", "Zamegljene: %@. Izpuščene: %d. Obdrži tiste, ki ti ugajajo."),
+        "cardEvents": ("Days and events", "Dnevi in dogodki"),
+        "eventsText": ("%@ in %@, named from time and place.", "%@, %@. Poimenovani po času in kraju."),
+        "cardDescriptions": ("Descriptions", "Opisi"),
+        "descAll": ("All %d photos have a description for Google Photos.", "Vseh %d fotografij ima opis za Google Photos."),
+        "descSome": ("%d of %d described. About %d min for the rest, on this Mac.", "%d od %d opisanih. Za ostale okoli %d min, na tem Macu."),
+        "cardExport": ("Export for Google Photos", "Izvoz za Google Photos"),
+        "exportReady": ("Ready: %@. One folder to drop into Google Photos.", "Pripravljeno: %@. Ena mapa za Google Photos."),
+        "exportDone": ("Exported. Upload the folder to Google Photos, then finish the album.", "Izvoženo. Mapo naloži v Google Photos, nato zaključi album."),
+        "exportShort": ("Export…", "Izvozi …"),
+        "exportAgain": ("Export Again…", "Izvozi znova …"),
+        "check": ("Check", "Preveri"),
+        "showCard": ("Show", "Pokaži"),
+        "review": ("Review", "Preglej"),
+        "browse": ("Browse", "Prebrskaj"),
+        "describe": ("Describe Photos", "Opiši fotografije"),
+        "done": ("Done", "Končano"),
+        "momentOf": ("Moment %d of %d", "Trenutek %d od %d"),
+        "keepRecommended": ("Keep the Recommended", "Obdrži priporočenega"),
+        "keepThisOne": ("Keep This One", "Obdrži tega"),
+        "acceptRest": ("Accept the Rest", "Sprejmi ostale"),
+        "momentsAllDone": ("Every moment is decided", "Vsi trenutki so odločeni"),
+        "momentsAllDoneText": ("The other frames stay in your folders; only the chosen ones are exported.",
+                               "Ostali posnetki ostanejo v tvojih mapah; izvozijo se samo izbrani."),
+        "decidedBecause": ("Chosen because:", "Izbran, ker:"),
+        "suggestedBecause": ("Suggested, close call:", "Predlog, odločitev je tesna:"),
+        "yourChoice": ("Your choice", "Tvoja izbira"),
+        "recommended": ("Recommended", "Priporočeno"),
+        "why_sharpest frame": ("sharpest frame", "najostrejši posnetek"),
+        "why_highest resolution": ("highest resolution", "največja ločljivost"),
+        "why_best overall look": ("best overall look", "najboljši skupni vtis"),
+        "why_eyes open on all faces": ("eyes open on all faces", "vsi imajo odprte oči"),
+        "why_eyes open (closed eyes in another frame)": ("eyes open (closed eyes in another frame)", "odprte oči (na drugem posnetku zaprte)"),
+        "why_looking at the camera (someone looks away in another frame)": ("looking at the camera (someone looks away in another frame)",
+                                                                           "pogled v kamero (na drugem posnetku kdo gleda stran)"),
+        "why_best balance of the criteria": ("best balance of the criteria", "najboljše razmerje meril"),
+        "why_chosen by you": ("chosen by you", "izbral si ti"),
+        "clocksLead": ("Two phones rarely show the same time. A correction only changes the order in the album; your files stay as they are.",
+                       "Dva telefona redko kažeta isti čas. Popravek spremeni samo vrstni red v albumu; datoteke ostanejo, kot so."),
+        "applyShift": ("Apply %@", "Uporabi %@"),
+        "reject": ("Reject", "Zavrni"),
+        "undo": ("Undo", "Razveljavi"),
+        "clockReference": ("Reference: the other clocks are aligned to this one.", "Referenca: druge ure so poravnane na to."),
+        "clockShifted": ("Shifted by %@.", "Premaknjeno za %@."),
+        "clockNoChange": ("no change", "brez spremembe"),
+        "exportLead": ("One folder with the kept photos and videos, ready to drag into Google Photos.",
+                       "Ena mapa z obdržanimi fotografijami in videi, pripravljena za Google Photos."),
+        "exportCount": ("%d files, %@", "%d datotek, %@"),
+        "exportMeta": ("Corrected time, place, description and favourites (5 stars) are written into the copies.",
+                       "Popravljen čas, kraj, opis in priljubljene (5 zvezdic) se zapišejo v kopije."),
+        "exportSafe": ("Your originals are not changed.", "Izvirniki se ne spremenijo."),
+        "warn_duplicates skipped": ("extra frames of a moment left out", "odvečnih posnetkov trenutka izpuščenih"),
+        "warn_rejected by you": ("left out by you", "izpustil ti"),
+        "warn_no place (no GPS)": ("without a place (no GPS)", "brez kraja (ni GPS)"),
+        "warn_paired files kept together": ("Live Photo pairs kept together", "parov Live Photo ohranjenih skupaj"),
+        "warn_no trustworthy capture time": ("without a reliable capture time", "brez zanesljivega časa"),
+        "exportFinished": ("Exported and verified.", "Izvoženo in preverjeno."),
+        "exportProblems": ("Exported with problems. See manifest.json in the folder.", "Izvoženo s težavami. Poglej manifest.json v mapi."),
+        "chooseAndExport": ("Choose Folder and Export…", "Izberi mapo in izvozi …"),
+        "exportHere": ("Export Here", "Izvozi sem"),
+        "exportWhere": ("Choose where to put the album, outside your photo folders.", "Izberi, kam shranim album, zunaj map s fotografijami."),
+
+        // window and sidebar
+        "library": ("Library", "Knjižnica"),
+        "allPhotos": ("All Photos", "Vse fotografije"),
+        "favourites": ("Favourites", "Priljubljene"),
+        "videos": ("Videos", "Videi"),
+        "leftOut": ("Left Out", "Izpuščene"),
+        "searchResults": ("Search Results", "Rezultati iskanja"),
+        "days": ("Days", "Dnevi"),
+        "trip": ("Album", "Album"),
+        "noTrip": ("No album", "Ni albuma"),
+        "newTrip": ("New Album…", "Nov album …"),
+        "tripSteps": ("Album Steps", "Koraki albuma"),
+        "tripStepsHelp": ("Times, best of each moment, events and descriptions, in the classic view until they move here",
+                          "Čas, najboljše iz trenutka, dogodki in opisi, v klasičnem pogledu, dokler ne pridejo sem"),
+        "classicView": ("Classic View", "Klasični pogled"),
+        "album": ("Album", "Album"),
+        "show": ("Show", "Prikaži"),
+        "stepsProgress": ("%d of 7 steps done", "%d od 7 korakov opravljenih"),
+        "exportGP": ("Export for Google Photos…", "Izvozi za Google Photos …"),
+        "exported": ("Exported", "Izvoženo"),
+        "finishAlbum": ("Finish Album…", "Zaključi album …"),
+        "finishTitle": ("Finish “%@”?", "Zaključim »%@«?"),
+        "finishText": ("Removes this album's working data from Photo Curator: analysis, descriptions, marks and thumbnails. Your photo folders and the exported folder are not touched.",
+                       "Iz Photo Curatorja odstrani delovne podatke tega albuma: analizo, opise, oznake in sličice. Tvoje mape s fotografijami in izvožena mapa ostanejo nedotaknjene."),
+        "finishNotExported": ("This album has not been exported yet. Your marks and descriptions will be lost.",
+                              "Ta album še ni izvožen. Tvoje oznake in opisi bodo izgubljeni."),
+        "finishConfirm": ("Finish Album", "Zaključi album"),
+        "albumFinished": ("“%@” finished: %d MB freed.", "»%@« zaključen: sproščenih %d MB."),
+        "photo": ("photo", "fotografija"),
+        "photos": ("photos", "fotografij"),
+        "video": ("video", "video"),
+        "noDate": ("No Date", "Brez datuma"),
+        "noPlace": ("No place", "Brez kraja"),
+        "notRated": ("Not rated", "Brez ocene"),
+        "unknown": ("Unknown", "Neznano"),
+        // toolbar
+        "find": ("Find Photos", "Išči fotografije"),
+        "searchPrompt": ("Sunset, ring, Florence", "Sončni zahod, prstan, Firence"),
+        "alsoAs": ("also searched as", "iskano tudi kot"),
+        "viewOptions": ("View Options", "Možnosti pogleda"),
+        "sort": ("Sort", "Razvrsti"),
+        "sort_time": ("By Time", "Po času"),
+        "sort_person": ("By Person", "Po osebi"),
+        "sort_place": ("By Place", "Po kraju"),
+        "sort_quality": ("By Quality", "Po kakovosti"),
+        "thumbSize": ("Thumbnail size", "Velikost sličic"),
+        "export": ("Export…", "Izvozi …"),
+        "exportHelp": ("Export for Google Photos (classic view for now)", "Izvoz za Google Photos (zaenkrat v klasičnem pogledu)"),
+        "inspector": ("Inspector", "Inšpektor"),
+        // photo actions
+        "photoMenu": ("Photo", "Fotografija"),
+        "favourite": ("Favourite", "Priljubljena"),
+        "unfavourite": ("Remove Favourite", "Odstrani priljubljeno"),
+        "leaveOut": ("Leave Out", "Izpusti"),
+        "keep": ("Keep", "Obdrži"),
+        "wallpaper": ("Phone Wallpaper", "Ozadje za telefon"),
+        "quickLook": ("Quick Look", "Hitri pogled"),
+        "showInFinder": ("Show in Finder", "Pokaži v Finderju"),
+        "selectAll": ("Select All", "Izberi vse"),
+        "selected": ("selected", "izbranih"),
+        "clearSelection": ("Clear selection", "Počisti izbiro"),
+        "moveToEvent": ("Move to Event", "Premakni v dogodek"),
+        "newEvent": ("New Event…", "Nov dogodek …"),
+        "eventName": ("Event name", "Ime dogodka"),
+        "create": ("Create", "Ustvari"),
+        "cancel": ("Cancel", "Prekliči"),
+        // inspector
+        "noSelection": ("No Selection", "Nič ni izbrano"),
+        "noSelectionHint": ("Select a photo to see its details.", "Izberi fotografijo za podrobnosti."),
+        "multiHint": ("Use the bar below to act on all of them.", "Z vrstico spodaj urediš vse naenkrat."),
+        "taken": ("Taken", "Posneto"),
+        "place": ("Place", "Kraj"),
+        "noGps": ("Unknown (no GPS)", "Neznan (ni GPS)"),
+        "person": ("Person", "Oseba"),
+        "camera": ("Camera", "Naprava"),
+        "size": ("Size", "Velikost"),
+        "faces": ("Faces", "Obrazi"),
+        "eyesOpen": ("Eyes open", "Oči odprte"),
+        "eyesClosed": ("Eyes may be closed", "Oči morda zaprte"),
+        "lookingAtCamera": ("Looking at the camera", "Gleda v kamero"),
+        "lookingAway": ("Looking away", "Gleda stran"),
+        "extraFrame": ("Another frame of this moment is kept", "Obdržan je drug posnetek tega trenutka"),
+        "focus": ("Focus", "Ostrina"),
+        "auto": ("Auto", "Samodejno"),
+        "tier_sharp": ("Sharp", "Ostra"),
+        "tier_soft": ("Soft", "Mehka"),
+        "tier_blurry": ("Blurry", "Zamegljena"),
+        "description": ("Description", "Opis"),
+        "aiNote": ("Written by local AI on this Mac, not checked.", "Napisal lokalni AI na tem Macu, ni preverjeno."),
+        "howTime": ("How the time was decided", "Kako je bil določen čas"),
+        // empty states and engine
+        "noTripsTitle": ("No Albums", "Ni albumov"),
+        "noTripsText": ("Create an album for a trip or an event in Album Steps: name it and add one folder per person.",
+                        "Album za potovanje ali dogodek ustvariš v Korakih albuma: poimenuj ga in dodaj mapo za vsako osebo."),
+        "nothingHere": ("Nothing Here", "Tukaj ni ničesar"),
+        "nothingHereText": ("No photos match this view.", "Nobena fotografija ne ustreza temu pogledu."),
+        "starting": ("Starting Photo Curator…", "Zaganjam Photo Curator …"),
+        "engineFailed": ("The Engine Did Not Start", "Pogon se ni zagnal"),
+        "engineUnreachable": ("The engine does not answer.", "Pogon se ne odziva."),
+        "tryAgain": ("Try Again", "Poskusi znova"),
+        "showLog": ("Show Engine Log", "Pokaži dnevnik pogona"),
+        // activity
+        "working": ("Working on your photos", "Delam na tvojih fotografijah"),
+        "nothingRunning": ("Nothing is running.", "Nič ne teče."),
+        "analyseAgain": ("Analyse Again", "Analiziraj znova"),
+        "stop": ("Stop", "Ustavi"),
+        "phase_idle": ("Up to date", "Vse je posodobljeno"),
+        "phase_reading": ("Reading photos", "Berem fotografije"),
+        "phase_clocks": ("Aligning clocks", "Poravnavam ure"),
+        "phase_duplicates": ("Finding similar shots", "Iščem podobne posnetke"),
+        "phase_quality": ("Rating focus", "Ocenjujem ostrino"),
+        "phase_faces": ("Looking at faces", "Pregledujem obraze"),
+        "phase_videos": ("Reading videos", "Berem videe"),
+        "phase_searchIndex": ("Learning what is in the photos", "Spoznavam vsebino fotografij"),
+        "phase_describing": ("Writing descriptions", "Pišem opise"),
+        "phase_exporting": ("Exporting", "Izvažam"),
+        "phase_paused": ("Paused to keep the Mac cool", "Premor, da se Mac ohladi"),
+        "phase_working": ("Working", "Delam"),
+        "phase_failed": ("Something went wrong", "Nekaj je šlo narobe"),
+        // settings
+        "general": ("General", "Splošno"),
+        "language": ("Language", "Jezik"),
+        "aiLimit": ("Local AI may use", "Lokalni AI sme uporabiti"),
+        "gentle": ("Gentle (about 25 % GPU time)", "Nežno (okoli 25 % časa GPU)"),
+        "standard": ("Standard (about 30 %)", "Običajno (okoli 30 %)"),
+        "faster": ("Faster (about 50 %)", "Hitreje (okoli 50 %)"),
+        "noLimit": ("No limit (gets warm)", "Brez omejitve (se segreje)"),
+        "pauseOnBattery": ("Pause local AI on battery", "Na bateriji ustavi lokalni AI"),
+        "aiLimitHint": ("Everything runs on this Mac. Nothing is uploaded.", "Vse teče na tem Macu. Nič se ne nalaga na splet."),
+        "bestOfMoment": ("Best of Each Moment", "Najboljše iz trenutka"),
+        "w_faces": ("Faces (eyes, gaze)", "Obrazi (oči, pogled)"),
+        "w_focus": ("Focus", "Ostrina"),
+        "w_look": ("Overall look", "Skupni vtis"),
+        "w_resolution": ("Resolution", "Ločljivost"),
+        "keeperHint": ("How much each criterion counts when the app picks the best of near-identical shots.",
+                       "Koliko šteje vsako merilo, ko aplikacija izbira najboljšega med skoraj enakimi posnetki."),
+    ]
+}

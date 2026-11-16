@@ -391,6 +391,21 @@ def old_timeline():
 # Collections, timeline, AI, export (app/web/timeline_bp.py). Same app, so the
 # same request guard and security headers apply.
 timeline_bp.folder_dialog = native_folder_dialog
+
+
+def _cache_files_for(image_path):
+    """Cached thumbnail and preview of one photo (used by "Finish album")."""
+    out = [_thumb_cache_path(image_path)]
+    try:
+        mtime = os.path.getmtime(image_path)
+        key = hashlib.md5(f"{image_path}:{mtime}:preview-v1".encode()).hexdigest()
+        out.append(THUMB_DIR / f"{key}_full.jpg")
+    except OSError:
+        pass
+    return out
+
+
+timeline_bp.cache_files_for = _cache_files_for
 app.register_blueprint(timeline_bp.bp)
 
 

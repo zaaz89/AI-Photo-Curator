@@ -108,6 +108,14 @@ def _non_keepers(conn):
         "WHERE g.category IN ('exact', 'near') AND g.keeper_id IS NOT NULL AND g.keeper_id != m.asset_id")}
 
 
+def google_photos_options() -> dict:
+    """The "Export for Google Photos" preset: one folder, the kept photos (no rejected, no blurry
+    unless favourite, no extra frames of a moment), Live Photo videos next to their stills."""
+    from app import settings
+    return {'template': 'default', 'folders': 'flat', 'duplicates': 'skip', 'selection': 'no_blurry',
+            'topn': 50, 'weights': settings.load()['rank_weights']}
+
+
 def plan_export(conn, template: str = 'default', folders: str = 'day', duplicates: str = 'skip',
                 selection: str = 'all', topn: int = 50, weights: dict | None = None) -> dict:
     if template not in TEMPLATES:
@@ -266,7 +274,9 @@ def run_export(conn, dest_root: str, plan: dict, resume_dir: str | None = None, 
                write_meta: bool = False):
     from app.safety.safe_export import ExportItem, export_copies
     items = [ExportItem(source=e['source'], dest_name=e['dest']) for e in plan['entries']]
-    roots = sorted({r[0] for r in conn.execute('SELECT path FROM sources')})
+    # Never export into any album's photo folders, not only this album's.
+    from app.collections import all_source_paths
+    roots = sorted({r[0] for r in conn.execute('SELECT path FROM sources')} | set(all_source_paths()))
     res = export_copies(items, dest_root, roots, plan['trip'], resume_dir=resume_dir, progress=progress,
                          extra={'plan': {k: plan[k] for k in ('template', 'folders', 'duplicates', 'selection', 'files', 'bytes')},
                                 'original_names': {e['dest']: e['original_name'] for e in plan['entries']}})

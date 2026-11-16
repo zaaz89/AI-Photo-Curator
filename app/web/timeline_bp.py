@@ -23,12 +23,14 @@ from app.ai import vision_analyzer as vlm
 bp = Blueprint('timeline', __name__, template_folder='templates', static_folder='static', static_url_path='/ui')
 
 _job_lock = threading.Lock()
-_job = {'running': False, 'collection': None, 'status': 'Idle', 'progress': 0,
+_job = {'running': False, 'collection': None, 'kind': None, 'status': 'Idle', 'progress': 0,
         'result': None, 'error': None, 'cancel': False, 'started': None}
 
 # Set by photo_curator.py so this module can open the native folder dialog
 # without importing the big app module (avoids a circular import).
 folder_dialog = None
+# Set by photo_curator.py: image path -> its cached thumbnail / preview files.
+cache_files_for = None
 
 
 def _err(msg, code=400):
@@ -48,6 +50,29 @@ def create_collection():
     except ValueError as e:
         return _err(str(e))
     return jsonify({'ok': True, 'id': slug})
+
+
+@bp.route('/api/collections/<cid>', methods=['DELETE'])
+def finish_album(cid):
+    """"Finish album": remove the app's working data for this album. Photo folders are never touched."""
+    if _job['running'] and _job['collection'] == cid:
+        return _err('the album is still being worked on; stop or wait first', 409)
+    try:
+        conn = col.open_db(cid)
+    except (FileNotFoundError, ValueError) as e:
+        return _err(str(e), 404)
+    rows = conn.execute("SELECT s.path || '/' || a.rel_path FROM assets a JOIN sources s ON s.id = a.source_id").fetchall()
+    conn.close()
+    files = []
+    if cache_files_for:
+        for (path,) in rows:
+            for p in {path, os.path.realpath(path)}:
+                files.extend(cache_files_for(p))
+    try:
+        res = col.remove_album(cid, files)
+    except (FileNotFoundError, ValueError) as e:
+        return _err(str(e), 404)
+    return jsonify({'ok': True, **res})
 
 
 @bp.route('/api/collections/<cid>/sources', methods=['GET'])
@@ -119,7 +144,7 @@ def start_index(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"indexing {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Starting…', progress=0,
+        _job.update(running=True, collection=cid, kind='analysis', status='Starting…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_index, args=(cid,), daemon=True).start()
     return jsonify({'ok': True})
@@ -127,7 +152,7 @@ def start_index(cid):
 
 @bp.route('/api/collections/<cid>/index', methods=['GET'])
 def index_status(cid):
-    return jsonify({k: _job[k] for k in ('running', 'collection', 'status', 'progress', 'result', 'error')})
+    return jsonify({k: _job.get(k) for k in ('running', 'collection', 'kind', 'status', 'progress', 'result', 'error')})
 
 
 @bp.route('/api/collections/<cid>/index', methods=['DELETE'])
@@ -269,7 +294,7 @@ def start_describe(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Starting local AI…', progress=0,
+        _job.update(running=True, collection=cid, kind='describe', status='Starting local AI…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_describe, args=(cid, int(limit) if limit else None), daemon=True).start()
     return jsonify({'ok': True})
@@ -343,10 +368,8 @@ def reset_events(cid):
 def _export_options(data):
     from app import settings
     if data.get('preset') == 'google_photos':
-        # One folder, the kept photos (no rejected, no blurry unless favourite, no extra duplicates),
-        # Live Photo videos next to their stills.
-        return {'template': 'default', 'folders': 'flat', 'duplicates': 'skip', 'selection': 'no_blurry',
-                'topn': 50, 'weights': settings.load()['rank_weights']}
+        from app.organization.export_plan import google_photos_options
+        return google_photos_options()
     return {'template': data.get('template', 'default'), 'folders': data.get('folders', 'day'),
             'duplicates': data.get('duplicates', 'skip'), 'selection': data.get('selection', 'all'),
             'topn': int(data.get('topn') or 50), 'weights': settings.load()['rank_weights']}
@@ -410,7 +433,7 @@ def start_smart_export(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Preparing export…', progress=0,
+        _job.update(running=True, collection=cid, kind='export', status='Preparing export…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_smart_export,
                      args=(cid, _export_options(data), dest, data.get('resume_dir'),
@@ -496,7 +519,7 @@ def export_wallpapers(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, status='Exporting wallpapers…', progress=0,
+        _job.update(running=True, collection=cid, kind='export', status='Exporting wallpapers…', progress=0,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_wallpapers, args=(cid, dest), daemon=True).start()
     return jsonify({'ok': True})
@@ -599,6 +622,26 @@ def reveal_export():
         return _err('not an export folder', 404)
     subprocess.run(['open', path], timeout=10)
     return jsonify({'ok': True})
+
+
+@bp.route('/api/suggest', methods=['POST'])
+def suggest_album():
+    """New Album wizard: who each folder belongs to, devices, dates, and a name for the album."""
+    from app.assistant import suggest
+    paths = (request.get_json() or {}).get('paths') or []
+    if not isinstance(paths, list) or len(paths) > 20:
+        return _err('paths must be a list of up to 20 folders')
+    return jsonify(suggest([str(p) for p in paths]))
+
+
+@bp.route('/api/collections/<cid>/overview')
+def album_overview(cid):
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.assistant import overview
+    job = _job if _job['collection'] == cid else None
+    return jsonify(overview(conn, job))
 
 
 @bp.route('/api/browse-folder', methods=['POST'])

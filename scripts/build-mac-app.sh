@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build "Photo Curator.app": a native window around the local app.
+# Build "Photo Curator.app": the native SwiftUI app (mac/) that starts the local engine.
 #   scripts/build-mac-app.sh            build into dist/Photo Curator.app
 #   scripts/build-mac-app.sh --install  also copy it to ~/Applications
 # The app starts the server from THIS project folder (path stored in Info.plist),
@@ -14,8 +14,10 @@ trap 'rm -rf "$TMP"' EXIT
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-echo "Compiling the window…"
-swiftc -O -swift-version 5 tools/mac-app/PhotoCuratorApp.swift -o "$APP/Contents/MacOS/PhotoCurator"
+echo "Compiling the app (Xcode 27 toolchain)…"
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+(cd mac && swift build -c release --product PhotoCurator >/dev/null)
+cp "mac/.build/release/PhotoCurator" "$APP/Contents/MacOS/PhotoCurator"
 
 echo "Drawing the icon…"
 swift tools/mac-app/make-icon.swift "$TMP/icon.png"
@@ -38,9 +40,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>PhotoCurator</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.7</string>
+  <key>CFBundleShortVersionString</key><string>0.8</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>27.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.photography</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
