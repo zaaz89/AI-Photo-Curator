@@ -265,22 +265,6 @@ def ai_status():
                     'vlm': vlm.status()})
 
 
-@bp.route('/api/collections/<cid>/assets/<int:aid>/description', methods=['POST'])
-def set_description(cid, aid):
-    """The owner's own description of a photo (by content); empty text removes it."""
-    from app.ai.owner_text import set_owner_description
-    conn, err = _open(cid)
-    if err:
-        return err
-    try:
-        text = set_owner_description(conn, aid, (request.get_json(silent=True) or {}).get('text'))
-    except LookupError as e:
-        return _err(str(e), 404)
-    except ValueError as e:
-        return _err(str(e))
-    return jsonify({'ok': True, 'description': text, 'edited': text is not None})
-
-
 @bp.route('/api/collections/<cid>/search')
 def search_photos(cid):
     conn, err = _open(cid)

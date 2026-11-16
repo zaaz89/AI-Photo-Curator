@@ -134,7 +134,7 @@ public final class APIClient: Sendable {
         return res.settings
     }
 
-    /// The album checklist: step name -> done (import, times, duplicates, blurry, events, descriptions, export).
+    /// The album checklist: step name -> done (import, times, duplicates, blurry, events, export).
     public func workflow(trip: String) async throws -> [String: Bool] {
         struct Step: Decodable { let step: String; let done: Bool }
         struct R: Decodable { let steps: [Step] }
@@ -197,9 +197,6 @@ public final class APIClient: Sendable {
         try await post("api/collections/\(trip)/workflow", ["step": step, "done": done], as: OK.self)
     }
 
-    public func describePhotos(trip: String) async throws {
-        try await post("api/collections/\(trip)/describe", [:], as: OK.self)
-    }
 
     public func exportPreview(trip: String, choice: ExportChoice = ExportChoice()) async throws -> ExportPreview {
         try await post("api/collections/\(trip)/export/preview", choice.body)
@@ -243,10 +240,7 @@ public final class APIClient: Sendable {
         try await post("api/collections/\(trip)/events/split", ["asset_id": photo], as: OK.self)
     }
 
-    /// The owner's own description; an empty text brings back the AI's.
-    public func setDescription(trip: String, photo: Int, text: String) async throws {
-        try await post("api/collections/\(trip)/assets/\(photo)/description", ["text": text], as: OK.self)
-    }
+
 
     public func jobStatus(trip: String) async throws -> JobStatus {
         try await get("api/collections/\(trip)/index")

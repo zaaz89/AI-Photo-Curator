@@ -57,82 +57,25 @@ def test_rename_album(client, H, album):
     assert client.patch('/api/collections/nope-nothing', json={'name': 'x'}, headers=H).status_code == 404
 
 
-# ---- 2. owner description ----
+# ---- 2. no descriptions in the export (decided 2026-11-16: Google Photos writes its own) ----
+
+def test_export_writes_no_description(album):
+    conn, _ = album
+    c = _id(conn, 'C.jpg')
+    sha = conn.execute('SELECT sha256 FROM assets WHERE id = ?', (c,)).fetchone()[0]
+    with conn:
+        conn.execute("INSERT INTO ai_annotations (sha256, model, prompt_version, description, tags_json, created_at) "
+                     "VALUES (?, 'm', 'p1', 'AI says a red thing.', '[\"red\"]', 'now')", (sha,))
+    meta = next(e['meta'] for e in plan_export(conn, **google_photos_options())['entries'] if e['asset_id'] == c)
+    assert 'description' not in meta
+
 
 def _timeline_item(client, H, slug, aid):
     items = client.get(f'/api/collections/{slug}/timeline', headers=H).get_json()['items']
     return next(i for i in items if i['id'] == aid)
 
 
-def test_owner_description_wins_everywhere_and_survives_reindex(client, H, album):
-    conn, slug = album
-    c = _id(conn, 'C.jpg')
-    sha = conn.execute('SELECT sha256 FROM assets WHERE id = ?', (c,)).fetchone()[0]
-    with conn:
-        conn.execute("INSERT INTO ai_annotations (sha256, model, prompt_version, description, tags_json, created_at) "
-                     "VALUES (?, 'm', 'p1', 'AI says a red thing.', '[\"red\"]', 'now')", (sha,))
-    ai = _timeline_item(client, H, slug, c)['ai']
-    assert ai['description'] == 'AI says a red thing.' and ai['edited'] is False
-
-    r = client.post(f'/api/collections/{slug}/assets/{c}/description', json={'text': '  Our  lunch\nin Pienza '},
-                    headers=H)
-    assert r.get_json() == {'ok': True, 'description': 'Our lunch in Pienza', 'edited': True}
-    ai = _timeline_item(client, H, slug, c)['ai']
-    assert ai['description'] == 'Our lunch in Pienza' and ai['edited'] is True and ai['tags'] == ['red']
-    plan = plan_export(conn, **google_photos_options())
-    meta = next(e['meta'] for e in plan['entries'] if e['asset_id'] == c)
-    assert meta['description'] == 'Our lunch in Pienza'            # verbatim, not tidied or capitalised
-
-    analyze_collection(conn)                                       # re-indexing keeps it (by content)
-    assert _timeline_item(client, H, slug, c)['ai']['description'] == 'Our lunch in Pienza'
-
-    # a photo without any AI text gets an owner-only entry
-    a = _id(conn, 'P.jpg')
-    assert _timeline_item(client, H, slug, a)['ai'] is None
-    client.post(f'/api/collections/{slug}/assets/{a}/description', json={'text': 'Partner at the market'}, headers=H)
-    ai = _timeline_item(client, H, slug, a)['ai']
-    assert ai['description'] == 'Partner at the market' and ai['edited'] is True
-
-    # empty text removes it: the AI text shows again
-    r = client.post(f'/api/collections/{slug}/assets/{c}/description', json={'text': '   '}, headers=H)
-    assert r.get_json() == {'ok': True, 'description': None, 'edited': False}
-    ai = _timeline_item(client, H, slug, c)['ai']
-    assert ai['description'] == 'AI says a red thing.' and ai['edited'] is False
-    meta = next(e['meta'] for e in plan_export(conn, **google_photos_options())['entries'] if e['asset_id'] == c)
-    assert meta['description'] == 'AI says a red thing.'
-
-
-def test_owner_description_validation(client, H, album):
-    conn, slug = album
-    c = _id(conn, 'C.jpg')
-    url = f'/api/collections/{slug}/assets/{c}/description'
-    assert client.post(url, json={'text': 5}, headers=H).status_code == 400
-    assert client.post(url, json={}, headers=H).status_code == 400
-    assert client.post(url, json={'text': 'x' * 1001}, headers=H).status_code == 400
-    assert client.post(f'/api/collections/{slug}/assets/99999/description', json={'text': 'x'},
-                       headers=H).status_code == 404
-
-
-def test_owner_description_is_used_by_search(client, tmp_path):
-    from app.ai import embeddings, search as search_mod
-    from app.ai.owner_text import set_owner_description
-    from test_local_ai import FakeEmbedder, _solid
-    embeddings.set_embedder(FakeEmbedder())
-    try:
-        src = tmp_path / 'cam'
-        _solid(src / 'red.jpg', (220, 20, 20))
-        _solid(src / 'blue.jpg', (20, 30, 210), '2026:10:23 18:10:00')
-        conn = col.open_db(col.create('search owner'))
-        col.add_source(conn, str(src), 'Cam')
-        analyze_collection(conn)
-        set_owner_description(conn, _id(conn, 'red.jpg'), 'the lighthouse at dusk')
-        top = search_mod.search(conn, 'lighthouse')['results'][0]
-        assert top['filename'] == 'red.jpg' and top['tag_match'] is True
-    finally:
-        embeddings.set_embedder(None)
-
-
-# ---- 3. a favourite extra frame is exported ----
+# ---- 3. favourite extra frames ----
 
 def test_favourite_non_keeper_is_exported_with_its_pair(album):
     conn, _ = album
@@ -151,7 +94,8 @@ def test_favourite_non_keeper_is_exported_with_its_pair(album):
     alt = plan_export(conn, **{**google_photos_options(), 'duplicates': 'alternatives'})
     assert next(e for e in alt['entries'] if e['asset_id'] == nk)['dest'].startswith('Selected/')
     o = overview(conn)
-    assert o['export']['photos'] == kept['files'] and o['funnel']['in_album'] == kept['files']
+    photos = sum(1 for e in kept['entries'] if e['paired_with'] is None)
+    assert o['export']['photos'] == photos and o['funnel']['in_album'] == photos == kept['photo_counts']['in_album']
 
 
 # ---- 4. overview additions ----
@@ -160,14 +104,18 @@ def test_funnel_identity_and_pairs(album):
     conn, slug = album
     o = overview(conn)
     f = o['funnel']
-    assert f['taken'] == 10                                        # 5 + 1 photos and 4 videos, each file once
+    # Photos, not files: a Live Photo (still + video) is one photo, as the owner sees it.
+    assert f['taken'] == 6
     assert f['taken'] == f['left_out'] + f['blurry'] + f['extra_frames'] + f['in_album']
-    assert f['in_album'] == o['export']['photos'] == plan_export(conn, **google_photos_options())['files']
-    assert (f['left_out'], f['blurry'], f['extra_frames']) == (0, 1, 2)    # D; the non-keeper of A/B with its video
+    plan = plan_export(conn, **google_photos_options())
+    assert f['in_album'] == o['export']['photos'] == sum(1 for e in plan['entries'] if e['paired_with'] is None)
+    assert (f['left_out'], f['blurry'], f['extra_frames'], f['in_album']) == (0, 1, 1, 4)    # D; the non-keeper of A/B
+    c = plan['counts']                                             # the plan still counts files too
+    assert c['taken'] == 10 and c['taken'] == c['left_out'] + c['blurry'] + c['not_selected'] + c['extra_frames'] + c['in_album']
 
     set_mark(conn, _id(conn, 'E.jpg'), rejected=True)
     f = overview(conn)['funnel']
-    assert f['left_out'] == 2                                      # E and its video, counted once each
+    assert f['left_out'] == 1                                      # E (its video follows it, not counted again)
     assert f['taken'] == f['left_out'] + f['blurry'] + f['extra_frames'] + f['in_album']
 
     set_mark(conn, _id(conn, 'D.jpg'), favorite=True)              # a favourite blurry photo stays in
@@ -181,7 +129,20 @@ def test_funnel_when_a_pair_secondary_is_left_out_alone(album):
     set_mark(conn, _id(conn, 'C.MOV'), rejected=True)
     o = overview(conn)
     f = o['funnel']
-    assert f['left_out'] == 1 and f['taken'] == f['left_out'] + f['blurry'] + f['extra_frames'] + f['in_album']
+    # the photo C is still in the album; only its video stays out, so the photo funnel does not change
+    assert f['left_out'] == 0 and f['in_album'] == 4
+    assert f['taken'] == f['left_out'] + f['blurry'] + f['extra_frames'] + f['in_album']
+
+
+def test_overview_survives_a_failing_album_summary(album, monkeypatch):
+    conn, _ = album
+    import app.assistant as a
+
+    def boom(*_):
+        raise RuntimeError('broken ranking')
+    monkeypatch.setattr(a, '_cover_and_highlights', boom)
+    o = overview(conn)
+    assert o['facts']['photos'] == 10 and o['funnel']['in_album'] == 0 and o['highlights'] == []
 
 
 def test_funnel_without_analysis_is_zero_filled(tmp_path):
@@ -195,8 +156,8 @@ def test_people_per_source(album):
     conn, _ = album
     set_mark(conn, _id(conn, 'E.jpg'), rejected=True)
     people = overview(conn)['people']
-    assert [(p['owner'], p['taken']) for p in people] == [('Me', 9), ('Partner', 1)]
-    assert [p['in_album'] for p in people] == [4, 1]
+    assert [(p['owner'], p['taken']) for p in people] == [('Me', 5), ('Partner', 1)]
+    assert [p['in_album'] for p in people] == [2, 1]
     assert [p['source_id'] for p in people] == sorted(p['source_id'] for p in people)
     f = overview(conn)['funnel']
     assert sum(p['taken'] for p in people) == f['taken'] and sum(p['in_album'] for p in people) == f['in_album']

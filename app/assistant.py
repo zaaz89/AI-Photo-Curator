@@ -192,8 +192,8 @@ def overview(conn, job: dict | None = None) -> dict:
                    'kept_favourites': sum(1 for i in blurry if i in favourite and i not in rejected)},
         'events': {'events': events, 'days': days},
         'descriptions': {'done': described, 'photos': images, 'minutes_left': minutes},
-        'export': {'done': bool(exported and exported[0]), 'photos': plan['files'] if plan else 0},
-        **_album_summary(conn, plan),
+        'export': {'done': bool(exported and exported[0]), 'photos': plan['photo_counts']['in_album'] if plan else 0},
+        **_safe_album_summary(conn, plan),
     }
 
 
@@ -206,22 +206,36 @@ def _plan(conn):
         return None
 
 
+EMPTY_SUMMARY = {'taken': 0, 'left_out': 0, 'blurry': 0, 'extra_frames': 0, 'in_album': 0}
+
+
+def _safe_album_summary(conn, plan) -> dict:
+    """The summary must never take the whole overview down (the app would show "still analysing" forever)."""
+    try:
+        return _album_summary(conn, plan)
+    except Exception:
+        return {'funnel': dict(EMPTY_SUMMARY), 'people': [], 'cover_id': None, 'highlights': []}
+
+
 def _album_summary(conn, plan) -> dict:
     """funnel, people, cover_id, highlights (M9), all derived from the same plan as the export.
 
-    funnel: taken == left_out + blurry + extra_frames + in_album. Every present file is counted once; a paired
-    secondary (Live Photo video, RAW/JPEG partner) follows its primary (see export_plan). The Google Photos preset
-    uses selection 'no_blurry', so the plan's 'not_selected' is 0; it is added to 'blurry' to keep the identity.
+    funnel: taken == left_out + blurry + extra_frames + in_album, counted by photo: a paired secondary (Live Photo
+    video, RAW/JPEG partner) is not counted on its own (see export_plan's photo_counts). The Google Photos preset
+    uses selection 'no_blurry', so 'not_selected' is 0; it is added to 'blurry' to keep the identity.
     """
     if plan is None:
-        funnel = {'taken': 0, 'left_out': 0, 'blurry': 0, 'extra_frames': 0, 'in_album': 0}
+        funnel = dict(EMPTY_SUMMARY)
         return {'funnel': funnel, 'people': [], 'cover_id': None, 'highlights': []}
-    c = plan['counts']
+    c = plan['photo_counts']
     funnel = {'taken': c['taken'], 'left_out': c['left_out'], 'blurry': c['blurry'] + c['not_selected'],
               'extra_frames': c['extra_frames'], 'in_album': c['in_album']}
     in_album = {e['asset_id'] for e in plan['entries']}
     taken_by, album_by = Counter(), Counter()
+    secondaries = set(plan['secondaries'])
     for r in conn.execute("SELECT id, source_id FROM assets WHERE status = 'present'"):
+        if r['id'] in secondaries:
+            continue
         taken_by[r['source_id']] += 1
         album_by[r['source_id']] += r['id'] in in_album
     people = [{'owner': r['owner'], 'source_id': r['id'], 'taken': taken_by[r['id']], 'in_album': album_by[r['id']]}

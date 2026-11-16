@@ -39,7 +39,10 @@ private func overview(analysing: Bool = false, pendingClocks: Int = 0, needYou: 
     s = stepStates(try overview(), marked: ["events": true], analysing: false)
     #expect(nextStep(s) == .export)
 
+    // Descriptions do not finish the story (Google Photos writes its own); only moving on does.
     s = stepStates(try overview(described: 10, exported: true), marked: [:], analysing: false)
+    #expect(nextStep(s) == .story)
+    s = stepStates(try overview(exported: true), marked: ["events": true], analysing: false)
     #expect(nextStep(s) == nil)
 }
 
@@ -97,4 +100,22 @@ private func overview(analysing: Bool = false, pendingClocks: Int = 0, needYou: 
      "boxes": [{"x": 0.2, "y": 0.2, "w": 0.2, "h": 0.3, "eyes_closed": true, "looking_away": false}]}
     """#.utf8))
     #expect(f.boxes?.first?.eyesClosed == true && f.boxes?.first?.h == 0.3)
+}
+
+@Test func blurryPhotoGoesToTheAlbumOnlyWhenTheOwnerKeepsIt() throws {
+    func photo(_ extra: String) throws -> Photo {
+        try JSONDecoder().decode(Photo.self, from: Data(#"{"id": 1, "filename": "a.jpg", "path": "/x/a.jpg", "kind": "image", \#(extra)}"#.utf8))
+    }
+    let blurry = try photo(#""focus": {"tier": "blurry", "auto_tier": "blurry"}"#)
+    #expect(blurry.foundBlurry && !blurry.goesToAlbumDespiteFocus)          // not rejected, still not exported
+    let kept = try photo(#""focus": {"tier": "soft", "auto_tier": "blurry", "override": "soft"}"#)
+    #expect(kept.foundBlurry && kept.goesToAlbumDespiteFocus)
+    #expect(try photo(#""favorite": true, "focus": {"tier": "blurry", "auto_tier": "blurry"}"#).goesToAlbumDespiteFocus)
+    #expect(!(try photo(#""rejected": true, "focus": {"tier": "soft", "auto_tier": "blurry", "override": "soft"}"#)).goesToAlbumDespiteFocus)
+    #expect(blurry.focus?.overridden("soft").tier == "soft" && blurry.focus?.overridden(nil).tier == "blurry")
+}
+
+@Test func movingOnFromClocksCountsAsDone() throws {
+    let s = stepStates(try overview(pendingClocks: 1), marked: ["times": true], analysing: false)
+    #expect(s[.photos]?.done == true && s[.photos]?.waiting == 1)
 }

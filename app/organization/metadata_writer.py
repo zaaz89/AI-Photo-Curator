@@ -1,4 +1,5 @@
-"""Write corrected time, place, description and favourite into EXPORTED COPIES.
+"""Write corrected time, place and favourite into EXPORTED COPIES (a description only if a plan asks for one;
+since 2026-11-16 the export plan does not).
 
 Owner's decision 2026-11-12: Google Photos only shows what is inside the file,
 so the "Export for Google Photos" copies get:

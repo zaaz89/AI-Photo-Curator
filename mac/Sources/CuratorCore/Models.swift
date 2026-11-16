@@ -24,6 +24,13 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         public let autoTier: String?
         public let override: String?
         enum CodingKeys: String, CodingKey { case tier, override, autoTier = "auto_tier" }
+        public init(tier: String, autoTier: String?, override: String?) {
+            self.tier = tier; self.autoTier = autoTier; self.override = override
+        }
+        /// The same photo with the owner's focus mark set (nil: back to the automatic tier).
+        public func overridden(_ mark: String?) -> Focus {
+            Focus(tier: mark ?? autoTier ?? tier, autoTier: autoTier, override: mark)
+        }
     }
     public struct Faces: Decodable, Hashable, Sendable {
         /// One face, normalised to the image, origin top-left (M9).
@@ -49,9 +56,7 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         public let description: String?
         public let tags: [String]?
         public let textVisible: String?
-        /// The description is the owner's own text (M9).
-        public let edited: Bool?
-        enum CodingKeys: String, CodingKey { case description, tags, edited, textVisible = "text_visible" }
+        enum CodingKeys: String, CodingKey { case description, tags, textVisible = "text_visible" }
     }
 
     public let id: Int
@@ -132,6 +137,11 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         return String(t.dropFirst(11).prefix(5))
     }
     public var isVideo: Bool { kind == "video" }
+    /// The app found it blurry (whatever the owner decided since).
+    public var foundBlurry: Bool { focus?.autoTier == "blurry" || focus?.tier == "blurry" }
+    /// The Google Photos export takes it: not left out, and not blurry unless it is a favourite or the
+    /// owner marked its focus as acceptable (same rule as the engine's export plan).
+    public var goesToAlbumDespiteFocus: Bool { !rejected && (favorite || focus?.tier != "blurry") }
     public var fileURL: URL { URL(fileURLWithPath: path) }
 }
 

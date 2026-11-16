@@ -22,7 +22,7 @@ public enum GuideStep: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .photos: ["import", "times"]
         case .selection: ["duplicates", "blurry"]
-        case .story: ["events", "descriptions"]
+        case .story: ["events"]
         case .export: ["export"]
         }
     }
@@ -44,12 +44,13 @@ public func stepStates(_ o: Overview?, marked: [String: Bool], analysing: Bool) 
     guard let o else { return out }
     let busy = analysing || o.analysing
     let pendingClocks = busy ? 0 : o.clocks.pending
-    out[.photos] = StepState(done: !busy && pendingClocks == 0 && o.facts.photos > 0, waiting: pendingClocks)
+    // Done when no clock waits, or when the owner moved on (Next) without answering a suggestion.
+    out[.photos] = StepState(done: !busy && o.facts.photos > 0 && (pendingClocks == 0 || marked["times"] == true),
+                             waiting: pendingClocks)
     let moments = busy ? 0 : o.moments.needYou
     out[.selection] = StepState(done: !busy && (moments == 0 || marked["duplicates"] == true), waiting: moments)
-    // The story is the owner's to judge: done once marked (events) or once every photo is described.
-    let described = o.descriptions.photos > 0 && o.descriptions.done >= o.descriptions.photos
-    out[.story] = StepState(done: !busy && (marked["events"] == true || described), waiting: 0)
+    // The story is the owner's to judge: done once the owner moved on from it (Next marks "events").
+    out[.story] = StepState(done: !busy && marked["events"] == true, waiting: 0)
     out[.export] = StepState(done: o.export.done, waiting: 0)
     return out
 }

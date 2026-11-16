@@ -59,9 +59,6 @@ def search(conn, query: str, limit: int = 60, translate: bool = True) -> dict:
     words = {w for v in variants for w in re.findall(r'\w{3,}', v.lower())}
     ann = {r['sha256']: r for r in conn.execute(
         'SELECT sha256, description, tags_json FROM ai_annotations WHERE error IS NULL')}
-    from app.ai.owner_text import owner_descriptions
-    for sha, text in owner_descriptions(conn).items():           # the owner's text wins over the AI text
-        ann[sha] = {'description': text, 'tags_json': (ann.get(sha) or {'tags_json': '[]'})['tags_json']}
     place_text = {}
     for r in conn.execute("SELECT a.sha256, p.label, p.region, p.country, p.aliases FROM places p "
                           "JOIN assets a ON a.id = p.asset_id WHERE a.status = 'present'"):

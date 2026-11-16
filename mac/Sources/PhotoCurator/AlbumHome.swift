@@ -32,6 +32,7 @@ struct AlbumHero: View {
     @EnvironmentObject var library: LibraryModel
     @State private var editing = false
     @State private var name = ""
+    @State private var editTrip: String?            // the album being renamed, kept if the owner switches albums
     @FocusState private var nameFocused: Bool
 
     var cover: Photo? {
@@ -68,7 +69,7 @@ struct AlbumHero: View {
                         Text(library.albumName).font(.system(size: 42, weight: .bold)).foregroundStyle(.white)
                             .lineLimit(2).shadow(color: .black.opacity(0.3), radius: 8)
                         Button {
-                            name = library.albumName; editing = true; nameFocused = true
+                            name = library.albumName; editTrip = library.tripId; editing = true; nameFocused = true
                         } label: { Image(systemName: "pencil").font(.title3.weight(.semibold)) }
                             .buttonStyle(.plain).foregroundStyle(.white.opacity(0.8))
                             .help(library.tr("renameAlbum")).accessibilityLabel(library.tr("renameAlbum"))
@@ -80,12 +81,13 @@ struct AlbumHero: View {
             .padding(28)
         }
         .clipShape(.rect(cornerRadius: 28))
+        .onChange(of: library.tripId) { _, _ in commit() }      // a half-typed name goes to its own album
         .shadow(color: .black.opacity(0.18), radius: 20, y: 10)
         .overlay(alignment: .topTrailing) { peopleStack.padding(20) }
     }
 
     func commit() {
-        if editing { library.renameAlbum(name) }
+        if editing { library.renameAlbum(name, trip: editTrip) }
         editing = false
     }
 
@@ -315,8 +317,7 @@ struct StepCards: View {
             if o.moments.needYou > 0 { return String(format: library.tr("momentsWait"), Strings.count(o.moments.needYou, .moment, l)) }
             return String(format: library.tr("momentsChosen"), Strings.count(o.moments.total, .moment, l))
         case .story:
-            return Strings.count(library.events.count, .chapter, l) + " · " +
-                String(format: library.tr("describedShort"), o.descriptions.done, o.descriptions.photos)
+            return Strings.count(library.events.count, .chapter, l) + " · " + Strings.count(o.events.days, .day, l)
         case .export:
             return o.export.done ? library.tr("exportDone")
                 : String(format: library.tr("exportReadyShort"), Strings.photos(o.funnel?.inAlbum ?? o.export.photos, l))
@@ -349,7 +350,7 @@ struct Highlights: View {
                                 .frame(width: tileWidth(photo), height: 200)
                                 .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
                                 .onTapGesture { library.destination = .all; library.click(photo, modifiers: []) }
-                                .help(photo.ai?.description ?? photo.filename)
+                                .help(photo.filename)
                         }
                     }
                     .padding(.vertical, 8)

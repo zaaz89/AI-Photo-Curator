@@ -157,11 +157,6 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     pairs = _pairs(conn)
     skip_dups = _non_keepers(conn, favorites)
     warnings = Counter()
-    ai = {r['sha256']: r['description'] for r in conn.execute(
-        "SELECT sha256, description FROM ai_annotations WHERE error IS NULL AND COALESCE(description, '') != '' "
-        'ORDER BY created_at')}
-    from app.ai.owner_text import owner_descriptions
-    owner_text = owner_descriptions(conn)
     days = sorted({_local_dt(r).date() for r in rows if _local_dt(r)})
     day_no = {d: (d - days[0]).days + 1 for d in days}          # calendar days since the first photo
     day_place = {}
@@ -171,6 +166,7 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
         day_place[d] = c.most_common(1)[0][0] if c else ''
 
     taken = len(rows)
+    taken_photos = sum(1 for r in rows if r['id'] not in pairs)
     why = {}                              # asset id -> why it is not exported (counts)
     if rejected:
         before = len(rows)
@@ -243,7 +239,7 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                 parts = [trip, f'Day-{day_no[dt.date()]}', clean_part(r['event_name'] or ''), n]
             stem = '_'.join(p for p in parts if p)
         stems[r['id']] = (folder, stem)
-        entries.append(_entry(r, folder, stem, r['id'] in skip_dups, meta=_meta(r, dt, ai, r['id'] in favorites, owner_text)))
+        entries.append(_entry(r, folder, stem, r['id'] in skip_dups, meta=_meta(r, dt, r['id'] in favorites)))
 
     for sec, pri in pairs.items():
         r = by_id.get(sec)
@@ -264,14 +260,23 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
               'not_selected': reasons['not_selected'], 'extra_frames': reasons['extra_frames'],
               'in_album': len(entries)}
     counts['extra_frames'] += taken - (sum(counts.values()) - taken)    # safety net: the identity always holds
+    # The same by photo, as the owner sees it: a paired secondary (Live Photo video, RAW partner) is not
+    # counted on its own; it goes wherever its primary goes.
+    photo_reasons = Counter(v for k, v in why.items() if k not in pairs)
+    photo_counts = {'taken': taken_photos, 'left_out': photo_reasons['left_out'], 'blurry': photo_reasons['blurry'],
+                    'not_selected': photo_reasons['not_selected'], 'extra_frames': photo_reasons['extra_frames'],
+                    'in_album': sum(1 for e in entries if e['paired_with'] is None)}
+    photo_counts['extra_frames'] += taken_photos - (sum(photo_counts.values()) - taken_photos)
     total = sum(e['size'] for e in entries)
     return {'trip': trip, 'template': template, 'folders': folders, 'duplicates': duplicates, 'selection': selection,
             'files': len(entries), 'bytes': total, 'folders_count': len({os.path.dirname(e['dest']) for e in entries}),
-            'warnings': dict(warnings), 'counts': counts, 'entries': entries}
+            'warnings': dict(warnings), 'counts': counts, 'photo_counts': photo_counts, 'secondaries': sorted(pairs),
+            'entries': entries}
 
 
-def _meta(r, dt, ai, favorite, owner_text=None) -> dict:
-    """What the Google Photos export writes into a copy (photos only)."""
+def _meta(r, dt, favorite) -> dict:
+    """What the Google Photos export writes into a copy (photos only): corrected time, place, favourite.
+    No description (decided 2026-11-16): Google Photos writes its own."""
     if r['kind'] != 'image':
         return {}
     m = {}
@@ -280,11 +285,6 @@ def _meta(r, dt, ai, favorite, owner_text=None) -> dict:
         m['datetime'] = dt.strftime('%Y:%m:%d %H:%M:%S')
         if off is not None:
             m['offset'] = f"{'+' if off >= 0 else '-'}{abs(off) // 60:02d}:{abs(off) % 60:02d}"
-    if (owner_text or {}).get(r['sha256']):                  # the owner's own words, verbatim
-        m['description'] = owner_text[r['sha256']]
-    elif ai.get(r['sha256']):
-        from app.ai.vision_analyzer import tidy_description
-        m['description'] = tidy_description(ai[r['sha256']])
     if r['place_precision'] == 'in' and r['place_name']:     # 'near X' is not written as city X
         m['city'] = r['place_name']
     if r['place_precision'] in ('in', 'near', 'region') and r['country']:
@@ -316,7 +316,7 @@ def run_export(conn, dest_root: str, plan: dict, resume_dir: str | None = None, 
         import json
         from app.organization.metadata_writer import write_into_copies
         if progress:
-            progress('Writing time, place and description into the copies', 0, 0)
+            progress('Writing time and place into the copies', 0, 0)
         work = [{'dest': it['dest'], 'meta': e['meta']} for it, e in zip(res.items, plan['entries'])
                 if it['status'] == 'verified' and e.get('meta')]
         res.metadata = write_into_copies(res.job_dir, work, roots)

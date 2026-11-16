@@ -2,7 +2,8 @@ import CuratorCore
 import SwiftUI
 
 /// Step 3: the album as a story. Days hold chapters (the engine's events); every chapter can be
-/// renamed, merged with the one before, opened, split at a photo, and its descriptions edited.
+/// renamed, merged with the one before, opened, and split at a photo. (No descriptions: Google Photos writes
+/// its own, decided 2026-11-16.)
 struct StepStory: View {
     @EnvironmentObject var library: LibraryModel
     @State private var open: TripEvent?
@@ -10,7 +11,6 @@ struct StepStory: View {
     var body: some View {
         StepPage(step: .story, lead: library.tr("lead_story"), status: status) {
             VStack(alignment: .leading, spacing: 30) {
-                DescriptionsCard()
                 if library.analysing && library.events.isEmpty {
                     AnalysisCard(compact: true)
                 }
@@ -47,41 +47,6 @@ struct StepStory: View {
     }
 }
 
-/// AI descriptions: how many are done, how long the rest takes on this Mac, and start.
-struct DescriptionsCard: View {
-    @EnvironmentObject var library: LibraryModel
-
-    var body: some View {
-        let d = library.overview?.descriptions
-        let describing = library.job.running && library.job.kind == "describe" && library.job.collection == library.tripId
-        HStack(spacing: 16) {
-            AIRing(symbol: "text.bubble", size: 46, spinning: describing,
-                   progress: d.map { Double($0.done) / Double(max(1, $0.photos)) })
-            VStack(alignment: .leading, spacing: 4) {
-                Text(library.tr("descTitle")).font(.headline)
-                Text(text(d, describing)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if describing {
-                Button(library.tr("stop")) { library.stopJob() }.buttonStyle(.glass).controlSize(.large)
-            } else if let d, d.done < d.photos {
-                Button(library.tr("describe")) { library.describePhotos() }
-                    .buttonStyle(.glassProminent).controlSize(.large).tint(.purple)
-                    .disabled(library.job.running)
-            }
-        }
-        .padding(18)
-        .card()
-    }
-
-    func text(_ d: Overview.Descriptions?, _ running: Bool) -> String {
-        guard let d else { return library.tr("stillAnalysing") }
-        if running { return library.job.status }
-        if d.photos > 0 && d.done >= d.photos { return String(format: library.tr("descAll"), d.photos) }
-        return String(format: library.tr("descSome"), d.done, d.photos, max(1, d.minutesLeft)) + " " + library.tr("descWhere")
-    }
-}
-
 /// One chapter: cover, name editable in place, time and place, a strip of its photos.
 struct ChapterCard: View {
     @EnvironmentObject var library: LibraryModel
@@ -89,6 +54,7 @@ struct ChapterCard: View {
     let first: Bool
     let open: () -> Void
     @State private var name = ""
+    @State private var trip: String?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -105,8 +71,8 @@ struct ChapterCard: View {
                     TextField(library.tr("chapterName"), text: $name)
                         .textFieldStyle(.plain).font(.title2.weight(.semibold))
                         .focused($focused)
-                        .onSubmit { library.renameEvent(event.id, to: name) }
-                        .onChange(of: focused) { _, f in if !f { library.renameEvent(event.id, to: name) } }
+                        .onSubmit { library.renameEvent(event.id, to: name, trip: trip) }
+                        .onChange(of: focused) { _, f in if !f { library.renameEvent(event.id, to: name, trip: trip) } }
                     Menu {
                         Button(library.tr("openChapter"), action: open)
                         if !first { Button(library.tr("mergePrevious")) { library.mergeWithPrevious(event.id) } }
@@ -132,8 +98,8 @@ struct ChapterCard: View {
         }
         .padding(16)
         .card(hover: true)
-        .onAppear { name = event.name }
-        .onDisappear { if focused { library.renameEvent(event.id, to: name) } }
+        .onAppear { name = event.name; trip = library.shownTrip }
+        .onDisappear { if focused { library.renameEvent(event.id, to: name, trip: trip) } }
         .onChange(of: event.name) { _, n in if !focused { name = n } }
     }
 
@@ -146,7 +112,7 @@ struct ChapterCard: View {
     }
 }
 
-/// A chapter opened: its photos with their descriptions, each editable; a new chapter can start at any photo.
+/// A chapter opened: its photos; a new chapter can start at any photo.
 struct ChapterSheet: View {
     @EnvironmentObject var library: LibraryModel
     @Environment(\.dismiss) private var dismiss
@@ -163,14 +129,13 @@ struct ChapterSheet: View {
                     Text(library.tr("chapterSheetLead")).foregroundStyle(.secondary)
                 }
                 Spacer()
-                // Escape closes; Return stays with the description being written.
-                Button(library.tr("done")) { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.cancelAction)
+                Button(library.tr("done")) { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
             }
             .padding(24)
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 18)], spacing: 22) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 18) {
                     ForEach(Array(photos.enumerated()), id: \.element.id) { i, p in
-                        DescribedPhoto(photo: p, canSplit: i > 0)
+                        ChapterPhoto(photo: p, canSplit: i > 0)
                     }
                 }
                 .padding(.horizontal, 24).padding(.bottom, 24)
@@ -183,17 +148,16 @@ struct ChapterSheet: View {
     }
 }
 
-struct DescribedPhoto: View {
+/// A photo of an opened chapter; the scissors start a new chapter at it.
+struct ChapterPhoto: View {
     @EnvironmentObject var library: LibraryModel
     let photo: Photo
     let canSplit: Bool
-    @State private var text = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             PhotoCover(photo: photo, side: 520, radius: 14)
-                .frame(height: 180)
+                .frame(height: 170)
                 .opacity(photo.rejected ? 0.45 : 1)
                 .overlay(alignment: .topTrailing) {
                     if photo.rejected {
@@ -201,38 +165,16 @@ struct DescribedPhoto: View {
                             .background(.regularMaterial, in: .capsule).padding(8)
                     }
                 }
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text(photo.clock).monospacedDigit().font(.callout.weight(.medium))
                 Text(photo.owner).font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                if photo.ai?.edited == true {
-                    Label(library.tr("yourText"), systemImage: "pencil").font(.caption).foregroundStyle(.secondary)
-                }
                 if canSplit {
-                    Button { library.newChapter(at: photo.id) } label: { Image(systemName: "scissors") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                    Button { library.newChapter(at: photo.id) } label: { Label(library.tr("newChapterShort"), systemImage: "scissors") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).font(.callout)
                         .help(library.tr("newChapterHere")).accessibilityLabel(library.tr("newChapterHere"))
                 }
             }
-            TextField(library.tr("descPlaceholder"), text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(2...5)
-                .focused($focused)
-                .padding(10)
-                .background(.fill.quaternary, in: .rect(cornerRadius: 10))
-                .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: focused ? 2 : 0) }
-                .contentShape(.rect)
-                .onTapGesture { focused = true }          // the whole box starts editing, not only the text line
-                .onSubmit { save() }
-                .onChange(of: focused) { _, f in if !f { save() } }
         }
-        .onAppear { text = photo.ai?.description ?? "" }
-        .onDisappear { save() }                      // the sheet closed while typing
-        .onChange(of: photo.ai?.description) { _, d in if !focused { text = d ?? "" } }
-    }
-
-    func save() {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t != (photo.ai?.description ?? "") { library.setDescription(photo.id, t) }
     }
 }

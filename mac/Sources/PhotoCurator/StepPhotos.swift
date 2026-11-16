@@ -55,6 +55,7 @@ struct SourceCard: View {
     let source: SourceInfo
     let index: Int
     @State private var name = ""
+    @State private var trip: String?
     @FocusState private var focused: Bool
 
     var mine: [Photo] { library.photos.filter { $0.sourceId == source.id } }
@@ -68,8 +69,8 @@ struct SourceCard: View {
                     TextField(library.tr("whosePhotos"), text: $name)
                         .textFieldStyle(.plain).font(.title3.weight(.semibold))
                         .focused($focused)
-                        .onSubmit { library.renamePerson(source: source.id, to: name) }
-                        .onChange(of: focused) { _, f in if !f { library.renamePerson(source: source.id, to: name) } }
+                        .onSubmit { library.renamePerson(source: source.id, to: name, trip: trip) }
+                        .onChange(of: focused) { _, f in if !f { library.renamePerson(source: source.id, to: name, trip: trip) } }
                     Text(library.tr("tapToRename")).font(.caption).foregroundStyle(.tertiary)
                 }
             }
@@ -90,8 +91,8 @@ struct SourceCard: View {
         }
         .padding(16)
         .card()
-        .onAppear { name = source.owner }
-        .onDisappear { if focused { library.renamePerson(source: source.id, to: name) } }
+        .onAppear { name = source.owner; trip = library.shownTrip }
+        .onDisappear { if focused { library.renamePerson(source: source.id, to: name, trip: trip) } }
         .onChange(of: source.owner) { _, n in if !focused { name = n } }
     }
 

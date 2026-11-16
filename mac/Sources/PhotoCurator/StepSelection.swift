@@ -36,7 +36,7 @@ struct StepSelection: View {
         case .moments:
             let n = library.overview?.moments.needYou ?? 0
             return library.tr("segMoments") + (n > 0 ? " · \(n)" : "")
-        case .blurry: return library.tr("segBlurry") + " · \(library.count(.blurry))"
+        case .blurry: return library.tr("segBlurry") + " · \(library.photos.filter(\.foundBlurry).count)"
         case .leftOut: return library.tr("segLeftOut") + " · \(library.count(.leftOut))"
         }
     }
@@ -332,8 +332,8 @@ struct ToggleGrid: View {
                 Text(library.tr(kind == .blurry ? "blurryLead" : "leftOutLead")).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 if kind == .blurry && !ids.isEmpty {
-                    Button(library.tr("keepAll")) { library.setLeftOut(ids, false) }.buttonStyle(.glass)
-                    Button(library.tr("leaveOutAll")) { library.setLeftOut(ids, true) }.buttonStyle(.glass)
+                    Button(library.tr("keepAll")) { library.setBlurryInAlbum(ids, true) }.buttonStyle(.glass)
+                    Button(library.tr("leaveOutAll")) { library.setBlurryInAlbum(ids, false) }.buttonStyle(.glass)
                 }
             }
             if ids.isEmpty {
@@ -345,23 +345,27 @@ struct ToggleGrid: View {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)], spacing: 12) {
                         ForEach(items) { p in
-                            Button { library.setLeftOut([p.id], !p.rejected) } label: {
+                            // In the album = what the export takes (a blurry photo needs the owner's keep).
+                            let inAlbum = kind == .blurry ? p.goesToAlbumDespiteFocus : !p.rejected
+                            Button {
+                                if kind == .blurry { library.setBlurryInAlbum([p.id], !inAlbum) } else { library.setLeftOut([p.id], inAlbum) }
+                            } label: {
                                 PhotoCover(photo: p, side: 520, radius: 14)
                                     .frame(height: 150)
-                                    .opacity(p.rejected ? 0.45 : 1)
-                                    .saturation(p.rejected ? 0.2 : 1)
+                                    .opacity(inAlbum ? 1 : 0.45)
+                                    .saturation(inAlbum ? 1 : 0.2)
                                     .overlay(alignment: .bottomTrailing) {
-                                        Label(library.tr(p.rejected ? "leftOut" : "inAlbum"),
-                                              systemImage: p.rejected ? "eye.slash.fill" : "checkmark.circle.fill")
+                                        Label(library.tr(inAlbum ? "inAlbum" : "notInAlbum"),
+                                              systemImage: inAlbum ? "checkmark.circle.fill" : "eye.slash.fill")
                                             .font(.caption.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 4)
                                             .background(.regularMaterial, in: .capsule)
-                                            .foregroundStyle(p.rejected ? Color.secondary : Color.green).padding(8)
+                                            .foregroundStyle(inAlbum ? Color.green : Color.secondary).padding(8)
                                     }
                                     .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .help(library.tr(p.rejected ? "clickToKeep" : "clickToLeaveOut"))
-                            .animation(.snappy(duration: 0.2), value: p.rejected)
+                            .help(library.tr(inAlbum ? "clickToLeaveOut" : "clickToKeep"))
+                            .animation(.snappy(duration: 0.2), value: inAlbum)
                         }
                     }
                     .padding(.bottom, 20)
@@ -377,7 +381,7 @@ struct ToggleGrid: View {
 
     func refresh() {
         switch kind {
-        case .blurry: ids = library.photos.filter { $0.focus?.tier == "blurry" }.map(\.id)
+        case .blurry: ids = library.photos.filter(\.foundBlurry).map(\.id)
         case .leftOut: ids = library.photos.filter(\.rejected).map(\.id)
         }
     }

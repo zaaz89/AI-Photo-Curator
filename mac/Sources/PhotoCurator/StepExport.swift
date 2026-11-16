@@ -132,7 +132,7 @@ struct StepExport: View {
         var parts = [ByteCountFormatter.string(fromByteCount: Int64(p.bytes), countStyle: .file)]
         if p.files != p.photoIds.count { parts.append(String(format: library.tr("pairedFiles"), p.files - p.photoIds.count)) }
         if let f = p.foldersCount, choice.kind == .archive { parts.append(String(format: library.tr("foldersCount"), f)) }
-        if p.writesMetadata == true { parts.append(library.tr("withDescriptions")) }
+        if p.writesMetadata == true { parts.append(library.tr("withTimePlace")) }
         return parts.joined(separator: " · ")
     }
 

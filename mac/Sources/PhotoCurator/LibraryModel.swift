@@ -53,7 +53,7 @@ enum AssistantSheet: String, Identifiable {
     /// Moments the owner went through in this session; a reopened sheet continues after them.
     var reviewedMoments: Set<Int> = []
     var exported: Bool { steps["export"] == true }
-    static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "descriptions", "export"]
+    static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "export"]
     var stepsDone: Int { Self.stepOrder.filter(isDone).count }
     /// A step is done when the owner marked it, or when there is nothing left to decide in it.
     func isDone(_ step: String) -> Bool {
@@ -63,7 +63,6 @@ enum AssistantSheet: String, Identifiable {
         case "times": return o.clocks.pending == 0
         case "duplicates": return o.moments.needYou == 0
         case "blurry": return o.blurry.total == 0
-        case "descriptions": return o.descriptions.photos > 0 && o.descriptions.done >= o.descriptions.photos
         case "export": return o.export.done
         default: return false
         }
@@ -342,6 +341,8 @@ enum AssistantSheet: String, Identifiable {
                 case ("favorite", .bool(let b)): copy[i].favorite = b
                 case ("rejected", .bool(let b)): copy[i].rejected = b
                 case ("wallpaper", .bool(let b)): copy[i].wallpaper = b
+                case ("focus", .string(let t)): copy[i].focus = copy[i].focus?.overridden(t)
+                case ("focus", .null): copy[i].focus = copy[i].focus?.overridden(nil)
                 default: break
                 }
             }
@@ -356,31 +357,37 @@ enum AssistantSheet: String, Identifiable {
     private var photoIndex: [Int: Int] = [:]
     var albumName: String { trips.first { $0.id == tripId }?.name ?? "" }
 
-    /// Runs one engine change, then reloads; errors become the message.
-    func change(_ work: @escaping @Sendable (APIClient, String) async throws -> Void) {
-        guard let tripId else { return }
-        enqueue { api in try await work(api, tripId) }
+    /// Runs one engine change for an album, then reloads. Ids of photos, chapters and people are per album,
+    /// so a view passes the album it was showing (`trip`): an edit committed after the owner switched albums
+    /// still goes to the album it belongs to, never to the one now open.
+    func change(trip: String? = nil, _ work: @escaping @Sendable (APIClient, String) async throws -> Void) {
+        guard let target = trip ?? (tripId == loadedTripId ? tripId : nil) else { return }
+        enqueue { api in try await work(api, target) }
     }
+    /// The album now shown, if its photos are loaded (views capture it when they appear).
+    var shownTrip: String? { tripId == loadedTripId ? tripId : nil }
+    /// True when `trip` is the album on screen (comparisons with the shown names only make sense then).
+    private func isShown(_ trip: String?) -> Bool { trip == nil || trip == shownTrip }
 
-    func renameAlbum(_ name: String) {
+    func renameAlbum(_ name: String, trip: String?) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let tripId, !n.isEmpty, n != albumName else { return }
+        guard let trip, !n.isEmpty, n != trips.first(where: { $0.id == trip })?.name else { return }
         Task {
-            do { try await api.renameAlbum(trip: tripId, name: n); trips = (try? await api.trips()) ?? trips }
+            do { try await api.renameAlbum(trip: trip, name: n); trips = (try? await api.trips()) ?? trips }
             catch { message = describe(error) }
         }
     }
 
-    func renamePerson(source: Int, to name: String) {
+    func renamePerson(source: Int, to name: String, trip: String?) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !n.isEmpty, sources.first(where: { $0.id == source })?.owner != n else { return }
-        change { api, trip in try await api.renamePerson(trip: trip, source: source, owner: n) }
+        guard !n.isEmpty, !(isShown(trip) && sources.first(where: { $0.id == source })?.owner == n) else { return }
+        change(trip: trip) { api, t in try await api.renamePerson(trip: t, source: source, owner: n) }
     }
 
-    func renameEvent(_ event: Int, to name: String) {
+    func renameEvent(_ event: Int, to name: String, trip: String?) {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !n.isEmpty, events.first(where: { $0.id == event })?.name != n else { return }
-        change { api, trip in try await api.renameEvent(trip: trip, event: event, name: n) }
+        guard !n.isEmpty, !(isShown(trip) && events.first(where: { $0.id == event })?.name == n) else { return }
+        change(trip: trip) { api, t in try await api.renameEvent(trip: t, event: event, name: n) }
     }
 
     func mergeWithPrevious(_ event: Int) {
@@ -395,11 +402,6 @@ enum AssistantSheet: String, Identifiable {
         change { api, trip in try await api.resetDay(trip: trip, day: day) }
     }
 
-    func setDescription(_ photo: Int, _ text: String) {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard self.photo(photo)?.ai?.description != t || t.isEmpty else { return }
-        change { api, trip in try await api.setDescription(trip: trip, photo: photo, text: t) }
-    }
 
     /// Favourite on a frame of a moment: it goes to the album too, next to the chosen one.
     func toggleKeepToo(_ id: Int) {
@@ -412,16 +414,41 @@ enum AssistantSheet: String, Identifiable {
         mark(items, ["rejected": .bool(out)], name: tr(out ? "leaveOut" : "keep"))
     }
 
-    /// Adds folders to the open album and analyses again (only the new photos are read).
+    /// Blurry photos: "keep" must be what the export reads, so a kept blurry photo gets the owner's focus
+    /// mark "soft" (acceptable) besides not being left out; "leave out" marks it left out.
+    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) {
+        let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
+        if inAlbum {
+            let needsMark = items.filter { $0.focus?.tier == "blurry" && !$0.favorite }
+            let plain = items.filter { !needsMark.contains($0) }
+            mark(needsMark, ["rejected": .bool(false), "focus": .string("soft")], name: tr("keep"))
+            mark(plain, ["rejected": .bool(false)], name: tr("keep"))
+        } else {
+            mark(items, ["rejected": .bool(true)], name: tr("leaveOut"))
+        }
+    }
+
+    /// Adds folders to the open album and analyses the new photos. Every folder is tried; refusals are shown
+    /// together, and the analysis starts when at least one folder was added.
     func addFolders(_ urls: [URL]) {
-        guard let tripId, !urls.isEmpty else { return }
+        guard let tripId, tripId == loadedTripId, !urls.isEmpty else { return }
         Task {
+            var problems: [String] = [], added = 0
             do {
                 let s = try await api.suggest(paths: urls.map(\.path))
-                for r in s.rejected { message = "\(URL(fileURLWithPath: r.path).lastPathComponent): \(trOr("problem_" + r.problem, r.problem))" }
-                for f in s.folders { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? f.path.split(separator: "/").last.map(String.init) ?? "?" : f.owner) }
-                if !s.folders.isEmpty { try await api.startAnalysis(trip: tripId); await reload(); await pollOnce() }
-            } catch { message = describe(error) }
+                problems += s.rejected.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \(trOr("problem_" + $0.problem, $0.problem))" }
+                for f in s.folders {
+                    let name = URL(fileURLWithPath: f.path).lastPathComponent
+                    do { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? name : f.owner); added += 1 }
+                    catch { problems.append("\(name): \(describe(error))") }
+                }
+            } catch { problems.append(describe(error)) }
+            if added > 0 {
+                do { try await api.startAnalysis(trip: tripId) } catch { problems.append(describe(error)) }
+                await reload()
+                await pollOnce()
+            }
+            if !problems.isEmpty { message = problems.joined(separator: " · ") }
         }
     }
 
@@ -492,10 +519,6 @@ enum AssistantSheet: String, Identifiable {
         Task { try? await api.setStep(trip: tripId, step: step, done: done); await reload() }
     }
 
-    func describePhotos() {
-        guard let tripId else { return }
-        Task { do { try await api.describePhotos(trip: tripId) } catch { message = describe(error) } }
-    }
 
     func leaveOutAllBlurry() {
         let blurry = photos.filter { $0.focus?.tier == "blurry" && !$0.rejected && !$0.favorite }

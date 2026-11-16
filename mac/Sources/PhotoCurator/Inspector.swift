@@ -70,17 +70,6 @@ struct InspectorView: View {
                         }
                     }
 
-                    if let d = p.ai?.description, !d.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(library.tr("description"), systemImage: "sparkles").font(.subheadline.weight(.semibold))
-                            Text(d).foregroundStyle(.secondary).textSelection(.enabled)
-                            if let tags = p.ai?.tags, !tags.isEmpty {
-                                FlowTags(tags: tags)
-                            }
-                            Text(library.tr("aiNote")).font(.caption).foregroundStyle(.tertiary)
-                        }
-                    }
-
                     if !p.isVideo {
                         Toggle(isOn: Binding(get: { p.wallpaper }, set: { _ in library.toggleWallpaper() })) {
                             Label(library.tr("wallpaper"), systemImage: "iphone")
@@ -120,16 +109,6 @@ struct InspectorView: View {
     }
 }
 
-struct FlowTags: View {
-    let tags: [String]
-    var body: some View {
-        FlowLayout(spacing: 4) {
-            ForEach(tags.prefix(10), id: \.self) { t in
-                Text(t).font(.caption).padding(.horizontal, 7).padding(.vertical, 2).background(.fill.tertiary, in: .capsule)
-            }
-        }
-    }
-}
 
 /// Lays views out in rows and wraps to the next row when the width is used up.
 struct FlowLayout: Layout {

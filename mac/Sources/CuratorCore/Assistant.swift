@@ -90,10 +90,6 @@ public struct Overview: Decodable, Sendable {
         enum CodingKeys: String, CodingKey { case total, leftOut = "left_out", keptFavourites = "kept_favourites" }
     }
     public struct Events: Decodable, Sendable { public let events: Int, days: Int }
-    public struct Descriptions: Decodable, Sendable {
-        public let done: Int, photos: Int, minutesLeft: Int
-        enum CodingKeys: String, CodingKey { case done, photos, minutesLeft = "minutes_left" }
-    }
     public struct Export: Decodable, Sendable { public let done: Bool, photos: Int }
     public let analysing: Bool
     public let facts: Facts
@@ -101,7 +97,6 @@ public struct Overview: Decodable, Sendable {
     public let moments: Moments
     public let blurry: Blurry
     public let events: Events
-    public let descriptions: Descriptions
     public let export: Export
     // M9 (optional so an older engine still decodes)
     public struct Funnel: Decodable, Sendable, Equatable {
@@ -123,7 +118,7 @@ public struct Overview: Decodable, Sendable {
     public let coverId: Int?
     public let highlights: [Int]?
     enum CodingKeys: String, CodingKey {
-        case analysing, facts, clocks, moments, blurry, events, descriptions, export, funnel, people, highlights
+        case analysing, facts, clocks, moments, blurry, events, export, funnel, people, highlights
         case coverId = "cover_id"
     }
 }
