@@ -46,7 +46,15 @@ struct MainWindow: View {
                 }
                 .quickLookPreview($library.quickLookURL, in: library.quickLookItems)
         }
+        // Under the quick review nothing else takes keys or clicks (a hidden page would act on its own photos).
+        .disabled(library.reviewFilter != nil)
         .overlay { AIGlow(active: library.job.running && library.job.phase.isAI) }
+        .overlay {
+            if let f = library.reviewFilter {
+                QuickReviewView(filter: f).transition(.opacity)
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: library.reviewFilter)
     }
 
     /// Which guide page shows (grid destinations share one, so the grid keeps its state).
@@ -62,6 +70,10 @@ struct MainWindow: View {
     @ToolbarContentBuilder var toolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) { ActivityPill() }
         if !library.destination.isGuide { gridTools }
+        ToolbarItem {
+            Button { library.startReview() } label: { Label(library.tr("quickReview"), systemImage: "rectangle.stack.badge.play") }
+                .help(library.tr("quickReviewHelp"))
+        }
         ToolbarItem {
             Button { library.destination = .step(.export) } label: { Label(library.tr("export"), systemImage: "square.and.arrow.up") }
                 .buttonStyle(.glassProminent)

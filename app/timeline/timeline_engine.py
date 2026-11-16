@@ -106,9 +106,10 @@ def timeline(conn: sqlite3.Connection) -> dict:
     }
     from app.quality.scoring import focus_tiers
     tiers = focus_tiers(conn)
-    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded, favorite, rejected FROM marks')}
-    from app.quality.faces import summaries
+    marks = {r['sha256']: r for r in conn.execute('SELECT sha256, wallpaper, excluded, favorite, rejected, keep FROM marks')}
+    from app.quality.faces import summaries, vision_info
     face_map = summaries(conn)
+    vision = vision_info(conn)
     videos = {r['sha256']: dict(r) for r in conn.execute('SELECT sha256, duration, thumb FROM video_meta')}
     sha_of = {r['id']: r['sha256'] for r in rows}
     for i in items:
@@ -118,7 +119,9 @@ def timeline(conn: sqlite3.Connection) -> dict:
         i['excluded'] = bool(m['excluded']) if m else False
         i['favorite'] = bool(m['favorite']) if m else False
         i['rejected'] = bool(m['rejected']) if m else False
+        i['keep'] = bool(m['keep']) if m else False
         i['faces'] = face_map.get(sha_of.get(i['id']))
+        i['quality'] = _quality(i, i['focus'], i['faces'], vision.get(sha_of.get(i['id'])))
         v = videos.get(sha_of.get(i['id']))
         i['duration'] = v['duration'] if v else None
         i['poster'] = bool(v and v['thumb'])
@@ -133,6 +136,35 @@ def timeline(conn: sqlite3.Connection) -> dict:
     summary['events'] = len(events)
     summary['with_place'] = sum(1 for i in items if i['place'])
     return {'summary': summary, 'items': items, 'events': events}
+
+
+_BLUR_CODES = {'subject': 'subject_blurry', 'movement': 'movement_blur', 'whole': 'whole_blurry'}
+
+
+def _quality(item: dict, focus, faces, vision) -> dict | None:
+    """Quality check v2 (M10b) for one photo: blur verdict on the subject, Apple's aesthetics score, the utility
+    flag and stable reason codes the app translates (eyes_closed, eyes_unsure, subject_blurry, movement_blur,
+    whole_blurry, utility_image, extra_frame). Suggestions only: nothing is marked automatically."""
+    if item['kind'] != 'image':
+        return None
+    focus, vision = focus or {}, vision or {}
+    reasons = []
+    eyes = (faces or {}).get('eyes') or {}
+    if eyes.get('closed'):
+        reasons.append('eyes_closed')
+    if eyes.get('unsure'):
+        reasons.append('eyes_unsure')
+    if focus.get('blur') == 'blurry' and focus.get('blur_reason') in _BLUR_CODES:
+        reasons.append(_BLUR_CODES[focus['blur_reason']])
+    if vision.get('utility'):
+        reasons.append('utility_image')
+    dup = item.get('duplicate')
+    if dup and dup.get('category') in ('exact', 'near') and dup.get('keeper') is False:
+        reasons.append('extra_frame')
+    aes = vision.get('aesthetic')
+    return {'blur': focus.get('blur'), 'blur_reason': focus.get('blur_reason'),
+            'aesthetic': round(float(aes), 3) if aes is not None else None,
+            'utility': bool(vision.get('utility')), 'reasons': reasons}
 
 
 def duplicate_groups(conn: sqlite3.Connection) -> list:

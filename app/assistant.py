@@ -258,7 +258,8 @@ def _cover_and_highlights(conn, in_album: set):
     marks = {r['sha256'] for r in conn.execute('SELECT sha256 FROM marks WHERE favorite = 1')}
     favourite = {r['id'] for r in conn.execute("SELECT id, sha256 FROM assets WHERE status = 'present'")
                  if r['sha256'] in marks}
-    ranked = [b for b in best_photos(conn, settings.load()['rank_weights'], 1_000_000, frozenset(favourite))
+    # Every photo in the album can be ranked (kept extra frames too); the cover prefers favourites.
+    ranked = [b for b in best_photos(conn, settings.load()['rank_weights'], 1_000_000, frozenset(in_album))
               if b['id'] in in_album]
     cover = next((b['id'] for b in ranked if b['id'] in favourite), ranked[0]['id'] if ranked else None)
     if cover is None:                    # nothing is scored yet: a favourite, else the first photo in the album

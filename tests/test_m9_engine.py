@@ -208,8 +208,11 @@ def _face(box, **kw):
 
 def test_face_boxes_flip_to_top_left_and_flags():
     # Vision: origin bottom left. A face in the TOP-left corner has a large Vision y.
+    # M10b: a closed-looking eye on a turned head is "unsure", not closed.
     boxes = face_boxes([_face([0.1, 0.6, 0.2, 0.3], left_eye=0.05, yaw=0.9)])
-    assert boxes == [{'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': True}]
+    assert boxes == [{'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.3, 'eyes_closed': False, 'looking_away': True,
+                      'state': 'unsure', 'main': True}]
+    assert face_boxes([_face([0.1, 0.6, 0.2, 0.3], left_eye=0.05)])[0]['eyes_closed'] is True
     ok = face_boxes([_face([0.5, 0.2, 0.1, 0.1])])[0]
     assert ok['eyes_closed'] is False and ok['looking_away'] is False and ok['y'] == 0.7
 
@@ -233,5 +236,44 @@ def test_timeline_items_carry_boxes(client, H, album):
                      (sha, json.dumps(faces), 'now'))
     f = _timeline_item(client, H, slug, c)['faces']
     assert f['faces'] == 1 and f['eyes_closed'] == 1
-    assert f['boxes'] == [{'x': 0.2, 'y': 0.2, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': False}]
+    assert f['boxes'] == [{'x': 0.2, 'y': 0.2, 'w': 0.2, 'h': 0.3, 'eyes_closed': True, 'looking_away': False,
+                           'state': 'closed', 'main': True}]
     assert _timeline_item(client, H, slug, _id(conn, 'P.jpg'))['faces'] is None
+
+
+def test_keep_too_exports_an_extra_frame_without_making_it_a_favourite(album):
+    """M10 review: "Yes" on another frame of a moment keeps it (mark `keep`), but no 5 stars in the export."""
+    conn, _ = album
+    nk = _non_keeper(conn)
+    assert nk not in {e['asset_id'] for e in plan_export(conn, **google_photos_options())['entries']}
+    set_mark(conn, nk, keep=True)
+    plan = plan_export(conn, **google_photos_options())
+    entry = next(e for e in plan['entries'] if e['asset_id'] == nk)
+    assert 'favorite' not in entry['meta']
+    o = overview(conn)
+    assert o['funnel']['extra_frames'] == 0 and o['funnel']['in_album'] == plan['photo_counts']['in_album']
+
+
+def test_helper_measures_again_only_when_newer(album, monkeypatch):
+    import app.quality.faces as F
+    conn, _ = album
+    calls = []
+
+    def fake_run(mode, paths, extra=None, timeout=600):
+        calls.append(len(paths))
+        return [{'path': p, 'faces': [], 'aesthetic': 0.1, 'utility': False} for p in paths]
+
+    monkeypatch.setattr(F, '_run', fake_run)
+    monkeypatch.setattr(F, 'helper_available', lambda: True)
+    monkeypatch.setattr(F, '_HELPER_VERSION', 1)
+    F._compute_helper(conn)
+    assert sum(calls) == 6                                             # first measurement by helper 1
+    calls.clear()
+    F._compute_helper(conn)
+    assert calls == []                                                 # an old helper never re-measures
+    monkeypatch.setattr(F, '_HELPER_VERSION', 2)
+    F._compute_helper(conn)
+    assert sum(calls) == 6                                             # the six photos, once
+    calls.clear()
+    F._compute_helper(conn)
+    assert calls == []                                                 # and not again

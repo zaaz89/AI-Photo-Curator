@@ -142,6 +142,9 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
     marks = {r['sha256']: r for r in conn.execute('SELECT sha256, favorite, rejected FROM marks')}
     favorites = {r[0] for r in conn.execute("SELECT a.id FROM assets a JOIN marks m ON m.sha256 = a.sha256 "
                                              "WHERE m.favorite = 1")}
+    # Frames the owner keeps as well as the moment's best ("keep too", or a favourite) are not extra frames.
+    kept_too = favorites | {r[0] for r in conn.execute("SELECT a.id FROM assets a JOIN marks m ON m.sha256 = a.sha256 "
+                                                       "WHERE m.keep = 1")}
     rejected = {r[0] for r in conn.execute("SELECT a.id FROM assets a JOIN marks m ON m.sha256 = a.sha256 "
                                             "WHERE m.rejected = 1")}
     if selection == 'no_blurry':
@@ -151,11 +154,11 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
         blurry = set()
     if selection == 'best':
         from app.quality.scoring import best_photos
-        keep_only = {b['id'] for b in best_photos(conn, weights, topn, frozenset(favorites))}
+        keep_only = {b['id'] for b in best_photos(conn, weights, topn, frozenset(kept_too))}
     trip = clean_part(conn.execute('SELECT name FROM collection WHERE id = 1').fetchone()[0]) or 'Collection'
     rows = _rows(conn)
     pairs = _pairs(conn)
-    skip_dups = _non_keepers(conn, favorites)
+    skip_dups = _non_keepers(conn, kept_too)
     warnings = Counter()
     days = sorted({_local_dt(r).date() for r in rows if _local_dt(r)})
     day_no = {d: (d - days[0]).days + 1 for d in days}          # calendar days since the first photo

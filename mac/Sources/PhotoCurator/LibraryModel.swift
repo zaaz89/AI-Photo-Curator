@@ -96,6 +96,7 @@ enum AssistantSheet: String, Identifiable {
     /// Writes go to the engine one after another, in the order the owner made them.
     private var writeQueue: Task<Void, Never>?
     private var pendingWrites = 0
+    private var writeGeneration = 0
 
     init(api: APIClient) { self.api = api }
 
@@ -143,6 +144,7 @@ enum AssistantSheet: String, Identifiable {
         guard let tripId else { photos = []; events = []; return }
         loading = true
         defer { loading = false }
+        let generation = writeGeneration
         do {
             async let t = api.timeline(trip: tripId)
             async let s = api.sources(trip: tripId)
@@ -153,8 +155,12 @@ enum AssistantSheet: String, Identifiable {
             guard tripId == self.tripId else { return }
             steps = wf
             overview = ov
-            photos = timeline.items
-            events = timeline.events
+            // A write made while this answer was on its way has already changed the photos locally; the engine's
+            // answer predates it, so it must not overwrite them (the reload after that write brings them).
+            if generation == writeGeneration && pendingWrites == 0 || loadedTripId != tripId {
+                photos = timeline.items
+                events = timeline.events
+            }
             sources = src
             loadedTripId = tripId
             trimSelection()
@@ -284,6 +290,7 @@ enum AssistantSheet: String, Identifiable {
     private func current(_ p: Photo, _ key: String) -> MarkValue {
         switch key {
         case "favorite": return .bool(p.favorite)
+        case "keep": return .bool(p.keep)
         case "rejected": return .bool(p.rejected)
         case "wallpaper": return .bool(p.wallpaper)
         default: return p.focus?.override.map { .string($0) } ?? .null
@@ -310,6 +317,7 @@ enum AssistantSheet: String, Identifiable {
     private func enqueue(_ write: @escaping @Sendable (APIClient) async throws -> Void) {
         let previous = writeQueue, api = self.api
         pendingWrites += 1
+        writeGeneration += 1
         writeQueue = Task { [weak self] in
             await previous?.value
             do { try await write(api) } catch { self?.message = self?.describe(error) }
@@ -341,6 +349,7 @@ enum AssistantSheet: String, Identifiable {
             for (k, v) in fields {
                 switch (k, v) {
                 case ("favorite", .bool(let b)): copy[i].favorite = b
+                case ("keep", .bool(let b)): copy[i].keep = b
                 case ("rejected", .bool(let b)): copy[i].rejected = b
                 case ("wallpaper", .bool(let b)): copy[i].wallpaper = b
                 case ("focus", .string(let t)): copy[i].focus = copy[i].focus?.overridden(t)
@@ -408,7 +417,7 @@ enum AssistantSheet: String, Identifiable {
     /// Favourite on a frame of a moment: it goes to the album too, next to the chosen one.
     func toggleKeepToo(_ id: Int) {
         guard let p = photo(id) else { return }
-        mark([p], ["favorite": .bool(!p.favorite), "rejected": .bool(false)], name: tr("keepToo"))
+        mark([p], ["keep": .bool(!p.keep), "rejected": .bool(false)], name: tr("keepToo"))
     }
 
     func setLeftOut(_ ids: [Int], _ out: Bool) {
@@ -416,16 +425,92 @@ enum AssistantSheet: String, Identifiable {
         mark(items, ["rejected": .bool(out)], name: tr(out ? "leaveOut" : "keep"))
     }
 
-    /// Blurry photos: "keep" must be what the export reads, so a kept blurry photo gets the owner's focus
-    /// mark "soft" (acceptable) besides not being left out; "leave out" marks it left out.
-    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) {
+    /// Puts photos into the album or leaves them out, by the export's own rule: a kept blurry photo gets the
+    /// owner's focus mark "soft", a kept extra frame of a moment becomes a favourite ("keep too").
+    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) { setInAlbum(ids, inAlbum) }
+
+    // MARK: quick review (M10)
+
+    /// The quick review on screen, and what it goes through.
+    @Published var reviewFilter: ReviewFilter?
+    /// ⌘Z during the quick review means Back (the review restores the photo and shows it again).
+    @Published var reviewUndoRequest = 0
+    // MARK: background control (development and checks; off unless the "automation" default is true)
+
+    /// The last key sent to the quick review through the background channel, and a counter that changes each time.
+    private(set) var automationKey: String?
+    @Published private(set) var automationKeyTick = 0
+
+    func handleAutomation(_ url: URL) {
+        guard UserDefaults.standard.bool(forKey: "automation"), let cmd = AutomationCommand(url: url) else { return }
+        switch cmd {
+        case .go(let page):
+            reviewFilter = nil
+            switch page {
+            case "home": destination = .home
+            case "selection": destination = .step(.selection)
+            case "story": destination = .step(.story)
+            case "export": destination = .step(.export)
+            case "people": destination = .people
+            case "all": destination = .all
+            default: destination = .leftOut
+            }
+        case .album(let id): if trips.contains(where: { $0.id == id }) { tripId = id }
+        case .review(let f): startReview(f)
+        case .closeReview: reviewFilter = nil
+        case .key(let k): automationKey = k; automationKeyTick += 1
+        case .window(let w, let h):
+            // Resize in place without bringing the app to the front.
+            if let win = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true && $0.isVisible })
+                ?? NSApp.windows.first(where: { $0.isVisible && $0.frame.height > 300 && !$0.title.contains("Classic") }) {
+                var f = win.frame; f.origin.y += f.height - h; f.size = NSSize(width: w, height: h)
+                win.setFrame(f, display: true)
+            }
+        case .reload: Task { await reload() }
+        }
+    }
+
+    /// How many photos need a yes or no (the quick review's default).
+    var decisionsCount: Int { photos.filter(needsDecision).count }
+    func startReview(_ f: ReviewFilter = .decisions) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }
+
+    /// A photo's marks before a quick-review decision (Back restores them exactly).
+    func marksOf(_ id: Int) -> [String: MarkValue] {
+        guard let p = photo(id) else { return [:] }
+        return ["favorite": .bool(p.favorite), "keep": .bool(p.keep), "rejected": .bool(p.rejected),
+                "focus": p.focus?.override.map { .string($0) } ?? .null]
+    }
+
+    /// Back in the quick review: the photo gets its earlier marks again.
+    func restore(_ id: Int, _ previous: [String: MarkValue]) {
+        guard let p = photo(id), !previous.isEmpty else { return }
+        mark([p], previous, name: tr("back"))
+    }
+
+    func toggleFavourite(_ id: Int) {
+        guard let p = photo(id) else { return }
+        mark([p], ["favorite": .bool(!p.favorite), "rejected": .bool(false)], name: tr("favourite"))
+    }
+
+    /// Where the last quick review of this album stopped (photo id), per filter.
+    func reviewBookmark(_ f: ReviewFilter) -> Int? {
+        guard let tripId else { return nil }
+        let v = UserDefaults.standard.integer(forKey: "review.\(tripId).\(f.rawValue)")
+        return v == 0 ? nil : v
+    }
+    func setReviewBookmark(_ f: ReviewFilter, _ id: Int?) {
+        guard let tripId else { return }
+        UserDefaults.standard.set(id ?? 0, forKey: "review.\(tripId).\(f.rawValue)")
+    }
+
+    func setInAlbum(_ ids: [Int], _ inAlbum: Bool) {
         let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
         if inAlbum {
             // An extra frame of a moment only goes in as a favourite ("keep too"); a blurry one needs the focus mark.
-            let extra = items.filter { $0.isExtraFrame && !$0.favorite }
+            let extra = items.filter { $0.isExtraFrame && !$0.favorite && !$0.keep }
             let needsMark = items.filter { !extra.contains($0) && $0.focus?.tier == "blurry" && !$0.favorite }
             let plain = items.filter { !extra.contains($0) && !needsMark.contains($0) }
-            mark(extra, ["rejected": .bool(false), "favorite": .bool(true)], name: tr("keep"))
+            mark(extra, ["rejected": .bool(false), "keep": .bool(true)], name: tr("keep"))
             mark(needsMark, ["rejected": .bool(false), "focus": .string("soft")], name: tr("keep"))
             mark(plain, ["rejected": .bool(false)], name: tr("keep"))
         } else {

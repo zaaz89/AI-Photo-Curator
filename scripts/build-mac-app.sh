@@ -48,10 +48,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>PCProjectPath</key><string>$ROOT</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>si.beehive.photocurator.automation</string>
+    <key>CFBundleURLSchemes</key><array><string>photocurator</string></array>
+  </dict></array>
 </dict></plist>
 PLIST
 
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# Register the photocurator:// scheme (background control, off unless the "automation" default is set).
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true
 echo "Built: $ROOT/$APP"
 
 if [ "$1" = "--install" ]; then

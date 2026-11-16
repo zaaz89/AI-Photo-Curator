@@ -294,21 +294,29 @@ struct FaceCrop: View {
     @State private var image: NSImage?
 
     var body: some View {
-        let warn = box.eyesClosed == true
+        let state = eyeState(box)
+        let colour: Color = state == "closed" ? .orange : (state == "unsure" ? .gray : .green)
         ZStack {
             Circle().fill(.fill.tertiary)
             if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
         }
         .frame(width: size, height: size)
         .clipShape(.circle)
-        .overlay { Circle().strokeBorder(warn ? Color.orange : Color.green, lineWidth: 2.5) }
+        .overlay { Circle().strokeBorder(colour, lineWidth: max(2.5, size / 30)) }
         .overlay(alignment: .bottomTrailing) {
-            Image(systemName: warn ? "eye.slash.fill" : "eye.fill")
-                .font(.system(size: size * 0.2, weight: .bold)).foregroundStyle(.white)
-                .padding(size * 0.06).background(warn ? Color.orange : Color.green, in: .circle)
+            Image(systemName: state == "closed" ? "eye.slash.fill" : (state == "unsure" ? "questionmark" : "eye.fill"))
+                .font(.system(size: size * 0.18, weight: .bold)).foregroundStyle(.white)
+                .padding(size * 0.06).background(colour, in: .circle)
+        }
+        .overlay(alignment: .bottomLeading) {
+            if box.lookingAway == true {
+                Image(systemName: "arrow.turn.up.right")
+                    .font(.system(size: size * 0.16, weight: .bold)).foregroundStyle(.white)
+                    .padding(size * 0.07).background(Color.orange, in: .circle)
+            }
         }
         .task(id: url.path + "\(box.x)\(box.y)") { image = await crop() }
-        .accessibilityLabel(warn ? "eyes closed" : "eyes open")
+        .accessibilityLabel(state == "closed" ? "eyes closed" : (state == "unsure" ? "eyes unclear" : "eyes open"))
     }
 
     func crop() async -> NSImage? {
@@ -322,5 +330,54 @@ struct FaceCrop: View {
         r = r.intersection(CGRect(x: 0, y: 0, width: w, height: h))
         guard !r.isEmpty, let c = cg.cropping(to: r.integral) else { return nil }
         return NSImage(cgImage: c, size: NSSize(width: c.width, height: c.height))
+    }
+}
+
+/// The same people side by side in every frame of a moment: one column per frame, one row per person,
+/// faces enlarged, so a blink or a look away shows at a glance. Click a column to look at that frame.
+struct FaceComparison: View {
+    @EnvironmentObject var library: LibraryModel
+    let frames: [Photo]
+    let current: Int?
+    var faceSize: CGFloat = 88
+    var pick: ((Photo) -> Void)? = nil
+
+    var body: some View {
+        let boxes = frames.map { $0.faces?.boxes ?? [] }
+        let ref = frames.firstIndex { $0.id == current }.flatMap { boxes[$0].isEmpty ? nil : $0 }
+            ?? boxes.indices.max { mainFaces(boxes[$0]).count < mainFaces(boxes[$1]).count } ?? 0
+        let rows = matchFaces(boxes, reference: ref)
+        HStack(alignment: .top, spacing: 14) {
+            ForEach(Array(frames.enumerated()), id: \.element.id) { col, f in
+                VStack(spacing: 8) {
+                    // Without faces to compare, the frames themselves are shown larger.
+                    PhotoCover(photo: f, side: 520, radius: 8)
+                        .frame(width: rows.isEmpty ? 240 : faceSize * 1.5, height: rows.isEmpty ? 160 : faceSize)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(f.id == current ? Color.white : .clear, lineWidth: 3)
+                        }
+                        .overlay(alignment: .topLeading) {
+                            Image(systemName: f.goesToAlbumDespiteFocus ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(f.goesToAlbumDespiteFocus ? Color.green : Color.gray)
+                                .font(.title3).padding(4).shadow(radius: 2)
+                        }
+                    ForEach(rows.indices, id: \.self) { r in
+                        if let b = rows[r][col] {
+                            FaceCrop(url: f.fileURL, box: b, size: faceSize)
+                        } else {
+                            Circle().strokeBorder(.tertiary, style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                                .frame(width: faceSize, height: faceSize)
+                                .overlay { Image(systemName: "person.crop.circle.badge.questionmark").foregroundStyle(.tertiary) }
+                                .help(library.tr("faceNotFound"))
+                        }
+                    }
+                }
+                .padding(6)
+                .background(f.id == current ? Color.white.opacity(0.08) : .clear, in: .rect(cornerRadius: 12))
+                .contentShape(.rect)
+                .onTapGesture { pick?(f) }
+            }
+        }
     }
 }
