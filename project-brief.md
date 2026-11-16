@@ -709,6 +709,8 @@ Design goals:
 
 Decision 2026-11-13 (M9): the native app leads through one guide with four steps (Photos & Clocks, Selection, Story, Export), each reachable and editable at any time, with an album home that shows the next step and what goes into the album. Design and engine contract: `notes/m9-album-guide.md`.
 
+Decision 2026-11-16 (M10): a quick review decides only where a decision is needed (frames of a moment, photos with a real problem) with → yes, ← no and Back; the quality check judges blur on the subject (bokeh is not a fault) and eyes per main face with an "unsure" state that never leaves a photo out. Plan: `notes/m10-plan.md`.
+
 ## 12.1 Main navigation
 
 Suggested sections:
