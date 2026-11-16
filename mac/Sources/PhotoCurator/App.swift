@@ -68,7 +68,7 @@ struct AppCommands: Commands {
         }
         CommandMenu(library.tr("guide")) {
             Button(library.tr("quickReview")) { library.startReview() }.keyboardShortcut("r")
-            Button(library.tr("quickReviewUnsure")) { library.startReview(.unsure) }.keyboardShortcut("r", modifiers: [.command, .shift])
+            Button(library.tr("quickReviewEverything")) { library.startReview(.all) }.keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
             Button(library.tr("albumHome")) { library.reviewFilter = nil; library.destination = .home }.keyboardShortcut("0")
             ForEach(GuideStep.allCases) { s in

@@ -426,8 +426,9 @@ enum AssistantSheet: String, Identifiable {
     @Published var reviewFilter: ReviewFilter?
     /// ⌘Z during the quick review means Back (the review restores the photo and shows it again).
     @Published var reviewUndoRequest = 0
-    /// ⌘/ in the quick review: the keys card.
-    func startReview(_ f: ReviewFilter = .all) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }
+    /// How many photos need a yes or no (the quick review's default).
+    var decisionsCount: Int { photos.filter(needsDecision).count }
+    func startReview(_ f: ReviewFilter = .decisions) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }
 
     /// A photo's marks before a quick-review decision (Back restores them exactly).
     func marksOf(_ id: Int) -> [String: MarkValue] {

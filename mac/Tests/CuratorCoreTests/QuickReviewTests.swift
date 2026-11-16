@@ -44,6 +44,9 @@ private func photo(_ id: Int, _ extra: String = "") throws -> Photo {
     #expect(reviewReasons(shot) == ["utility_image"])
     let all = [fine, blurry, extra, v2, shot]
     #expect(reviewQueue(all, filter: .all) == [1, 2, 3, 4, 5])
-    #expect(reviewQueue(all, filter: .unsure) == [2, 3, 4, 5])
+    #expect(reviewQueue(all, filter: .decisions) == [2, 3, 4, 5])        // the fine single photo stays, no question
+    let keeper = try photo(6, #""duplicate": {"group": 4, "category": "near", "keeper": true}"#)
+    let scene = try photo(7, #""duplicate": {"group": 5, "category": "similar_scene"}"#)
+    #expect(reviewQueue([keeper, scene, fine], filter: .decisions) == [6])   // every frame of a moment, not similar scenes
     #expect(reviewQueue(all, filter: .leftOut) == [2, 3])    // what the export would not take
 }

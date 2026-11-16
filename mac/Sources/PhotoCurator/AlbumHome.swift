@@ -134,7 +134,7 @@ struct NextCard: View {
                     .padding(.top, 6)
                     if step == .selection {
                         Button { library.startReview() } label: {
-                            Label(library.tr("quickReviewAll"), systemImage: "rectangle.stack.badge.play")
+                            Label(String(format: library.tr("quickReviewN"), library.decisionsCount), systemImage: "rectangle.stack.badge.play")
                         }
                         .buttonStyle(.glass).controlSize(.large)
                         .help(library.tr("quickReviewHelp"))

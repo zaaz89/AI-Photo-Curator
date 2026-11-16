@@ -2,9 +2,11 @@ import Foundation
 
 // MARK: M10 quick review: → keeps, ← leaves out, back undoes, one photo at a time
 
-/// Which photos the quick review goes through.
+/// Which photos the quick review goes through. The default, `decisions`, is only where the owner has to
+/// decide: every frame of a moment with several near-identical shots, and photos the app has doubts about.
+/// Everything else simply stays in the album (owner's request 2026-11-16).
 public enum ReviewFilter: String, CaseIterable, Identifiable, Sendable {
-    case all, unsure, leftOut
+    case decisions, all, leftOut
     public var id: String { rawValue }
 }
 
@@ -87,11 +89,17 @@ public func reviewReasons(_ p: Photo) -> [String] {
 /// A photo the app is not sure about: any reason to look at it.
 public func needsALook(_ p: Photo) -> Bool { !reviewReasons(p).isEmpty }
 
+/// One of several near-identical shots of the same moment (the keeper as well as the other frames).
+public func isMomentFrame(_ p: Photo) -> Bool { ["exact", "near"].contains(p.duplicate?.category ?? "") }
+
+/// A photo that needs the owner's yes or no.
+public func needsDecision(_ p: Photo) -> Bool { isMomentFrame(p) || needsALook(p) }
+
 /// The photos of a review, in the album's time order (videos included: they can be kept or left out too).
 public func reviewQueue(_ photos: [Photo], filter: ReviewFilter) -> [Int] {
     switch filter {
     case .all: return photos.map(\.id)
-    case .unsure: return photos.filter { needsALook($0) || $0.rejected }.map(\.id)
+    case .decisions: return photos.filter(needsDecision).map(\.id)
     case .leftOut: return photos.filter { !$0.goesToAlbumDespiteFocus }.map(\.id)
     }
 }

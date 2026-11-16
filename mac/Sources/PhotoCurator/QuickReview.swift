@@ -73,8 +73,14 @@ struct QuickReviewView: View {
                 if c.skipped > 0 { Label("\(c.skipped)", systemImage: "forward.fill").foregroundStyle(.orange) }
             }
             .font(.callout.weight(.semibold)).monospacedDigit()
-            Text("\(min(session.index + 1, session.queue.count)) / \(session.queue.count)")
-                .font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(.white)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("\(min(session.index + 1, session.queue.count)) / \(session.queue.count)")
+                    .font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(.white)
+                if filter == .decisions {
+                    Text(String(format: library.tr("reviewRestStays"), library.photos.count - session.queue.count))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Button { showKeys.toggle() } label: { Image(systemName: "keyboard") }
                 .buttonStyle(.glass).help(library.tr("reviewKeys"))
         }
@@ -160,7 +166,7 @@ struct QuickReviewView: View {
             GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
                     Button { decide(.leaveOut) } label: {
-                        Label(library.tr("leaveOut"), systemImage: "arrow.left").frame(minWidth: 140)
+                        Label(library.tr("reviewNo"), systemImage: "arrow.left").frame(minWidth: 150)
                     }
                     .buttonStyle(.glass).controlSize(.extraLarge)
                     Button { back() } label: { Label(library.tr("back"), systemImage: "arrow.uturn.backward") }
@@ -168,7 +174,7 @@ struct QuickReviewView: View {
                     Button { decide(.skip) } label: { Label(library.tr("skip"), systemImage: "forward") }
                         .buttonStyle(.glass).controlSize(.extraLarge)
                     Button { decide(.keep) } label: {
-                        Label(library.tr("keep"), systemImage: "arrow.right").labelStyle(TrailingIconLabel()).frame(minWidth: 140)
+                        Label(library.tr("reviewYes"), systemImage: "arrow.right").labelStyle(TrailingIconLabel()).frame(minWidth: 150)
                     }
                     .buttonStyle(.glassProminent).tint(.green).controlSize(.extraLarge)
                 }
