@@ -88,12 +88,19 @@ def test_throttled_map_rests_after_each_round(slept):
     from concurrent.futures import ThreadPoolExecutor
     settings.save({'ai_gpu_share': 25})
     t = th.Throttle(share=None)
-    out = list(th.throttled_map(lambda x: x * 2, range(10), t, workers=2, make_pool=ThreadPoolExecutor,
-                                chunksize=2))
+    import time
+
+    def double(x):
+        time.sleep(0.002)
+        return x * 2
+    out = list(th.throttled_map(double, range(10), t, workers=2, make_pool=ThreadPoolExecutor, chunksize=2))
     assert out == [(i, i * 2) for i in range(10)]          # order kept
     assert len(slept) == 3                                # rounds of 4, 4, 2, each followed by a rest
     slept.clear()
-    list(th.throttled_map(lambda x: x, range(3), th.Throttle(), workers=1))
+    def work(x):
+        time.sleep(0.002)                                 # measured work is never exactly 0 s
+        return x
+    list(th.throttled_map(work, range(3), th.Throttle(), workers=1))
     assert len(slept) == 3                                # one worker: every item is a round
     settings.save({'ai_gpu_share': 100})
     slept.clear()

@@ -43,6 +43,9 @@ def timeline(conn: sqlite3.Connection) -> dict:
     for r in conn.execute('SELECT kind, asset_a, asset_b FROM relationships'):
         rel.setdefault(r['asset_a'], []).append({'kind': r['kind'], 'with': r['asset_b']})
         rel.setdefault(r['asset_b'], []).append({'kind': r['kind'], 'with': r['asset_a']})
+    # The second file of a Live Photo or RAW+JPEG pair follows its primary (the export's own rule, M12).
+    from app.organization.export_plan import _pairs
+    paired = _pairs(conn)
     dup = {}
     for r in conn.execute('SELECT m.asset_id, g.id, g.category, g.keeper_id FROM duplicate_members m '
                           'JOIN duplicate_groups g ON g.id = m.group_id'):
@@ -86,6 +89,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
             'confidence': r['confidence'] or 'unknown',
             'notes': json.loads(r['notes_json'] or '[]'),
             'related': rel.get(r['id'], []),
+            'paired_with': paired.get(r['id']),
             'exact_copies': sha_count[r['sha256']] - 1 if r['sha256'] else 0,
             'duplicate': dup.get(r['id']),
             'ai': ai.get(r['sha256']),
