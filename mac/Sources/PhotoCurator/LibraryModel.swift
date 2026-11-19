@@ -5,10 +5,10 @@ import SwiftUI
 
 /// Sidebar destinations.
 enum Destination: Hashable {
-    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search, settings
+    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search, settings, sorting
     /// The guide's pages (album home, the steps, people and clocks, settings), not a photo grid.
     var isGuide: Bool {
-        switch self { case .home, .step, .people, .settings: true; default: false }
+        switch self { case .home, .step, .people, .settings, .sorting: true; default: false }
     }
 }
 
@@ -89,6 +89,8 @@ enum AssistantSheet: String, Identifiable {
     @Published var settings: EngineSettings?
     /// The measured speed of this Mac for the time estimate (nil before the first analysis).
     @Published var speed: EngineSpeed?
+    /// Each change plays the sorting stage again ("Show what you did").
+    @Published var stageReplayTick = 0
     @Published var message: String?                     // transient error or info for the user
     @Published private(set) var job = JobStatus(running: false, status: "")
     @Published private(set) var loading = false
@@ -178,7 +180,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return .leftOut
         case .videos: return .videos
         case .blurry: return .blurry
-        case .home, .step, .people, .settings: return .all
+        case .home, .step, .people, .settings, .sorting: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -198,7 +200,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
         case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
-        case .home, .step, .people, .settings: return 0
+        case .home, .step, .people, .settings, .sorting: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -456,9 +458,15 @@ enum AssistantSheet: String, Identifiable {
             case "people": destination = .people
             case "all": destination = .all
             case "settings": destination = .settings
+            case "sorting": destination = .sorting
             default: destination = .leftOut
             }
-        case .album(let id): if trips.contains(where: { $0.id == id }) { tripId = id }
+        case .album(let id):
+            // The album may have been made outside the app (engine, command line): read the list first.
+            Task {
+                if !trips.contains(where: { $0.id == id }) { trips = (try? await api.trips()) ?? trips }
+                if trips.contains(where: { $0.id == id }) { tripId = id }
+            }
         case .review(let f): startReview(f)
         case .closeReview: reviewFilter = nil
         case .key(let k): automationKey = k; automationKeyTick += 1
@@ -470,6 +478,7 @@ enum AssistantSheet: String, Identifiable {
                 win.setFrame(f, display: true)
             }
         case .reload: Task { await reload() }
+        case .replay: showSorting(replay: true)
         }
     }
 
@@ -509,13 +518,11 @@ enum AssistantSheet: String, Identifiable {
     func setInAlbum(_ ids: [Int], _ inAlbum: Bool) {
         let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
         if inAlbum {
-            // An extra frame of a moment only goes in as a favourite ("keep too"); a blurry one needs the focus mark.
-            let extra = items.filter { $0.isExtraFrame && !$0.favorite && !$0.keep }
-            let needsMark = items.filter { !extra.contains($0) && $0.focus?.tier == "blurry" && !$0.favorite }
-            let plain = items.filter { !extra.contains($0) && !needsMark.contains($0) }
-            mark(extra, ["rejected": .bool(false), "keep": .bool(true)], name: tr("keep"))
-            mark(needsMark, ["rejected": .bool(false), "focus": .string("soft")], name: tr("keep"))
-            mark(plain, ["rejected": .bool(false)], name: tr("keep"))
+            // An extra frame of a moment goes in as "keep too", a blurry one with the focus mark, one that is
+            // both with both (putBackMarks); photos that need the same marks are written together.
+            for (fields, group) in Dictionary(grouping: items, by: putBackMarks) {
+                mark(group, fields, name: tr("keep"))
+            }
         } else {
             mark(items, ["rejected": .bool(true)], name: tr("leaveOut"))
         }
@@ -601,6 +608,8 @@ enum AssistantSheet: String, Identifiable {
             trips = (try? await api.trips()) ?? trips
             tripId = id
             try await api.startAnalysis(trip: id)
+            destination = .sorting                     // a new album is sorted in front of the owner
+            await pollNow()
             return true
         } catch {
             // A half-made album (a folder was refused) is removed so it does not linger unseen.
@@ -687,6 +696,13 @@ enum AssistantSheet: String, Identifiable {
     }
 
     // MARK: jobs
+
+    /// The sorting stage; `replay` plays it again from the folders to the overview.
+    func showSorting(replay: Bool = false) {
+        reviewFilter = nil
+        destination = .sorting
+        if replay { Task { @MainActor in try? await Task.sleep(for: .milliseconds(150)); self.stageReplayTick += 1 } }
+    }
 
     func analyse() {
         guard let tripId else { return }

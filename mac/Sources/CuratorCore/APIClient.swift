@@ -7,7 +7,7 @@ public enum APIError: Error, Equatable, Sendable {
 }
 
 /// A value for a mark: favourite / rejected / wallpaper are booleans, focus is a tier or null.
-public enum MarkValue: Sendable, Equatable {
+public enum MarkValue: Sendable, Hashable {
     case bool(Bool), string(String), null
     var json: Any {
         switch self {
