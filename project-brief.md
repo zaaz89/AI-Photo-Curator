@@ -713,6 +713,8 @@ Decision 2026-11-16 (M10): a quick review decides only where a decision is neede
 
 Decision 2026-11-16 (M11): settings are a page in the app (sidebar, album home, also ⌘,) and every setting says what it changes. The analysis share is a slider from 10 to 100 % and applies to the whole analysis (focus, faces, subject sharpness) and the search index, with a time estimate from the speed measured on this Mac; thermal and battery pauses stay. The quality check has three levels (lenient, normal = calibrated, strict) applied when results are read, so a change needs no new analysis. Note: `notes/m11-smart-settings.md`.
 
+Decision 2026-11-19 (M12): sorting is shown while it happens. A Sorting page follows the analysis: photos fly in by day, blurry ones drop into a Removed tray, near-identical frames stack behind the best one, and the album settles into one overview with three trays (Removed, Stacked into moments, Have a look) from which every photo can be put back. Verdicts follow the export rule; the second file of a pair follows its primary. Screenshots and documents are still only asked about. Note: `notes/m12-sorting-stage.md`.
+
 ## 12.1 Main navigation
 
 Suggested sections:
