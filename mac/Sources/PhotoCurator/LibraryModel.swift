@@ -89,8 +89,10 @@ enum AssistantSheet: String, Identifiable {
     @Published var settings: EngineSettings?
     /// The measured speed of this Mac for the time estimate (nil before the first analysis).
     @Published var speed: EngineSpeed?
-    /// Each change plays the sorting stage again ("Show what you did").
-    @Published var stageReplayTick = 0
+    /// The sorting stage should play again from the folders when it next shows (or now, when it shows already).
+    @Published var pendingReplay = false
+    /// Changes after an analysis of this album ended and its photos were read again (the stage's cue).
+    @Published private(set) var analysisFinishedTick = 0
     @Published var message: String?                     // transient error or info for the user
     @Published private(set) var job = JobStatus(running: false, status: "")
     @Published private(set) var loading = false
@@ -701,7 +703,7 @@ enum AssistantSheet: String, Identifiable {
     func showSorting(replay: Bool = false) {
         reviewFilter = nil
         destination = .sorting
-        if replay { Task { @MainActor in try? await Task.sleep(for: .milliseconds(150)); self.stageReplayTick += 1 } }
+        if replay { pendingReplay = true }
     }
 
     func analyse() {
@@ -735,7 +737,7 @@ enum AssistantSheet: String, Identifiable {
         let wasRunning = job.running
         if s.collection == nil || s.collection == tripId || s.running { job = s }
         // A job that ended between two polls is still noticed here (export result, reload).
-        if wasRunning && !job.running { await reload(); jobFinished() }
+        if wasRunning && !job.running { await reload(); analysisFinishedTick += 1; jobFinished() }
     }
     /// Analysis of this album runs (not descriptions or an export).
     var analysing: Bool { job.running && job.collection == tripId && (job.kind ?? "analysis") == "analysis" }

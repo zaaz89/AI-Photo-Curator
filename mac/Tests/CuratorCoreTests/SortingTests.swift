@@ -94,3 +94,8 @@ private let blurry = #""focus": {"tier": "blurry", "auto_tier": "blurry"}"#
     // A blurry extra frame needs both marks (the tray's "Put back" used to set only "keep too").
     #expect(putBackMarks(try photo(6, blurry + extra)) == ["rejected": .bool(false), "keep": .bool(true), "focus": .string("soft")])
 }
+
+@Test func secondFileOfAPairNamesItsPrimary() throws {
+    #expect(try photo(1, sharp + #", "paired_with": 7"#).pairedWith == 7)
+    #expect(try photo(2, sharp).pairedWith == nil)
+}

@@ -286,7 +286,7 @@ public enum Strings {
         "stageUndated": ("No date", "Brez datuma"),
         "stageNext": ("Next: Selection", "Naprej: izbor"),
         "stageWatch": ("Watch the sorting", "Glej, kako sortiram"),
-        "stageReplay": ("Show what you did", "Pokaži, kaj si naredil"),
+        "stageReplay": ("Replay the sorting", "Pokaži sortiranje znova"),
         "stageLinkText": ("How the photos were sorted, and what was removed", "Kako so bile fotografije razvrščene in kaj je odstranjeno"),
         "replay": ("Replay", "Ponovi"),
         "counter_read": ("read", "prebrano"),

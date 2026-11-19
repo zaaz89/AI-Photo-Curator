@@ -35,3 +35,28 @@ more arrive reads well; tiles in the trays need the reason on hover or click.
   with one click; replay "Show what you did"; animate by groups above about 400 photos; Reduce Motion =
   fades only.
 - Open decision (owner): remove screenshots automatically (reversible, visible in the tray) or keep asking.
+
+## Built (2026-11-19, branch claude/m12-sorting-stage)
+
+- "Sorting" page (sidebar under Album, a line on the album home, opens by itself for a new album,
+  `photocurator://go?page=sorting`, `photocurator://replay`). Tiles fly in as the engine reads the photos
+  (the app reloads when the count changes), the sweep follows the job's progress during focus and faces, the
+  photos are read again once faces are done, verdicts play out as soon as every photo has its results
+  (blurry ones lift and drop into Removed), the moments stack at the end, then the overview: summary from the
+  album funnel, trays Removed / Stacked into moments / Have a look, each opens with the reason per photo and
+  Put back (one or all); Have a look offers "It's fine", Leave out and the quick review.
+- Verdicts follow the export rule (`sortVerdict`, CuratorCore/Sorting.swift); the second file of a RAW+JPEG
+  or Live Photo pair is not shown (engine: `paired_with` on timeline items, the export's own pairing).
+- The screenshot question is open: screenshots and documents stay in the album and show in "Have a look".
+- Review (independent, Opus) found and these were fixed: running acts kept writing after a replay
+  (generation counter), the end of an analysis was seen before the final photos were read (the app now
+  signals after reading them) and late photos could stay unshown (every act ends with a reconcile), pairs
+  counted twice, tray tiles spilled into the next tray (last twelve shown, clamped), per-render work at
+  1000 photos (one pass, arrivals and thumbnails in batches), gathering onto a keeper outside the album,
+  duplicate day ids, glass on a status chip, VoiceOver action on tiles.
+- Fixed on the way: "Put back" of a blurry extra frame of a moment set only keep-too and left it out
+  (`putBackMarks`, used by the tray, the Blurry grid and the quick review).
+
+Not verified: Reduce Motion, light appearance, VoiceOver, an album above about 300 photos live (the 302-photo
+album was shown read-only as an overview), clicks in the tray popover (no synthetic clicks; put back was
+checked through the engine's marks endpoint and the stage moved the photo).

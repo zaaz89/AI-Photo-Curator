@@ -101,10 +101,13 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
     public let ai: AI?
     public let quality: Quality?
     public let notes: [String]?
+    /// The second file of a RAW+JPEG or Live Photo pair: the id of its primary, which it follows (M12).
+    public let pairedWith: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, filename, path, kind, owner, device, confidence, favorite, keep, rejected, wallpaper, width, height, duration,
              poster, place, focus, faces, duplicate, ai, quality, notes
+        case pairedWith = "paired_with"
         case sourceId = "source_id", localTime = "local_time", correctedLocalTime = "corrected_local_time",
              utcTime = "utc_time", offsetMinutes = "offset_minutes", eventId = "event_id"
     }
@@ -138,6 +141,7 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         duplicate = try c.decodeIfPresent(Duplicate.self, forKey: .duplicate)
         ai = try c.decodeIfPresent(AI.self, forKey: .ai)
         quality = try c.decodeIfPresent(Quality.self, forKey: .quality)
+        pairedWith = try c.decodeIfPresent(Int.self, forKey: .pairedWith)
         notes = try c.decodeIfPresent([String].self, forKey: .notes)
     }
 

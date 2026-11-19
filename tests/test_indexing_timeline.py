@@ -112,6 +112,11 @@ def test_raw_jpeg_and_live_photo_pairs(tmp_path):
     link_relationships(conn)
     live = conn.execute("SELECT asset_a, asset_b FROM relationships WHERE kind = 'live_photo'").fetchall()
     assert [(r['asset_a'], r['asset_b']) for r in live] == [(ids[2], ids[0])]
+    # M12: the timeline names the primary of each pair's second file, as the export does.
+    from app.timeline.timeline_engine import timeline
+    items = {i['id']: i for i in timeline(conn)['items']}
+    assert items[ids[0]]['paired_with'] == ids[2]           # the Live Photo video follows its still
+    assert items[ids[2]]['paired_with'] is None
 
 
 def test_overlapping_or_data_folder_sources_are_refused(tmp_path):
