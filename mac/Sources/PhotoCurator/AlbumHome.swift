@@ -275,6 +275,7 @@ struct FunnelView: View {
         case .inAlbum: .green
         case .extraFrames: .blue
         case .blurry: .orange
+        case .screenshots: .purple
         case .leftOut: .gray
         }
     }
@@ -285,6 +286,7 @@ struct FunnelView: View {
             case .inAlbum: library.destination = .step(.export)
             case .extraFrames: library.selectionView = .moments; library.destination = .step(.selection)
             case .blurry: library.selectionView = .blurry; library.destination = .step(.selection)
+            case .screenshots: library.destination = .sorting      // the Removed tray shows them with Put back
             case .leftOut: library.selectionView = .leftOut; library.destination = .step(.selection)
             }
         }

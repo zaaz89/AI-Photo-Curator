@@ -47,7 +47,7 @@ more arrive reads well; tiles in the trays need the reason on hover or click.
   Put back (one or all); Have a look offers "It's fine", Leave out and the quick review.
 - Verdicts follow the export rule (`sortVerdict`, CuratorCore/Sorting.swift); the second file of a RAW+JPEG
   or Live Photo pair is not shown (engine: `paired_with` on timeline items, the export's own pairing).
-- The screenshot question is open: screenshots and documents stay in the album and show in "Have a look".
+- Screenshots (decided 2026-11-19, built 2026-11-23): see the section below. Documents stay in the album and show in "Have a look".
 - Review (independent, Opus) found and these were fixed: running acts kept writing after a replay
   (generation counter), the end of an analysis was seen before the final photos were read (the app now
   signals after reading them) and late photos could stay unshown (every act ends with a reconcile), pairs
@@ -60,3 +60,22 @@ more arrive reads well; tiles in the trays need the reason on hover or click.
 Not verified: Reduce Motion, light appearance, VoiceOver, an album above about 300 photos live (the 302-photo
 album was shown read-only as an overview), clicks in the tray popover (no synthetic clicks; put back was
 checked through the engine's marks endpoint and the stage moved the photo).
+
+## Screenshots leave the album (built 2026-11-23, Claude in Cowork, same branch)
+
+- Engine: `UserComment` added to the ExifTool tags (and the Pillow fallback); migration 12 `screenshot_checks`;
+  `app/quality/screenshots.py` (`is_screenshot`: EXIF mark "Screenshot", or no camera Make and a screenshot file name in
+  EN/SL/DE/FR/IT/ES/PL/CS/HR/SR; `detect` runs right after indexing, settles camera photos without reading, reads
+  ExifTool again only for make-less images of older albums, once). A changed file is checked again.
+- Export: screenshots not kept (keep or favourite) are left out of `no_blurry` and `best` with reason `screenshot`;
+  `counts` and `photo_counts` get `screenshots` (the identity holds); `all` (archive) keeps them. Funnel and
+  `EMPTY_SUMMARY` get `screenshots`; timeline items get `screenshot`.
+- App: `Photo.screenshot`; `goesToAlbumDespiteFocus` needs `!screenshot || keep`; `sortReason` → `screenshot`
+  (`why2_screenshot`); `putBackMarks` sets keep; `needsALook` is false for screenshots; funnel part `screenshots`
+  (purple) opens the Sorting page (Removed tray).
+- Tests: Python `tests/test_m12_screenshots.py` (rule, detection, export exclusion, keep/favourite override, archive,
+  funnel identity, timeline field, older album read once); Swift: `screenshotsLeaveTheAlbumByThemselves`,
+  `funnelShowsScreenshots`, put back covers screenshots.
+- Not verified: the Swift code was written in a Linux container without a Swift toolchain, so it was neither compiled
+  nor run. Run `scripts/test-mac.sh` and `scripts/build-mac-app.sh` before merging; check on a throwaway album with a
+  copy of one owner screenshot.

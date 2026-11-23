@@ -64,7 +64,7 @@ public func nextStep(_ states: [GuideStep: StepState]) -> GuideStep? {
 
 /// The funnel as segments of one bar, largest meaning first. Zero parts are dropped.
 public struct FunnelPart: Identifiable, Equatable, Sendable {
-    public enum Kind: String, Sendable { case inAlbum, extraFrames, blurry, leftOut }
+    public enum Kind: String, Sendable { case inAlbum, extraFrames, blurry, screenshots, leftOut }
     public let kind: Kind
     public let count: Int
     public var id: String { kind.rawValue }
@@ -72,7 +72,8 @@ public struct FunnelPart: Identifiable, Equatable, Sendable {
 
 public func funnelParts(_ f: Overview.Funnel) -> [FunnelPart] {
     [FunnelPart(kind: .inAlbum, count: f.inAlbum), FunnelPart(kind: .extraFrames, count: f.extraFrames),
-     FunnelPart(kind: .blurry, count: f.blurry), FunnelPart(kind: .leftOut, count: f.leftOut)].filter { $0.count > 0 }
+     FunnelPart(kind: .blurry, count: f.blurry), FunnelPart(kind: .screenshots, count: f.screenshots),
+     FunnelPart(kind: .leftOut, count: f.leftOut)].filter { $0.count > 0 }
 }
 
 // MARK: chapters (events grouped by day)

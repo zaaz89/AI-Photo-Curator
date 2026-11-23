@@ -166,3 +166,12 @@ Plan (owner agreed to "remove automatically"; screenshots only, documents and th
 3. Timeline items: `screenshot: true/false`.
 4. App: `Photo.screenshot`; `goesToAlbumDespiteFocus` also needs `!screenshot || keep`; `sortReason` → `screenshot`, string `why2_screenshot`; `putBackMarks` sets `keep` for a screenshot; `needsALook` is false for a screenshot (the quick review stops asking); funnel: `Overview.Funnel.screenshots` (optional, 0) and a `screenshots` part in `funnelParts` with `funnel_`/`funnelHelp_` strings and where its click goes (`AlbumHome.FunnelView.open`).
 5. Tests (Python: rule, export exclusion and keep override, funnel identity; Swift: rule, put back, funnel part), check on a throwaway album with a screenshot copy, update PR #15.
+
+### 2026-11-23 — Screenshots leave the album by themselves, built (Claude, Cowork)
+Built the five-step plan of the 2026-11-19 entry on `claude/m12-sorting-stage` (details in `notes/m12-sorting-stage.md`).
+Owner asked Cowork to do the work directly. Python: 156 passed (141 + 15 new) in a Linux container with ExifTool 12.x.
+Swift: changed and tests added, but NOT compiled or run (no Swift toolchain reachable there): run `scripts/test-mac.sh`
+and `scripts/build-mac-app.sh` on the Mac first. Delivered as a git bundle (no push access from the container).
+Also added `notes/m13-m18-roadmap.md` (owner's plan for M13 to M18, 2026-11-23: no new AI models; no Google Photos API).
+Open: compile and verify the Swift side, update PR #15, merge; then M13.
+

@@ -5,7 +5,7 @@ import Foundation
 /// while photos fly in. Pure functions, so the stage and the tests agree.
 
 /// album: in the album. check: in the album, but worth a look (closed eyes, a screenshot or document).
-/// removed: blurry or left out by the owner. stacked: another frame of a moment whose best frame is in the album.
+/// removed: blurry, a screenshot, or left out by the owner. stacked: another frame of a moment whose best frame is in the album.
 public enum SortVerdict: String, CaseIterable, Sendable {
     case album, check, removed, stacked
 }
@@ -29,6 +29,7 @@ public func sortReason(_ p: Photo) -> String? {
     case .album: return nil
     case .removed:
         if p.rejected { return "leftOut" }
+        if p.screenshot && !p.keep { return "screenshot" }
         let blur = reviewReasons(p).first { ["movement_blur", "subject_blurry", "whole_blurry"].contains($0) }
         return blur ?? "whole_blurry"
     case .stacked: return "extra_frame"
@@ -95,11 +96,11 @@ public func stagger(_ count: Int, total: Double, min lower: Double = 0.012, max 
 }
 
 /// The marks that bring a photo back into the album by the export's rule: not left out; another frame of a
-/// moment as "keep too"; a blurry one with the owner's focus mark "soft" (both when it is both).
+/// moment or a screenshot as "keep too"; a blurry one with the owner's focus mark "soft" (all that apply).
 public func putBackMarks(_ p: Photo) -> [String: MarkValue] {
     var m: [String: MarkValue] = ["rejected": .bool(false)]
     if p.favorite { return m }
-    if p.isExtraFrame && !p.keep { m["keep"] = .bool(true) }
+    if (p.isExtraFrame || p.screenshot) && !p.keep { m["keep"] = .bool(true) }
     if p.focus?.tier == "blurry" { m["focus"] = .string("soft") }
     return m
 }

@@ -254,6 +254,14 @@ MIGRATIONS = [
     """
     ALTER TABLE marks ADD COLUMN keep INTEGER NOT NULL DEFAULT 0;
     """,
+    # 12: screenshots (M12, owner 2026-11-19: they leave the album by themselves, visible in the Removed tray)
+    """
+    CREATE TABLE screenshot_checks (
+        asset_id   INTEGER PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+        screenshot INTEGER NOT NULL,          -- 1: a screen capture, 0: not
+        reason     TEXT                       -- mark (EXIF UserComment "Screenshot") | filename | NULL
+    );
+    """,
 ]
 
 

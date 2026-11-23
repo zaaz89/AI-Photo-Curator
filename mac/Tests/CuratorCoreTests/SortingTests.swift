@@ -77,7 +77,8 @@ private let blurry = #""focus": {"tier": "blurry", "auto_tier": "blurry"}"#
 @Test func putBackBringsEveryRemovedOrStackedPhotoIntoTheAlbum() throws {
     let extra = #", "duplicate": {"group": 4, "category": "near", "keeper": false}"#
     let cases = [try photo(1, blurry), try photo(2, sharp + extra), try photo(3, blurry + extra),
-                 try photo(4, sharp + #", "rejected": true"#), try photo(5, blurry + extra + #", "rejected": true"#)]
+                 try photo(4, sharp + #", "rejected": true"#), try photo(5, blurry + extra + #", "rejected": true"#),
+                 try photo(7, sharp + #", "screenshot": true"#), try photo(8, blurry + #", "screenshot": true"#)]
     for var p in cases {
         #expect(!p.goesToAlbumDespiteFocus)
         for (k, v) in putBackMarks(p) {
@@ -98,4 +99,21 @@ private let blurry = #""focus": {"tier": "blurry", "auto_tier": "blurry"}"#
 @Test func secondFileOfAPairNamesItsPrimary() throws {
     #expect(try photo(1, sharp + #", "paired_with": 7"#).pairedWith == 7)
     #expect(try photo(2, sharp).pairedWith == nil)
+}
+
+@Test func screenshotsLeaveTheAlbumByThemselves() throws {
+    let shot = sharp + #", "screenshot": true, "quality": {"utility": true, "reasons": ["utility_image"]}"#
+    let p = try photo(1, shot)
+    #expect(!p.goesToAlbumDespiteFocus)
+    #expect(sortVerdict(p) == .removed && sortReason(p) == "screenshot")
+    #expect(!needsALook(p))                                            // the quick review stops asking
+    #expect(putBackMarks(p) == ["rejected": .bool(false), "keep": .bool(true)])
+    let kept = try photo(2, shot + #", "keep": true"#)
+    #expect(kept.goesToAlbumDespiteFocus && sortVerdict(kept) == .album)
+    #expect(try photo(3, shot + #", "favorite": true"#).goesToAlbumDespiteFocus)
+    #expect(sortReason(try photo(4, shot + #", "rejected": true"#)) == "leftOut")
+    #expect(try photo(5, sharp).screenshot == false)                     // older engine: no field
+    // A camera photo of a receipt is not a screenshot: it stays in the album, flagged for a look.
+    let receipt = try photo(6, sharp + #", "quality": {"utility": true, "reasons": ["utility_image"]}"#)
+    #expect(sortVerdict(receipt) == .check)
 }

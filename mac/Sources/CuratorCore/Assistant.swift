@@ -101,11 +101,23 @@ public struct Overview: Decodable, Sendable {
     // M9 (optional so an older engine still decodes)
     public struct Funnel: Decodable, Sendable, Equatable {
         public let taken: Int, leftOut: Int, blurry: Int, extraFrames: Int, inAlbum: Int
+        /// Screenshots left out of the album (M12; 0 from an older engine).
+        public let screenshots: Int
         enum CodingKeys: String, CodingKey {
-            case taken, blurry, leftOut = "left_out", extraFrames = "extra_frames", inAlbum = "in_album"
+            case taken, blurry, screenshots, leftOut = "left_out", extraFrames = "extra_frames", inAlbum = "in_album"
         }
-        public init(taken: Int, leftOut: Int, blurry: Int, extraFrames: Int, inAlbum: Int) {
+        public init(taken: Int, leftOut: Int, blurry: Int, extraFrames: Int, inAlbum: Int, screenshots: Int = 0) {
             self.taken = taken; self.leftOut = leftOut; self.blurry = blurry; self.extraFrames = extraFrames; self.inAlbum = inAlbum
+            self.screenshots = screenshots
+        }
+        public init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            taken = try c.decode(Int.self, forKey: .taken)
+            leftOut = try c.decode(Int.self, forKey: .leftOut)
+            blurry = try c.decode(Int.self, forKey: .blurry)
+            extraFrames = try c.decode(Int.self, forKey: .extraFrames)
+            inAlbum = try c.decode(Int.self, forKey: .inAlbum)
+            screenshots = try c.decodeIfPresent(Int.self, forKey: .screenshots) ?? 0
         }
     }
     public struct Person: Decodable, Sendable, Hashable, Identifiable {

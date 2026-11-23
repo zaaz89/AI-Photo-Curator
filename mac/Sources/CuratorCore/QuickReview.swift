@@ -95,7 +95,10 @@ public func reviewReasons(_ p: Photo) -> [String] {
 /// as information but is no reason on its own to ask the owner.
 /// "Another frame of the same moment" is no reason on its own either: frames of a moment are asked about as
 /// moments (byte-identical copies not at all).
-public func needsALook(_ p: Photo) -> Bool { reviewReasons(p).contains { $0 != "eyes_unsure" && $0 != "extra_frame" } }
+/// Screenshots are not asked about: they leave the album by themselves (owner, 2026-11-19) and can be put back.
+public func needsALook(_ p: Photo) -> Bool {
+    !p.screenshot && reviewReasons(p).contains { $0 != "eyes_unsure" && $0 != "extra_frame" }
+}
 
 /// One of several near-identical shots of the same moment (the keeper as well as the other frames).
 /// Byte-identical copies (AirDrop, the same file twice) are not asked about: one copy is enough.

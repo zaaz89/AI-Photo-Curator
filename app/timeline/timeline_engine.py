@@ -115,6 +115,8 @@ def timeline(conn: sqlite3.Connection) -> dict:
     face_map = summaries(conn)
     vision = vision_info(conn)
     videos = {r['sha256']: dict(r) for r in conn.execute('SELECT sha256, duration, thumb FROM video_meta')}
+    from app.quality.screenshots import screenshot_ids
+    shots = screenshot_ids(conn)
     sha_of = {r['id']: r['sha256'] for r in rows}
     for i in items:
         i['focus'] = tiers.get(i['id'])
@@ -124,6 +126,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
         i['favorite'] = bool(m['favorite']) if m else False
         i['rejected'] = bool(m['rejected']) if m else False
         i['keep'] = bool(m['keep']) if m else False
+        i['screenshot'] = i['id'] in shots
         i['faces'] = face_map.get(sha_of.get(i['id']))
         i['quality'] = _quality(i, i['focus'], i['faces'], vision.get(sha_of.get(i['id'])))
         v = videos.get(sha_of.get(i['id']))

@@ -127,6 +127,7 @@ def index_source(conn: sqlite3.Connection, source_id: int,
                 conn.execute(f"UPDATE assets SET {', '.join(f'{k} = :{k}' for k in row)} WHERE id = :id",
                              {**row, 'id': old['id']})
                 asset_id = old['id']
+                conn.execute('DELETE FROM screenshot_checks WHERE asset_id = ?', (asset_id,))   # file changed: check again
             else:
                 stats['new'] += 1
                 cur = conn.execute(f"INSERT INTO assets ({', '.join(row)}) VALUES ({', '.join(':' + k for k in row)})", row)
