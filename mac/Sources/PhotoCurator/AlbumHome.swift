@@ -128,7 +128,7 @@ struct NextCard: View {
                         .font(.callout.weight(.semibold)).foregroundStyle(step.tint)
                     Text(title(step)).font(.system(size: 26, weight: .bold)).fixedSize(horizontal: false, vertical: true)
                     Text(text(step)).font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button { withAnimation(.snappy) { library.destination = .step(step) } } label: {
+                    Button { withMotion(.settle) { library.destination = .step(step) } } label: {
                         Label(library.tr("action_" + step.rawValue), systemImage: "arrow.right").labelStyle(TrailingIconLabel())
                             .padding(.horizontal, 8)
                     }
@@ -193,7 +193,7 @@ struct ClocksNextCard: View {
                 Text(String(format: library.tr("nextClocks"), library.clocksWaiting)).font(.system(size: 26, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(library.tr("nextText_clocks")).font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button { withAnimation(.snappy) { library.destination = .people } } label: {
+                Button { withMotion(.settle) { library.destination = .people } } label: {
                     Label(library.tr("checkClocks"), systemImage: "arrow.right").labelStyle(TrailingIconLabel()).padding(.horizontal, 8)
                 }
                 .buttonStyle(.glassProminent).controlSize(.extraLarge).tint(.teal)
@@ -272,16 +272,16 @@ struct FunnelView: View {
 
     func color(_ k: FunnelPart.Kind) -> Color {
         switch k {
-        case .inAlbum: .green
-        case .extraFrames: .blue
-        case .blurry: .orange
+        case .inAlbum: StatusColor.kept
+        case .extraFrames: StatusColor.stacked
+        case .blurry: StatusColor.removed
         case .screenshots: .purple
         case .leftOut: .gray
         }
     }
 
     func open(_ k: FunnelPart.Kind) {
-        withAnimation(.snappy) {
+        withMotion(.settle) {
             switch k {
             case .inAlbum: library.destination = .step(.export)
             case .extraFrames: library.selectionView = .moments; library.destination = .step(.selection)
@@ -305,7 +305,7 @@ struct StepCards: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: GuideStep.allCases.count), spacing: 16) {
                 ForEach(GuideStep.allCases) { s in
                     let st = states[s] ?? StepState(done: false, waiting: 0)
-                    Button { withAnimation(.snappy) { library.destination = .step(s) } } label: {
+                    Button { withMotion(.settle) { library.destination = .step(s) } } label: {
                         VStack(alignment: .leading, spacing: 12) {
                             PhotoMosaic(photos: stepPhotos(s, library), radius: 16).frame(height: 130)
                                 .overlay(alignment: .topLeading) {
@@ -401,7 +401,7 @@ struct PeopleRow: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     SectionTitle(title: library.tr("peopleTitle"), detail: library.tr("peopleLead"))
-                    Button { withAnimation(.snappy) { library.destination = .people } } label: {
+                    Button { withMotion(.settle) { library.destination = .people } } label: {
                         Label(library.tr("editPeople"), systemImage: "pencil")
                     }
                     .buttonStyle(.glass)

@@ -80,7 +80,7 @@ struct NewAlbumWizard: View {
         }
         .padding(24)
         .frame(width: 640)
-        .animation(.spring(duration: 0.35), value: folders)
+        .motionAnimation(.arrive, value: folders)
     }
 
     var dropZone: some View {

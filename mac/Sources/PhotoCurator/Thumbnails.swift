@@ -1,6 +1,7 @@
 import AppKit
 import QuickLookThumbnailing
 import SwiftUI
+import CuratorCore
 
 /// Thumbnails made by macOS from the original files (read-only), cached in memory.
 /// Works for HEIC, RAW and videos without going through the engine.
@@ -43,7 +44,7 @@ struct Thumbnail: View {
             .clipped()
             .task(id: "\(url.path)#\(side)") {
                 let img = await ThumbnailCache.shared.image(for: url, side: side)
-                withAnimation(.easeOut(duration: 0.18)) { image = img; missing = img == nil }
+                withMotion(.fade) { image = img; missing = img == nil }
             }
     }
 }

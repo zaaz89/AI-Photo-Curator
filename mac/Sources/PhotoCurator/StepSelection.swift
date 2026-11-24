@@ -95,7 +95,7 @@ struct MomentsPanel: View {
             .scrollContentBackground(.hidden)
             .background(.background.secondary, in: .rect(cornerRadius: 20))
             .clipShape(.rect(cornerRadius: 20))
-            .onChange(of: selected) { _, id in withAnimation { proxy.scrollTo(id) } }
+            .onChange(of: selected) { _, id in withMotion(.settle) { proxy.scrollTo(id) } }
         }
     }
 
@@ -130,7 +130,7 @@ struct MomentsPanel: View {
         }
         .padding(20)
         .background(.background.secondary, in: .rect(cornerRadius: 22))
-        .animation(.snappy(duration: 0.25), value: g.id)
+        .motionAnimation(.settle, value: g.id)
     }
 
     func frameGrid(_ g: MomentGroup, faceRows: [[Photo.Faces.Box?]], layout: FrameLayout) -> some View {
@@ -257,7 +257,7 @@ struct MomentRow: View {
             Spacer(minLength: 0)
             Image(systemName: group.chosenByOwner ? "hand.thumbsup.fill" : (group.clear ? "sparkles" : "circle.fill"))
                 .font(group.clear || group.chosenByOwner ? .callout : .caption2)
-                .foregroundStyle(group.chosenByOwner ? .green : (group.clear ? .secondary : .orange))
+                .foregroundStyle(group.chosenByOwner ? StatusColor.kept : (group.clear ? .secondary : StatusColor.look))
                 .help(library.tr(group.chosenByOwner ? "yourChoice" : (group.clear ? "decidedAuto" : "needsYou")))
         }
         .padding(.vertical, 3)
@@ -291,7 +291,7 @@ struct FrameColumn: View {
                 }
                 .opacity(isKeeper || alsoKept || highlighted ? 1 : 0.82)
                 .scaleEffect(highlighted ? 1 : 0.985)
-                .animation(.snappy(duration: 0.2), value: highlighted)
+                .motionAnimation(.quick, value: highlighted)
                 .onTapGesture(count: 2) { keep() }
             HStack(spacing: 6) {
                 Text(String((member.localTime ?? "").dropFirst(11).prefix(8))).monospacedDigit().font(.callout.weight(.medium))
@@ -369,8 +369,8 @@ struct FrameColumn: View {
     func chip(_ key: String, warn: Bool) -> some View {
         Text(library.tr(key)).font(.caption.weight(.medium))
             .padding(.horizontal, 7).padding(.vertical, 3)
-            .background((warn ? Color.orange : Color.green).opacity(0.18), in: .capsule)
-            .foregroundStyle(warn ? .orange : .green)
+            .background((warn ? StatusColor.warning : StatusColor.kept).opacity(0.18), in: .capsule)
+            .foregroundStyle(warn ? StatusColor.warning : StatusColor.kept)
     }
 }
 
@@ -424,7 +424,7 @@ struct ToggleGrid: View {
                             }
                             .buttonStyle(.plain)
                             .help(library.tr(inAlbum ? "clickToLeaveOut" : "clickToKeep"))
-                            .animation(.snappy(duration: 0.2), value: inAlbum)
+                            .motionAnimation(.quick, value: inAlbum)
                         }
                     }
                     .padding(.bottom, 20)
