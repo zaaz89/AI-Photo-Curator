@@ -50,6 +50,7 @@ public struct StageFlow: Sendable {
     public var days: [(day: String, origin: CGPoint)] = []
     public var tileHeight: CGFloat = 0
     public var height: CGFloat = 0
+    public init() {}
 }
 
 /// Days flow one after another like words in a paragraph: a day begins with its label above its first photo,
