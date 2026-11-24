@@ -16,7 +16,7 @@ import Testing
 @Test func springsMatchTheSpec() {
     #expect(MotionToken.arrive.curve == .spring(response: 0.45, dampingFraction: 0.82))
     #expect(MotionToken.settle.curve == .spring(response: 0.6, dampingFraction: 0.9))
-    #expect(MotionToken.drop.curve == .spring(response: 0.35, dampingFraction: 0.7))
+    #expect(MotionToken.drop.curve == .spring(response: 0.55, dampingFraction: 0.72))
     #expect(MotionToken.stack.curve == .spring(response: 0.5, dampingFraction: 0.85))
     #expect(MotionToken.quick.curve.isSpring)
 }

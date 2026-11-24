@@ -41,7 +41,7 @@ background blobs, AI glow gradient, step and person tints) are not status colour
 |---|---|---|
 | `arrive` | spring 0.45 / 0.82 | something appears: photos fly in, a panel or row comes in |
 | `settle` | spring 0.6 / 0.9 | things come to rest: overview, page / layout changes, progress |
-| `drop` | spring 0.35 / 0.7 | something falls away (a photo into "Removed") |
+| `drop` | spring 0.55 / 0.72 | something falls away (a photo into "Left out"); slower than first spec so the fall reads, faster than the old 0.8 |
 | `stack` | spring 0.5 / 0.85 | frames slide onto the best one and into "Stacked" |
 | `quick` | snappy 0.2 | hover, press, selection, small value changes |
 | `fade` | easeInOut 0.2 | opacity only: image fade-in, a message or flash leaving, a reset |

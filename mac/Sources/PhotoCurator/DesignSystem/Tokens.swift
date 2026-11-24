@@ -48,6 +48,7 @@ enum StatusColor {
     /// In the album / kept.
     static var kept: Color { .green }
     /// Removed (blurry, left out).
+    /// System red, not the softer (1, .42, .42): white text on the softer one is only ~2.8:1.
     static var removed: Color { .red }
     /// "Have a look": the app is not sure and asks the owner.
     static var look: Color { .orange }

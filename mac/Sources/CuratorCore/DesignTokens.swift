@@ -74,7 +74,7 @@ public enum MotionToken: String, CaseIterable, Sendable {
         switch self {
         case .arrive: .spring(response: 0.45, dampingFraction: 0.82)
         case .settle: .spring(response: 0.6, dampingFraction: 0.9)
-        case .drop: .spring(response: 0.35, dampingFraction: 0.7)
+        case .drop: .spring(response: 0.55, dampingFraction: 0.72)
         case .stack: .spring(response: 0.5, dampingFraction: 0.85)
         case .quick: .snappy(duration: 0.2)
         case .fade: .easeInOut(duration: 0.2)
