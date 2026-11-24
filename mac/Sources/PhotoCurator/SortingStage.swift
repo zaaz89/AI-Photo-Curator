@@ -27,6 +27,15 @@ import SwiftUI
     @Published private(set) var verdicts: [Int: SortVerdict] = [:]
     /// The analysis passed the face check (its results are worth reading before the moments are built).
     var sawFaces = false
+    /// The owner skipped the animation (Space or Esc): the stage shows every change at once until a replay or
+    /// another album.
+    @Published private(set) var skipped = false
+
+    var busy: Bool { act != .idle }
+    /// More photos than the stage animates one by one (`stageChoreographyLimit`): shown at once in a grid.
+    var large: Bool { !stageAnimatesEachPhoto(shown.count) }
+    /// No per-photo animation: skipped, or too many photos.
+    var instant: Bool { skipped || large }
 
     weak var library: LibraryModel?
     var motion = true
@@ -41,8 +50,6 @@ import SwiftUI
     private var pendingImages: [Int: NSImage] = [:]
     private var flushScheduled = false
 
-    var busy: Bool { act != .idle }
-
     /// Opening the page: a finished album shows its overview at once; a running analysis is followed live.
     func attach(_ lib: LibraryModel) {
         library = lib
@@ -53,12 +60,35 @@ import SwiftUI
         sync()
     }
 
+    /// "Skip animation": the running and queued acts stop, everything is shown where it belongs at once.
+    func skip() {
+        skipped = true
+        snap()
+    }
+
+    /// Shows the current state without animation: every photo arrived, verdicts that are known shown, frames
+    /// stacked once the analysis is over, the overview when nothing runs.
+    private func snap() {
+        guard let lib = library else { return }
+        generation += 1
+        queue?.cancel(); queue = nil
+        queued = []; actPending = false
+        lifting = []; scanning = []; gathering = [:]
+        let ids = present(shown)
+        arrived = ids
+        revealed = Set(shown.filter(hasResults).map(\.id))
+        stackedShown = lib.analysing ? [] : ids
+        act = .idle
+        settled = !lib.analysing && !shown.isEmpty
+        load(shown)
+    }
+
     private func reset(to id: String?) {
         generation += 1
         queue?.cancel(); queue = nil
         trip = id
         arrived = []; revealed = []; stackedShown = []; lifting = []; scanning = []; gathering = [:]
-        settled = false; act = .idle; queued = []; actPending = false; sawFaces = false
+        settled = false; act = .idle; queued = []; actPending = false; sawFaces = false; skipped = false
         images = [:]; aspects = [:]; loading = []; toLoad = []; pendingImages = [:]
     }
 
@@ -87,6 +117,7 @@ import SwiftUI
         if !arrived.isSubset(of: present) {             // photos left the album (Finish album)
             arrived.formIntersection(present); revealed.formIntersection(present); stackedShown.formIntersection(present)
         }
+        if instant { snap(); return }
         let new = shown.filter { !arrived.contains($0.id) && !queued.contains($0.id) }
         if !new.isEmpty {
             animate(.quick) { settled = false }
@@ -101,7 +132,7 @@ import SwiftUI
     /// What is still to show, in order: verdicts (as soon as every photo has its results), then the moments
     /// (once the analysis is over), then the overview. Runs after every act, so nothing is left unshown.
     func reconcile() {
-        guard let lib = library, !actPending, queued.isEmpty else { return }
+        guard let lib = library, !actPending, queued.isEmpty, !instant else { return }
         let waiting = shown.filter { arrived.contains($0.id) && hasResults($0) && !revealed.contains($0.id) }
         if !waiting.isEmpty && (!lib.analysing || shown.allSatisfy(hasResults)) {
             schedule { gen in await self.quality(gen) }
@@ -121,6 +152,8 @@ import SwiftUI
 
     /// "Replay the sorting": everything flies again, from the folders to the overview.
     func replay() {
+        skipped = false
+        if large { snap(); return }                        // too many photos to fly one by one
         generation += 1
         queue?.cancel(); queue = nil
         let gen = generation
@@ -175,6 +208,7 @@ import SwiftUI
     /// Thumbnails come from macOS (Quick Look), eight at a time, in time order; they reach the page in small
     /// batches so the stage is not redrawn for every single one.
     private func load(_ photos: [Photo]) {
+        guard !large else { return }                       // the grid loads its own thumbnails as they scroll in
         let todo = photos.filter { !loading.contains($0.id) && images[$0.id] == nil }
         loading.formUnion(todo.map(\.id))
         toLoad.append(contentsOf: todo)
@@ -327,9 +361,12 @@ struct SortingStage: View {
         GeometryReader { g in
             let geo = StageGeometry(size: g.size, settled: stage.settled)
             let scene = makeScene()
-            let flow = stageFlow(albumItems(scene), in: geo.albumRect, maxHeight: stage.settled ? 230 : 170)
-            let frames = tileFrames(scene, flow: flow, geo: geo)
-            let sweep = sweepIds()
+            let flow = stage.large ? StageFlow() : stageFlow(albumItems(scene), in: geo.albumRect, maxHeight: stage.settled ? 230 : 170)
+            // Too many photos, or a settled album that does not fit: a scrollable grid by day instead of the
+            // flying tiles, so no photo is cut off (M12c). Up to the limit the animation stays as it was.
+            let grid = stage.large || (stage.settled && flow.height > geo.albumRect.height + 1)
+            let frames = grid ? [:] : tileFrames(scene, flow: flow, geo: geo)
+            let sweep = grid ? [] : sweepIds()
             ZStack(alignment: .topLeading) {
                 StageBackground()
                 StageHeader(stage: stage, counts: scene.counts).frame(width: g.size.width)
@@ -340,7 +377,13 @@ struct SortingStage: View {
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                 }
-                ForEach(Array(flow.days.enumerated()), id: \.offset) { _, d in
+                if grid {
+                    StageGrid(stage: stage, ids: stage.shown.filter { scene.places[$0.id] == .album }.map(\.id),
+                              stackedBehind: scene.stackedBehind) { openTray = $0 }
+                        .frame(width: geo.albumRect.width, height: geo.albumRect.height)
+                        .position(x: geo.albumRect.midX, y: geo.albumRect.midY)
+                }
+                ForEach(Array((grid ? [] : flow.days).enumerated()), id: \.offset) { _, d in
                     Text(dayLabel(d.day))
                         .font(.system(size: stage.settled ? 15 : 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
@@ -358,12 +401,13 @@ struct SortingStage: View {
                                   verdict: stage.revealed.contains(p.id) ? stage.verdicts[p.id] : nil,
                                   scanning: stage.scanning.contains(p.id) || sweep.contains(p.id),
                                   lifted: stage.lifting.contains(p.id),
-                                  stacked: scene.stackedBehind[p.id] ?? 0)
+                                  stacked: scene.stackedBehind[p.id] ?? 0, lang: library.lang)
                             .rotationEffect(.degrees(f.rotation))
                             .position(x: f.rect.midX, y: f.rect.midY)
                             .zIndex(f.z)
                             .opacity(scene.places[p.id] == .source || f.hidden ? 0 : 1)
                             .allowsHitTesting(!f.hidden)
+                            .accessibilityHidden(scene.places[p.id] == .source || f.hidden)
                             .animation(reduceMotion ? nil : Motion.settle, value: f)
                             .onTapGesture { tapped(p, scene) }
                             .accessibilityAction { tapped(p, scene) }
@@ -588,6 +632,7 @@ private struct StageTile: View {
     let scanning: Bool
     let lifted: Bool
     let stacked: Int
+    let lang: Lang
 
     var corner: CGFloat { min(12, size.height * 0.12) }
 
@@ -610,7 +655,7 @@ private struct StageTile: View {
                 Image(systemName: symbol(verdict))
                     .font(.system(size: max(10, min(18, size.height * 0.16)), weight: .bold))
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, color(verdict))
+                    .foregroundStyle(verdict == .check ? StatusColor.onLook : .white, color(verdict))
                     .shadow(radius: 3).padding(4)
                     .transition(.scale.combined(with: .opacity))
             }
@@ -640,7 +685,7 @@ private struct StageTile: View {
         .shadow(color: .black.opacity(lifted ? 0.6 : 0.3), radius: lifted ? 16 : 6, y: lifted ? 10 : 3)
         .scaleEffect(lifted ? 1.08 : 1)
         .accessibilityElement()
-        .accessibilityLabel(photo.filename)
+        .accessibilityLabel(stageTileAccessibilityLabel(photo, verdict: verdict, stacked: stacked, lang))
     }
 
     func symbol(_ v: SortVerdict) -> String {
@@ -653,6 +698,83 @@ private struct StageTile: View {
     }
     func color(_ v: SortVerdict) -> Color {
         switch v { case .album: StatusColor.kept; case .check: StatusColor.look; case .removed: StatusColor.removed; case .stacked: StatusColor.stacked }
+    }
+}
+
+/// The stage for many photos, or a settled album that does not fit (M12c): the photos in the album as a
+/// scrollable grid by day. Lazy, so only the rows on screen load thumbnails (`ThumbnailCache` caps how many
+/// load at once); no per-photo animation. The trays below stay as they are.
+private struct StageGrid: View {
+    @EnvironmentObject var library: LibraryModel
+    @ObservedObject var stage: StageModel
+    let ids: [Int]
+    let stackedBehind: [Int: Int]
+    let open: (SortVerdict) -> Void
+
+    private struct Day: Identifiable { let id: String; var ids: [Int] }
+
+    private var days: [Day] {
+        var out: [Day] = []
+        for id in ids {
+            guard let p = library.photo(id) else { continue }
+            if out.last?.id == p.day { out[out.count - 1].ids.append(id) } else { out.append(Day(id: p.day, ids: [id])) }
+        }
+        return out
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Space.xxl) {
+                ForEach(days) { d in
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        Text(d.id == Photo.undated ? library.tr("stageUndated") : formatDay(d.id, library.lang, style: .short))
+                            .font(TypeRole.cardTitle).foregroundStyle(.white.opacity(0.85))
+                            .accessibilityAddTraits(.isHeader)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: Space.m)], spacing: Space.m) {
+                            ForEach(d.ids, id: \.self) { id in
+                                if let p = library.photo(id) { tile(p) }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, Space.xl)
+        }
+        .scrollIndicators(.visible)
+    }
+
+    func tile(_ p: Photo) -> some View {
+        let verdict = stage.revealed.contains(p.id) ? stage.verdicts[p.id] : nil
+        let stacked = stackedBehind[p.id] ?? 0
+        return Thumbnail(url: p.fileURL, side: 260)
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(.rect(cornerRadius: Radius.small))
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.small)
+                    .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(Color.white.opacity(0.14)),
+                                  lineWidth: verdict == .check ? 2 : 1)
+            }
+            .overlay(alignment: .topTrailing) {
+                if stacked > 0 {
+                    Text("×\(stacked + 1)").font(TypeRole.caption.weight(.bold)).monospacedDigit()
+                        .padding(.horizontal, Space.s).padding(.vertical, Space.xxs)
+                        .background(.ultraThinMaterial, in: .capsule).padding(Space.xs)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if verdict == .check {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(StatusColor.onLook, StatusColor.look)
+                        .padding(Space.xs)
+                }
+            }
+            .contentShape(.rect)
+            .onTapGesture { if verdict == .check { open(.check) } }
+            .accessibilityElement()
+            .accessibilityLabel(stageTileAccessibilityLabel(p, verdict: verdict, stacked: stacked, library.lang))
+            .accessibilityAddTraits(verdict == .check ? .isButton : [])
+            .accessibilityAction { if verdict == .check { open(.check) } }
     }
 }
 
@@ -681,7 +803,13 @@ private struct StageHeader: View {
     @ObservedObject var stage: StageModel
     let counts: StageCounts
 
+    /// Running, failed, stopped, waiting or done (CuratorCore, tested).
+    var state: StageState {
+        stageState(job: library.job, analysing: library.analysing, trip: library.tripId, photos: stage.shown)
+    }
+
     var title: String {
+        if !stage.busy, let t = stageStateTexts(state, library.lang) { return t.title }
         if library.analysing {
             switch library.job.phase {
             case .reading: return library.tr("stagePhase_reading")
@@ -702,13 +830,13 @@ private struct StageHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 16) {
-                AIRing(symbol: stage.settled ? "checkmark" : "sparkles", size: 46,
+                AIRing(symbol: state.needsRestart ? "exclamationmark" : (stage.settled ? "checkmark" : "sparkles"), size: 46,
                        spinning: library.analysing || stage.busy, progress: library.analysing ? library.job.progress / 100 : 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.7)
                         .id(title).transition(.push(from: .bottom).combined(with: .opacity))
-                    Text(stage.settled ? library.tr("stageDoneSub") : library.albumName)
+                    Text(subtitle)
                         .foregroundStyle(.white.opacity(0.65)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 .motionAnimation(.quick, value: title)
@@ -725,24 +853,73 @@ private struct StageHeader: View {
                         .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
                         .contentTransition(.numericText())
                     Spacer()
+                    restartButton
                     Button { library.showSorting(replay: true) } label: { Label(library.tr("replay"), systemImage: "arrow.counterclockwise") }
                         .buttonStyle(.glass)
-                    Button { library.destination = .step(.selection) } label: {
-                        Label(library.tr("stageNext"), systemImage: "arrow.right")
-                    }
-                    .buttonStyle(.glassProminent)
-                } else if library.analysing {
-                    ProgressView(value: library.job.progress, total: 100).tint(stageColors[1]).frame(maxWidth: 520)
-                    Spacer()
-                    Button(library.tr("stop")) { library.stopJob() }.buttonStyle(.glass)
+                    nextButton
                 } else {
+                    if library.analysing {
+                        ProgressView(value: library.job.progress, total: 100).tint(stageColors[1]).frame(maxWidth: 520)
+                    }
                     Spacer()
+                    restartButton
+                    if showSkip { skipButton }
+                    if library.analysing { Button(library.tr("stop")) { library.stopJob() }.buttonStyle(.glass) }
+                    // Next is always there; until the album is sorted it says why it waits (M12c, no dead end).
+                    Text(library.tr("stageNextWhy")).font(TypeRole.caption).foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1).accessibilityHidden(true)
+                    nextButton.disabled(true).accessibilityHint(library.tr("stageNextWhy"))
                 }
             }
             .frame(height: 34)
         }
         .padding(.horizontal, 36).padding(.top, 26)
         .environment(\.colorScheme, .dark)
+    }
+
+    var subtitle: String {
+        if !stage.busy, let t = stageStateTexts(state, library.lang) { return t.subtitle }
+        return stage.settled ? library.tr("stageDoneSub") : library.albumName
+    }
+
+    /// "Skip animation" shows from the first frame of any act or replay until the overview.
+    var showSkip: Bool {
+        !stage.instant && !stage.settled && !stage.shown.isEmpty && (stage.busy || !library.analysing)
+    }
+
+    /// Esc and Space both skip (Space through a second, invisible button: one shortcut per button).
+    var skipButton: some View {
+        Button { stage.skip() } label: { Label(library.tr("skipAnimation"), systemImage: "forward.end") }
+            .buttonStyle(.glass)
+            .keyboardShortcut(.cancelAction)
+            .help(library.tr("skipAnimationHelp"))
+            .background {
+                Button("") { stage.skip() }
+                    .keyboardShortcut(.space, modifiers: [])
+                    .opacity(0).frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+    }
+
+    /// The primary action after a stop or a failure: analyse the rest, or try again.
+    @ViewBuilder var restartButton: some View {
+        if case .stopped = state, !stage.busy {
+            Button { library.analyse() } label: { Label(library.tr("resume"), systemImage: "play.fill") }
+                .buttonStyle(.glassProminent)
+        } else if case .failed = state, !stage.busy {
+            Button { library.analyse() } label: { Label(library.tr("analyseAgain"), systemImage: "arrow.clockwise") }
+                .buttonStyle(.glassProminent)
+        }
+    }
+
+    /// Next step; secondary while a restart is the primary action.
+    @ViewBuilder var nextButton: some View {
+        let label = Label(library.tr("stageNext"), systemImage: "arrow.right")
+        if state.needsRestart {
+            Button { library.destination = .step(.selection) } label: { label }.buttonStyle(.glass)
+        } else {
+            Button { library.destination = .step(.selection) } label: { label }.buttonStyle(.glassProminent)
+        }
     }
 
     /// The same numbers as the album home's funnel (a RAW+JPEG or Live Photo pair counts once).
@@ -837,7 +1014,7 @@ private struct TrayContents: View {
                 if verdict == .check {
                     Button(library.tr("quickReview")) { close(); library.startReview() }.buttonStyle(.borderedProminent)
                 } else {
-                    Button(library.tr("putBackAll")) { library.setInAlbum(ids, true) }
+                    Button(library.tr("putBackAll")) { library.offerUndo(.putBack, count: library.setInAlbum(ids, true)) }
                 }
                 Spacer()
                 Button(library.tr("done")) { close() }.keyboardShortcut(.cancelAction)
@@ -853,12 +1030,15 @@ private struct TrayContents: View {
             Text(reason(p)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             if verdict == .check {
                 HStack(spacing: 6) {
-                    Button(library.tr("itsFine")) { library.mark([p], ["keep": .bool(true)], name: library.tr("keep")) }
-                    Button(library.tr("leaveOut")) { library.setInAlbum([p.id], false) }
+                    Button(library.tr("itsFine")) {
+                        library.mark([p], ["keep": .bool(true)], name: library.tr("keep"))
+                        library.offerUndo(.keptInAlbum, count: 1)
+                    }
+                    Button(library.tr("leaveOut")) { library.offerUndo(.leaveOut, count: library.setInAlbum([p.id], false)) }
                 }
                 .controlSize(.small)
             } else {
-                Button(library.tr("putBack")) { library.setInAlbum([p.id], true) }.controlSize(.small)
+                Button(library.tr("putBack")) { library.offerUndo(.putBack, count: library.setInAlbum([p.id], true)) }.controlSize(.small)
             }
         }
     }

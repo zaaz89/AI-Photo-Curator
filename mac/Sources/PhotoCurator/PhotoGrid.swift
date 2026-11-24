@@ -196,11 +196,12 @@ struct PhotoTile: View {
             if let tier = photo.focus?.tier, tier != "sharp", !photo.isVideo {
                 Text(library.tr("tier_" + tier)).font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(tier == "blurry" ? StatusColor.removed : StatusColor.look, in: .capsule).foregroundStyle(.white)
+                    .background(tier == "blurry" ? StatusColor.removedFill : StatusColor.look, in: .capsule)
+                    .foregroundStyle(tier == "blurry" ? StatusColor.onRemoved : StatusColor.onLook)
             }
             if (photo.faces?.eyesClosed ?? 0) > 0 {
                 Image(systemName: "eye.slash.fill").font(.caption2).padding(4)
-                    .background(StatusColor.look, in: .circle).foregroundStyle(.white)
+                    .background(StatusColor.look, in: .circle).foregroundStyle(StatusColor.onLook)
                     .help(library.tr("eyesClosed"))
             }
             if photo.duplicate?.keeper == false {
@@ -216,13 +217,8 @@ struct PhotoTile: View {
         return String(format: "%d:%02d", Int(d) / 60, Int(d.rounded()) % 60)
     }
 
-    var accessibilityText: String {
-        var parts = [photo.filename, photo.clock, photo.owner]
-        if photo.favorite { parts.append(library.tr("favourite")) }
-        if photo.rejected { parts.append(library.tr("leftOut")) }
-        if photo.isVideo { parts.append(library.tr("video")) }
-        return parts.filter { !$0.isEmpty }.joined(separator: ", ")
-    }
+    /// File, time, owner and every status the badges show (CuratorCore, tested), so colour is not the only cue.
+    var accessibilityText: String { gridTileAccessibilityLabel(photo, library.lang) }
 }
 
 /// A light sweep over photos the engine is still analysing.

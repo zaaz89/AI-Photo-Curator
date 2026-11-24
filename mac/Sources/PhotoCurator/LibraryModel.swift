@@ -94,6 +94,8 @@ enum AssistantSheet: String, Identifiable {
     /// Changes after an analysis of this album ended and its photos were read again (the stage's cue).
     @Published private(set) var analysisFinishedTick = 0
     @Published var message: String?                     // transient error or info for the user
+    /// The last reversible action, confirmed with an Undo button (`UndoToast`, M12c).
+    @Published var undoToast: UndoToastInfo?
     @Published private(set) var job = JobStatus(running: false, status: "")
     @Published private(set) var loading = false
 
@@ -132,6 +134,7 @@ enum AssistantSheet: String, Identifiable {
 
     private func tripChanged() {
         undoManager?.removeAllActions()            // undo must never write into another trip
+        undoToast = nil
         reviewedMoments = []
         photos = []                                // never show or act on the previous trip's photos
         steps = [:]
@@ -433,7 +436,7 @@ enum AssistantSheet: String, Identifiable {
 
     /// Puts photos into the album or leaves them out, by the export's own rule: a kept blurry photo gets the
     /// owner's focus mark "soft", a kept extra frame of a moment becomes a favourite ("keep too").
-    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) { setInAlbum(ids, inAlbum) }
+    func setBlurryInAlbum(_ ids: [Int], _ inAlbum: Bool) { _ = setInAlbum(ids, inAlbum) }
 
     // MARK: quick review (M10)
 
@@ -517,7 +520,9 @@ enum AssistantSheet: String, Identifiable {
         UserDefaults.standard.set(id ?? 0, forKey: "review.\(tripId).\(f.rawValue)")
     }
 
-    func setInAlbum(_ ids: [Int], _ inAlbum: Bool) {
+    /// Returns how many photos changed (0: nothing to undo).
+    @discardableResult
+    func setInAlbum(_ ids: [Int], _ inAlbum: Bool) -> Int {
         let items = ids.compactMap(photo).filter { $0.goesToAlbumDespiteFocus != inAlbum }
         if inAlbum {
             // An extra frame of a moment goes in as "keep too", a blurry one with the focus mark, one that is
@@ -528,6 +533,45 @@ enum AssistantSheet: String, Identifiable {
         } else {
             mark(items, ["rejected": .bool(true)], name: tr("leaveOut"))
         }
+        return items.count
+    }
+
+    // MARK: undo toast (M12c)
+
+    /// Shows the undo toast for an action that just registered its undo (nothing when nothing changed, so
+    /// Undo never reverts an older action).
+    func offerUndo(_ action: UndoableAction, count: Int) {
+        guard count > 0 else { return }
+        offerUndo(undoToastText(action, count: count, lang))
+    }
+
+    func offerUndo(_ text: String) {
+        guard undoManager?.canUndo == true else { return }
+        undoToast = UndoToastInfo(text: text)
+    }
+
+    /// The toast's Undo: the window's undo manager, so it works from a popover too.
+    func undoLast() {
+        undoToast = nil
+        guard let um = undoManager, um.canUndo else { return }
+        um.undo()
+    }
+
+    /// "Accept the Rest" in the moments: these moments count as reviewed and the step as done; undoable.
+    func acceptRest(_ moments: [Int]) {
+        guard let tripId, tripId == loadedTripId else { return }
+        let added = moments.filter { !reviewedMoments.contains($0) }
+        let wasDone = steps["duplicates"] == true
+        reviewedMoments.formUnion(added)
+        markStep("duplicates")
+        registerUndo(name: tr("acceptRest"), trip: tripId) { model in
+            model.reviewedMoments.subtract(added)
+            if !wasDone { model.markStep("duplicates", false) }
+        } redo: { model in
+            model.reviewedMoments.formUnion(added)
+            model.markStep("duplicates")
+        }
+        offerUndo(tr("acceptedRest"))
     }
 
     /// Adds folders to the open album and analyses the new photos. Every folder is tried; refusals are shown
