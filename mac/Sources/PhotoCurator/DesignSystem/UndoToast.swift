@@ -35,7 +35,7 @@ struct UndoToast: View {
                 .padding(.horizontal, Space.xl).padding(.vertical, Space.m)
                 .glassEffect(.regular, in: .capsule)
                 .padding(.bottom, Space.xl)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .motionTransition(.move(edge: .bottom).combined(with: .opacity))
                 .accessibilityElement(children: .contain)
                 .task(id: t.id) {
                     AccessibilityNotification.Announcement(t.text).post()

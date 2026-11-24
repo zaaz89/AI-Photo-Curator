@@ -10,6 +10,11 @@ struct StepExport: View {
     @State private var preview: ExportPreview?
     @State private var loading = false
     @State private var started = false
+    /// Why the preview could not be loaded (M12e, #20): shown with Try Again instead of a spinner forever.
+    @State private var previewError: HumanError?
+    @State private var previewAttempt = 0
+    /// The owner pressed Cancel during this export.
+    @State private var cancelled = false
 
     var body: some View {
         StepPage(step: .export, lead: library.tr("lead_export"), status: status) {
@@ -21,7 +26,7 @@ struct StepExport: View {
                 runSection
             }
         }
-        .task(id: "\(library.tripId ?? "")\(choice.kind.rawValue)\(choice.bestCount)\(choice.folders)\(choice.template)\(library.loadedTripId ?? "")") {
+        .task(id: "\(library.tripId ?? "")\(choice.kind.rawValue)\(choice.bestCount)\(choice.folders)\(choice.template)\(library.loadedTripId ?? "")\(previewAttempt)") {
             await loadPreview()
         }
     }
@@ -120,6 +125,12 @@ struct StepExport: View {
                         }
                     }
                 }
+            } else if let e = previewError {
+                VStack(alignment: .leading, spacing: Space.m) {
+                    Text(library.tr("previewFailed")).font(TypeRole.cardTitle)
+                    ErrorBanner(error: e, retry: { previewAttempt += 1 }, floating: false)
+                }
+                .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
             } else {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 120)
             }
@@ -150,9 +161,20 @@ struct StepExport: View {
                         Text(library.tr("exporting")).font(.headline)
                         Text(job.status).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                     }
+                    Spacer()
+                    // Cancel next to the progress (M12e, #20); files already copied stay, nothing else changes.
+                    Button(library.tr("cancelExport"), role: .cancel) { cancelled = true; library.stopJob() }
+                        .buttonStyle(.glass)
+                        .disabled(cancelled)
                 }
+            } else if started && cancelled {
+                Label(library.tr("exportCancelled"), systemImage: "xmark.circle")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else if started, let error = job.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: Space.m) {
+                    Text(library.tr("exportFailed")).font(TypeRole.cardTitle)
+                    ErrorBanner(error: humanError(engineText: error, library.lang), retry: { choose() }, floating: false)
+                }
             } else if started, let last = library.lastExport {
                 HStack(spacing: 12) {
                     Label(library.tr(last.ok ? "exportFinished" : "exportProblems"),
@@ -185,8 +207,16 @@ struct StepExport: View {
         guard let t = library.tripId else { return }
         loading = true
         defer { loading = false }
-        do { preview = try await library.api.exportPreview(trip: t, choice: choice) }
-        catch { library.message = library.describe(error) }
+        do {
+            preview = try await library.api.exportPreview(trip: t, choice: choice)
+            previewError = nil
+        } catch is CancellationError {
+            return                                          // a newer choice replaced this request
+        } catch {
+            if (error as? URLError)?.code == .cancelled { return }
+            preview = nil                                   // never a stale preview next to the error
+            previewError = humanError(error, library.lang)
+        }
     }
 
     func choose() {
@@ -198,10 +228,11 @@ struct StepExport: View {
         panel.message = library.tr("exportWhere")
         guard panel.runModal() == .OK, let url = panel.url, let t = library.tripId else { return }
         library.clearLastExport()
+        cancelled = false
         let c = choice
         Task {
             do { try await library.api.startExport(trip: t, destination: url.path, choice: c); started = true; await library.pollNow() }
-            catch { library.message = library.describe(error) }
+            catch { library.report(error) { choose() } }
         }
     }
 }

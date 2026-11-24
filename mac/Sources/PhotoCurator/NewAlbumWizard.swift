@@ -47,7 +47,7 @@ struct NewAlbumWizard: View {
                 }
                 .padding(.horizontal, 12)
                 .background(.fill.quaternary, in: .rect(cornerRadius: 12))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .motionTransition(.opacity.combined(with: .move(edge: .top)))
             }
             ForEach(rejected, id: \.self) { r in
                 Label("\(URL(fileURLWithPath: r.path).lastPathComponent): \(library.trOr("problem_" + r.problem, r.problem))",

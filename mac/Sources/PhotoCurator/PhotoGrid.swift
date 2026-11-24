@@ -73,20 +73,25 @@ struct PhotoGrid: View {
         }
         .onKeyPress(.space) { library.toggleQuickLook(); return .handled }
         // Photo keys live here, not as menu shortcuts: menu shortcuts would also fire while
-        // typing in the search field or a sheet.
+        // typing in the search field or a sheet. K keeps and X leaves out, the grid's form of the quick review's
+        // → and ← (the arrows move the cursor here); Space is Quick Look; Esc closes Quick Look, then clears the
+        // selection; ⌘Z undoes (M12e, #18; `gridKeyAction` in CuratorCore).
         .onKeyPress(phases: .down) { press in
             let key = press.characters.lowercased()
             if press.modifiers == .command && key == "a" { library.selectAll(); return .handled }
-            guard press.modifiers.isEmpty || press.modifiers == .shift else { return .ignored }
-            switch key {
-            case "f": library.toggleFavourite()
-            case "x": library.toggleLeaveOut()
-            case "b": library.toggleWallpaper()
-            default: return .ignored
+            guard press.modifiers.isEmpty || press.modifiers == .shift, let action = gridKeyAction(key) else { return .ignored }
+            switch action {
+            case .keep: library.keepTargets()
+            case .leaveOut: library.leaveOutTargets()
+            case .favourite: library.toggleFavourite()
+            case .wallpaper: library.toggleWallpaper()
             }
             return .handled
         }
-        .onKeyPress(.escape) { library.clearSelection(); return .handled }
+        .onKeyPress(.escape) {
+            if library.quickLookURL != nil { library.quickLookURL = nil } else { library.clearSelection() }
+            return .handled
+        }
         .onKeyPress(characters: CharacterSet(charactersIn: "0123"), phases: .down) { press in
             guard press.modifiers.isEmpty else { return .ignored }
             library.setFocus(["1": "sharp", "2": "soft", "3": "blurry"][press.characters])
@@ -168,7 +173,7 @@ struct PhotoTile: View {
             .overlay(alignment: .topTrailing) {
                 if photo.favorite {
                     Image(systemName: "heart.fill").foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 3).padding(8)
-                        .transition(.scale.combined(with: .opacity))
+                        .motionTransition(.scale.combined(with: .opacity))
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -192,12 +197,25 @@ struct PhotoTile: View {
     }
 
     @ViewBuilder var badges: some View {
+        let auto = autoBadge(photo, library.lang)
         HStack(spacing: 4) {
             if let tier = photo.focus?.tier, tier != "sharp", !photo.isVideo {
                 Text(library.tr("tier_" + tier)).font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(tier == "blurry" ? StatusColor.removedFill : StatusColor.look, in: .capsule)
                     .foregroundStyle(tier == "blurry" ? StatusColor.onRemoved : StatusColor.onLook)
+                    .help(auto?.kind == .blurry ? auto?.reason ?? "" : "")
+            }
+            // Left out (or flagged) by the app itself, with the reason in the tooltip (M12e, #21). Blurry photos
+            // already carry the tier badge above; it gets the reason as its tooltip.
+            if let auto, auto.kind != .blurry {
+                Label(auto.label, systemImage: auto.kind == .screenshot ? "camera.viewfinder" : "doc.text")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, Space.s).padding(.vertical, Space.xxs)
+                    .background(auto.kind == .screenshot ? StatusColor.removedFill : StatusColor.look, in: .capsule)
+                    .foregroundStyle(auto.kind == .screenshot ? StatusColor.onRemoved : StatusColor.onLook)
+                    .help(auto.reason)
             }
             if (photo.faces?.eyesClosed ?? 0) > 0 {
                 Image(systemName: "eye.slash.fill").font(.caption2).padding(4)
@@ -218,7 +236,11 @@ struct PhotoTile: View {
     }
 
     /// File, time, owner and every status the badges show (CuratorCore, tested), so colour is not the only cue.
-    var accessibilityText: String { gridTileAccessibilityLabel(photo, library.lang) }
+    var accessibilityText: String {
+        let base = gridTileAccessibilityLabel(photo, library.lang)
+        guard let auto = autoBadge(photo, library.lang) else { return base }
+        return base + ", " + auto.reason
+    }
 }
 
 /// A light sweep over photos the engine is still analysing.

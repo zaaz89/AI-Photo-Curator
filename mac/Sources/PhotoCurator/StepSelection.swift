@@ -17,7 +17,8 @@ struct StepSelection: View {
                     Button { library.startReview() } label: {
                         Label(library.tr("quickReview") + "  ⌘R", systemImage: "rectangle.stack.badge.play")
                     }
-                    .buttonStyle(.glassProminent).help(library.tr("quickReviewHelp"))
+                    // Secondary (M12e, #16): the page's primary is Next in the bottom bar.
+                    .buttonStyle(.glass).help(library.tr("quickReviewHelp"))
                 }
                 .padding(.horizontal, 8)
                 Group {
@@ -265,6 +266,7 @@ struct MomentRow: View {
 /// One frame of a moment: the photo large, faces with eyes open or closed, focus, and the two choices.
 struct FrameColumn: View {
     @EnvironmentObject var library: LibraryModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let member: MomentGroup.Member
     let photo: Photo?
     let group: MomentGroup
@@ -288,7 +290,7 @@ struct FrameColumn: View {
                     RoundedRectangle(cornerRadius: 14).strokeBorder(Color.accentColor, lineWidth: highlighted ? 4 : 0)
                 }
                 .opacity(isKeeper || alsoKept || highlighted ? 1 : 0.82)
-                .scaleEffect(highlighted ? 1 : 0.985)
+                .scaleEffect(highlighted || reduceMotion ? 1 : 0.985)       // no size change under Reduce Motion (M12e)
                 .motionAnimation(.quick, value: highlighted)
                 .onTapGesture(count: 2) { keep() }
             HStack(spacing: 6) {

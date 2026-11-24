@@ -39,6 +39,11 @@ Files:
 `library.offerUndo(.putBack, count:)` (or `offerUndo(text)`) right after an action that registered its undo; the
 toast's Undo calls the window's undo manager, so it matches Cmd+Z.
 
+`ErrorBanner` (DesignSystem/ErrorBanner.swift, M12e): the one way to show an error. Call `library.report(error, retry:)`
+(or build a `HumanError` with `humanError(...)` from CuratorCore); it shows a human sentence, the raw text behind
+"Details", Try Again when `retry` is given, and Dismiss. It never times out and is announced to VoiceOver.
+`floating: false` gives the tinted inline variant for cards (Export preview, export failure).
+
 Status colours are system colours, so light and dark appearance both work. Decorative colours (stage
 background blobs, AI glow gradient, step and person tints) are not status colours and stay where they are.
 
@@ -62,6 +67,8 @@ animation. Use:
   `@Environment(\.accessibilityReduceMotion)` when you have it; otherwise the system setting is read).
 - `Motion.animation(.quick, reduceMotion: reduceMotion)` when the view already reads the environment.
 - `Motion.ambient` only after checking Reduce Motion is off.
+- `.motionTransition(.move(edge: .top).combined(with: .opacity))` instead of `.transition(_:)` for anything that
+  slides, pushes or scales (M12e): under Reduce Motion it becomes a cross-fade. Plain `.transition(.opacity)` is fine.
 
 ## Rules for new screens (M13 onwards)
 
