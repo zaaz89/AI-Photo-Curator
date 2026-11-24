@@ -22,24 +22,25 @@ count() {
     printf '%s\n' "$out" | grep -c . || true
 }
 
-declare -A now
+# One variable per metric (now_padding, ...) instead of an associative array: macOS ships bash 3.2.
 # .padding(8), .padding(.horizontal, 10), .padding(size * 0.07): any padding with a number in it.
-now[padding]=$(count '\.padding\([^)]*[0-9][^)]*\)')
+now_padding=$(count '\.padding\([^)]*[0-9][^)]*\)')
 # cornerRadius: 12 (RoundedRectangle, .rect(cornerRadius:)).
-now[cornerRadius]=$(count 'cornerRadius: *[0-9]')
+now_cornerRadius=$(count 'cornerRadius: *[0-9]')
 # .font(.system(size: 34 ...)): fixed font sizes; use TypeRole.
-now[fontSystemSize]=$(count '\.font\(\.system\(size: *[0-9]')
+now_fontSystemSize=$(count '\.font\(\.system\(size: *[0-9]')
 # Raw animation curves and withAnimation without a Motion name.
-now[animationCurve]=$(( $(count '\.(snappy|spring|bouncy|smooth|easeIn|easeOut|easeInOut|linear|interactiveSpring|interpolatingSpring|timingCurve)\b(\(|[^A-Za-z(])' '\.linear[^A-Za-z(]') \
+now_animationCurve=$(( $(count '\.(snappy|spring|bouncy|smooth|easeIn|easeOut|easeInOut|linear|interactiveSpring|interpolatingSpring|timingCurve)\b(\(|[^A-Za-z(])' '\.linear[^A-Za-z(]') \
     + $(count 'withAnimation *(\([A-Za-z.]*|\{)' 'withAnimation *\(Motion\.') \
     + $(count '\.animation\(\.default') ))
+now() { local v="now_$1"; echo "${!v}"; }
 
 keys=(padding cornerRadius fontSystemSize animationCurve)
 
 if [[ "${1:-}" == "--update" ]]; then
     {
         echo "# Design-token ratchet baseline (scripts/check-design-tokens.sh). Counts may only go down."
-        for k in "${keys[@]}"; do echo "$k=${now[$k]}"; done
+        for k in "${keys[@]}"; do echo "$k=$(now "$k")"; done
     } > "$BASELINE"
     echo "Baseline written to $BASELINE"
 fi
@@ -51,10 +52,10 @@ printf '%-16s %8s %8s\n' metric baseline now
 for k in "${keys[@]}"; do
     base=$(grep -E "^$k=" "$BASELINE" | cut -d= -f2)
     base=${base:-0}
-    mark=""
-    if (( now[$k] > base )); then mark="  <-- grew: use the DesignSystem tokens"; fail=1
-    elif (( now[$k] < base )); then mark="  (lower: run --update to ratchet down)"; fi
-    printf '%-16s %8s %8s%s\n' "$k" "$base" "${now[$k]}" "$mark"
+    mark=""; n=$(now "$k")
+    if (( n > base )); then mark="  <-- grew: use the DesignSystem tokens"; fail=1
+    elif (( n < base )); then mark="  (lower: run --update to ratchet down)"; fi
+    printf '%-16s %8s %8s%s\n' "$k" "$base" "$n" "$mark"
 done
 if (( fail )); then echo "FAIL: hardcoded design values grew (see notes/m12b-design-system.md)"; exit 1; fi
 echo "OK"
