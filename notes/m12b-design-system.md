@@ -84,3 +84,32 @@ could not be compiled when this was written. Plan, one small PR each, compiled a
    odd values (3, 5, 7, 9, 10, 14, 18, 22) go to the nearest token.
 3. Fixed font sizes to `TypeRole`; symbol sizes that must stay fixed get named roles.
 4. After each PR: `scripts/check-design-tokens.sh --update` to lower the baseline.
+
+## Review keymap (M12d)
+
+One keymap for Quick Review and its compare view: `ReviewKeymap` in `mac/Sources/CuratorCore/ReviewKeymap.swift`
+(pure, tested in `ReviewKeymapTests.swift`). The view maps a key press to `ReviewKey`, asks
+`ReviewKeymap.command(for:modifiers:in:)` and returns `.ignored` for anything that is not the review's, so VoiceOver,
+menus and ⌘Z still get their keys (any key with ⌘, ⌥ or ⌃ is never the review's). The keys card is built from
+`ReviewKeymap.entries(_:)`, so card and keys cannot drift.
+
+Two key families (audit #18): the **review family** below acts on the one photo on screen; the **grid family**
+(PhotoGrid, Selection: X, digits, Space = Quick Look, Esc clears the selection) acts on a selection and is documented
+with the grid.
+
+| Key | Quick Review (`.single`) | Compare (`.compare`) |
+|---|---|---|
+| → / ← | keep / leave out, next photo | next / previous frame on the right |
+| ⌫ (and ⌘Z through the menu) | back, decision undone | (nothing) |
+| Space | skip | (nothing) |
+| 1 / 2 | (nothing) | left / right frame goes to the album (`LibraryModel.keep(group:photo:)`) |
+| Z | toggle 100% of the original on the main face (drag to pan) | same, both panes in sync |
+| F / E | favourite / faces large | (nothing) |
+| C | open compare for this moment | close compare |
+| ? | keys card | keys card |
+| Esc | keys card, else close the review | keys card, else close compare |
+
+Zoom (`ZoomMath`, `ReviewZoom.swift`): 100% = one image pixel on one screen pixel (`actualPixelsFactor`), centred on
+the largest main face (`target`), clamped so no empty band shows (`clamp`/`offset`), drag moves the centre (`pan`).
+The original is decoded with ImageIO off the main thread only for the photo on screen
+(`PhotoCurator/ZoomablePhoto.swift`); zoom resets on a new photo, focus loss and scene-phase change.

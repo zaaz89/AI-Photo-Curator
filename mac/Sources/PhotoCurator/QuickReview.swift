@@ -2,8 +2,9 @@ import CuratorCore
 import SwiftUI
 
 /// Quick review (M10): the album one photo at a time, full window. → keeps, ← leaves out, ⌫ or ⌘Z goes back
-/// and undoes, Space skips, F favourite, hold Z zooms on the subject, E shows the faces large, ? the keys.
-/// Every decision is written at once; nothing is ever deleted.
+/// and undoes, Space skips, F favourite, Z toggles 100% on the subject, E shows the faces large, C compares the
+/// frames of a moment, ? the keys. Every key comes from `ReviewKeymap` (M12d); keys it does not know pass
+/// through (VoiceOver, menus). Every decision is written at once; nothing is ever deleted.
 struct QuickReviewView: View {
     @EnvironmentObject var library: LibraryModel
     @State var filter: ReviewFilter
@@ -13,8 +14,17 @@ struct QuickReviewView: View {
     @State private var showFaces = false
     @State private var showKeys = false
     @State private var flash: ReviewAction?
-    @State private var slide: CGFloat = 0
     @State private var flashTask: Task<Void, Never>?
+    /// The last decision, for the direction the photo leaves in (none with Reduce Motion: a cross-fade).
+    @State private var lastAction: ReviewAction?
+    /// What is in the middle of the view at 100% (unit coordinates); shared by both panes of the compare view.
+    @State private var zoomCentre = ZoomPoint.centre
+    /// Compare mode (M12d): two frames of a moment side by side.
+    @State private var compare: CompareSession?
+    /// Compare was opened from Selection: leaving it closes the review too.
+    @State private var compareOnly = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The session goes through a chosen subset (e.g. the skipped photos), not the filter's whole queue.
     @State private var subset = false
     @FocusState private var focused: Bool
@@ -25,68 +35,83 @@ struct QuickReviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                topBar.padding(.horizontal, 22).padding(.top, 14)
-                if session.finished && started {
-                    EndCard(session: session, filter: filter, again: { f, ids in begin(f, ids: ids) }, close: close)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let p = photo {
-                    HStack(alignment: .top, spacing: 0) {
-                        stage(p).frame(maxWidth: .infinity, maxHeight: .infinity)
-                        if let siblings = momentFrames(p), siblings.count > 1 {
-                            // The same people in every frame of this moment, enlarged, next to each other.
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(String(format: library.tr("compareFrames"), siblings.count))
-                                    .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
-                                ScrollView([.vertical, .horizontal]) {
-                                    FaceComparison(frames: siblings, current: p.id, faceSize: showFaces ? 132 : 104) { f in jump(to: f.id) }
+                if let c = compare {
+                    CompareView(session: c, zoomed: zoom, centre: $zoomCentre, pick: pickInCompare,
+                                toggleZoom: toggleZoom, showKeys: { showKeys.toggle() }, close: closeCompare)
+                        .padding(.horizontal, Space.xxl).padding(.vertical, Space.l)
+                } else {
+                    topBar.padding(.horizontal, 22).padding(.top, 14)
+                    if session.finished && started {
+                        EndCard(session: session, filter: filter, again: { f, ids in begin(f, ids: ids) }, close: close)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let p = photo {
+                        HStack(alignment: .top, spacing: 0) {
+                            stage(p).frame(maxWidth: .infinity, maxHeight: .infinity)
+                            if let siblings = momentFrames(p), siblings.count > 1 {
+                                // The same people in every frame of this moment, enlarged, next to each other.
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: Space.m) {
+                                        Text(String(format: library.tr("compareFrames"), siblings.count))
+                                            .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                                        Spacer(minLength: 0)
+                                        Button { openCompare() } label: {
+                                            Label(library.tr("compare") + "  C", systemImage: "rectangle.split.2x1")
+                                        }
+                                        .buttonStyle(.glass).help(library.tr("compareHelp"))
+                                    }
+                                    ScrollView([.vertical, .horizontal]) {
+                                        FaceComparison(frames: siblings, current: p.id, faceSize: showFaces ? 132 : 104) { f in jump(to: f.id) }
+                                    }
+                                    .scrollIndicators(.never)
                                 }
-                                .scrollIndicators(.never)
+                                .padding(16)
+                                .frame(maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
+                                .background(.white.opacity(0.05), in: .rect(cornerRadius: 18))
+                                .padding(.trailing, 22).padding(.vertical, 6)
                             }
-                            .padding(16)
-                            .frame(maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
-                            .background(.white.opacity(0.05), in: .rect(cornerRadius: 18))
-                            .padding(.trailing, 22).padding(.vertical, 6)
                         }
+                        bottom(p).padding(.horizontal, 22).padding(.bottom, 18)
+                    } else if started {
+                        GuideEmpty(symbol: "checkmark.circle", title: library.tr("reviewNothing"), text: library.tr("reviewNothingText"))
+                            .foregroundStyle(.white).frame(maxHeight: .infinity)
                     }
-                    bottom(p).padding(.horizontal, 22).padding(.bottom, 18)
-                } else if started {
-                    GuideEmpty(symbol: "checkmark.circle", title: library.tr("reviewNothing"), text: library.tr("reviewNothingText"))
-                        .foregroundStyle(.white).frame(maxHeight: .infinity)
                 }
             }
-            if showKeys { KeysCard { showKeys = false } }
+            if showKeys { KeysCard(context: compare == nil ? .single : .compare) { showKeys = false } }
         }
         .environment(\.colorScheme, .dark)
         .focusable().focusEffectDisabled().focused($focused)
-        // One decision per press: a held key does not repeat (it would decide photos the owner never saw).
-        .onKeyPress(.rightArrow, phases: .down) { _ in decide(.keep); return .handled }
-        .onKeyPress(.leftArrow, phases: .down) { _ in decide(.leaveOut); return .handled }
-        .onKeyPress(.space, phases: .down) { _ in decide(.skip); return .handled }
-        .onKeyPress(keys: [.delete, .deleteForward, KeyEquivalent("\u{8}"), KeyEquivalent("\u{7F}")], phases: .down) { _ in back(); return .handled }
-        .onKeyPress(.escape) { if showKeys { showKeys = false } else { close() }; return .handled }
-        .onKeyPress(characters: CharacterSet(charactersIn: "fF")) { _ in favourite(); return .handled }
-        .onKeyPress(characters: CharacterSet(charactersIn: "eE")) { _ in showFaces.toggle(); return .handled }
-        .onKeyPress(characters: CharacterSet(charactersIn: "?/")) { _ in showKeys.toggle(); return .handled }
-        .onKeyPress(characters: CharacterSet(charactersIn: "zZ"), phases: [.down, .up]) { press in
-            zoom = press.phase == .down
-            return .handled
+        // One decision per press: only the down phase, so a held key does not repeat (it would decide photos the
+        // owner never saw). Keys the keymap does not know are .ignored and reach VoiceOver and the menus.
+        .onKeyPress(phases: .down) { press in handle(press) }
+        .onAppear {
+            begin(filter, ids: nil); focused = true
+            openRequestedCompare()
         }
-        .onAppear { begin(filter, ids: nil); focused = true }
-        .onChange(of: library.reviewUndoRequest) { _, _ in back() }
+        .onChange(of: library.compareRequest) { _, _ in openRequestedCompare() }
+        .onChange(of: library.reviewUndoRequest) { _, _ in if compare == nil { back() } }
+        // Zoom never sticks: a new photo, focus moving away or the app going to the background resets it (#19).
+        .onChange(of: session.current) { _, _ in zoom = false }
+        .onChange(of: focused) { _, f in if !f { zoom = false } }
+        .onChange(of: scenePhase) { _, _ in zoom = false }
         .onChange(of: library.automationKeyTick) { _, _ in
-            switch library.automationKey {
-            case "right": decide(.keep)
-            case "left": decide(.leaveOut)
-            case "back": back()
-            case "skip": decide(.skip)
-            case "favourite": favourite()
-            case "faces": showFaces.toggle()
-            case "zoom": zoom = true
-            case "unzoom": zoom = false
-            case "keys": showKeys.toggle()
-            case "esc": if showKeys { showKeys = false } else { close() }
-            default: break
+            let k: ReviewKey? = switch library.automationKey {
+            case "right": ReviewKey.right
+            case "left": ReviewKey.left
+            case "back": ReviewKey.delete
+            case "skip": ReviewKey.space
+            case "esc": ReviewKey.escape
+            case "favourite": ReviewKey.character("f")
+            case "faces": ReviewKey.character("e")
+            case "keys": ReviewKey.character("?")
+            case "compare": ReviewKey.character("c")
+            case "pick1": ReviewKey.character("1")
+            case "pick2": ReviewKey.character("2")
+            default: nil
             }
+            if library.automationKey == "zoom" && !zoom { toggleZoom() }
+            if library.automationKey == "unzoom" { zoom = false }
+            if let k, let cmd = ReviewKeymap.command(for: k, in: compare == nil ? .single : .compare) { perform(cmd) }
         }
         // Another album: the ids mean something else. Close without touching any bookmark.
         .onChange(of: library.loadedTripId) { _, _ in library.reviewFilter = nil }
@@ -138,29 +163,33 @@ struct QuickReviewView: View {
     }
 
     func stage(_ p: Photo) -> some View {
-        GeometryReader { g in
-            let anchor = zoomAnchor(p)
-            Thumbnail(url: p.fileURL, side: 2048, fill: false)
-                .aspectRatio(CGFloat(p.width ?? 3) / CGFloat(max(p.height ?? 2, 1)), contentMode: .fit)
-                .clipShape(.rect(cornerRadius: 10))
-                .scaleEffect(zoom ? 3 : 1, anchor: anchor)
-                .frame(width: g.size.width, height: g.size.height)
-                .clipped()
-                .overlay {
-                    // The decision flashes on the photo: green for keep, grey for leave out.
-                    if let flash {
-                        Image(systemName: flash == .keep ? "checkmark.circle.fill" : (flash == .leaveOut ? "xmark.circle.fill" : "forward.fill"))
-                            .font(.system(size: 96, weight: .semibold))
-                            .foregroundStyle(flash == .keep ? StatusColor.kept : (flash == .leaveOut ? Color.white.opacity(0.7) : StatusColor.look))
-                            .shadow(radius: 20)
-                            .transition(.scale.combined(with: .opacity))
-                    }
+        // 100% of the original when zoomed (M12d), the whole photo otherwise; drag pans at 100%.
+        ZoomablePhoto(url: p.fileURL, ratio: Double(p.width ?? 3) / Double(max(p.height ?? 2, 1)), pixelWidth: p.width,
+                      zoomed: zoom && !p.isVideo, centre: $zoomCentre)
+            .overlay {
+                // The decision flashes on the photo: green for keep, grey for leave out.
+                if let flash {
+                    Image(systemName: flash == .keep ? "checkmark.circle.fill" : (flash == .leaveOut ? "xmark.circle.fill" : "forward.fill"))
+                        .font(.system(size: 96, weight: .semibold))
+                        .foregroundStyle(flash == .keep ? StatusColor.kept : (flash == .leaveOut ? Color.white.opacity(0.7) : StatusColor.look))
+                        .shadow(radius: 20)
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale.combined(with: .opacity))
+                        .accessibilityHidden(true)
                 }
-                .offset(x: slide)
-                .motionAnimation(.quick, value: zoom)
-                .id(p.id)
-                .transition(.opacity)
-        }
+            }
+            // VoiceOver (#9): who and what is shown, zoom and the last decision as the value, the review's actions.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(gridTileAccessibilityLabel(p, library.lang))
+            .accessibilityValue(reviewAccessibilityValue(zoomed: zoom && !p.isVideo, flash: flash, library.lang))
+            .accessibilityAddTraits(.isImage)
+            .accessibilityAction(named: Text(library.tr("reviewYes"))) { decide(.keep) }
+            .accessibilityAction(named: Text(library.tr("reviewNo"))) { decide(.leaveOut) }
+            .accessibilityAction(named: Text(library.tr("skip"))) { decide(.skip) }
+            .accessibilityAction(named: Text(library.tr("back"))) { back() }
+            .accessibilityAction(named: Text(library.tr(zoom ? "a11yZoomFit" : "zoomToggle"))) { toggleZoom() }
+            .accessibilityAction(named: Text(library.tr("compare"))) { openCompare() }
+            .id(p.id)
+            .transition(photoTransition)
         .padding(.horizontal, 22).padding(.vertical, 6)
         .overlay(alignment: .topTrailing) {
             if showFaces, let boxes = mainFaces(p), !boxes.isEmpty {
@@ -233,16 +262,19 @@ struct QuickReviewView: View {
         }
         // The decision is recorded and the next photo shown at once, so fast or held keys never land twice on
         // the same photo or skip one; the flash is only a short visual confirmation.
-        withMotion(.quick) {
+        let position = session.index + 1, total = session.queue.count
+        withMotion(.quick, reduceMotion: reduceMotion) {
+            lastAction = action
             session.record(action, previous: previous)
             zoom = false
             flash = action
         }
+        AccessibilityNotification.Announcement(reviewAnnouncement(action, position: position, total: total, library.lang)).post()
         library.setReviewBookmark(filter, session.current)
         flashTask?.cancel()
         flashTask = Task {
             try? await Task.sleep(for: .milliseconds(260))
-            if !Task.isCancelled { withMotion(.fade) { flash = nil } }
+            if !Task.isCancelled { withMotion(.fade, reduceMotion: reduceMotion) { flash = nil } }
         }
     }
 
@@ -250,7 +282,9 @@ struct QuickReviewView: View {
         guard let e = session.back() else { return }
         if e.action != .skip { library.restore(e.photoId, e.previous) }
         library.setReviewBookmark(filter, session.current)
-        flash = nil; slide = 0
+        flash = nil; lastAction = nil; zoom = false
+        let name = library.photo(e.photoId)?.filename ?? ""
+        AccessibilityNotification.Announcement(String(format: library.tr("a11yBackUndone"), name)).post()
     }
 
     func favourite() { if let p = photo { library.toggleFavourite(p.id) } }
@@ -267,18 +301,127 @@ struct QuickReviewView: View {
         library.reviewFilter = nil
     }
 
+    // MARK: keys, zoom and compare (M12d)
+
+    /// One key press through the keymap. Not the review's key: .ignored, so it reaches VoiceOver and the menus.
+    func handle(_ press: KeyPress) -> KeyPress.Result {
+        guard let key = reviewKey(press) else { return .ignored }
+        var mods: ReviewKeyModifiers = []
+        if press.modifiers.contains(.shift) { mods.insert(.shift) }
+        if press.modifiers.contains(.command) { mods.insert(.command) }
+        if press.modifiers.contains(.option) { mods.insert(.option) }
+        if press.modifiers.contains(.control) { mods.insert(.control) }
+        guard let cmd = ReviewKeymap.command(for: key, modifiers: mods, in: compare == nil ? .single : .compare) else {
+            return .ignored
+        }
+        perform(cmd)
+        return .handled
+    }
+
+    func reviewKey(_ press: KeyPress) -> ReviewKey? {
+        let k = press.key
+        if k == .rightArrow { return .right }
+        if k == .leftArrow { return .left }
+        if k == .upArrow { return .up }
+        if k == .downArrow { return .down }
+        if k == .space { return .space }
+        if k == .escape { return .escape }
+        if k == .return { return .returnKey }
+        if k == .delete || k == .deleteForward || press.characters == "\u{8}" || press.characters == "\u{7F}" { return .delete }
+        return press.characters.isEmpty ? nil : .character(press.characters)
+    }
+
+    func perform(_ cmd: ReviewCommand) {
+        // With the keys card open only ? and esc work (no decision on a photo behind the card).
+        if showKeys && cmd != .keys && cmd != .close { return }
+        switch cmd {
+        case .keep: decide(.keep)
+        case .leaveOut: decide(.leaveOut)
+        case .skip: decide(.skip)
+        case .back: back()
+        case .favourite: favourite()
+        case .faces: showFaces.toggle()
+        case .zoom: toggleZoom()
+        case .compare: openCompare()
+        case .keys: showKeys.toggle()
+        case .close:
+            if showKeys { showKeys = false } else if compare != nil { closeCompare() } else { close() }
+        case .pickFirst: pickInCompare(1)
+        case .pickSecond: pickInCompare(2)
+        case .nextChallenger: compare?.next()
+        case .previousChallenger: compare?.previous()
+        }
+    }
+
+    /// Z: 100% of the original on the main face (or the centre), or back to the whole photo.
+    func toggleZoom() {
+        if zoom { zoom = false; return }
+        let target: Photo?
+        if let c = compare { target = library.photo(c.keeper) } else { target = photo }
+        guard let p = target, !p.isVideo else { return }
+        zoomCentre = ZoomMath.target(faces: p.faces?.boxes)
+        zoom = true
+    }
+
+    /// Opens the compare view for the current photo's moment (the current frame on the right), or for `group`.
+    @discardableResult
+    func openCompare(group: Int? = nil) -> Bool {
+        let current = group == nil ? photo : nil
+        let frames: [Photo]
+        if let group {
+            frames = library.photos.filter { $0.duplicate?.group == group && !$0.isVideo }
+        } else if let p = current, let siblings = momentFrames(p) {
+            frames = siblings.filter { !$0.isVideo }
+        } else {
+            frames = []
+        }
+        guard frames.count > 1 else { return false }
+        let keeper = frames.first { $0.duplicate?.keeper == true }?.id
+        compare = CompareSession(frames: frames.map(\.id), keeper: keeper, challenger: current?.id)
+        zoom = false
+        showFaces = false
+        return true
+    }
+
+    /// Selection asked for a moment's compare view.
+    func openRequestedCompare() {
+        guard let g = library.compareRequest else { return }
+        library.compareRequest = nil
+        compareOnly = true
+        if !openCompare(group: g) { compareOnly = false; library.reviewFilter = nil }
+    }
+
+    /// 1 or 2: that frame is the one for the album, through the same call as Selection's "Keep This One".
+    func pickInCompare(_ side: Int) {
+        guard var c = compare, let group = library.photo(c.keeper)?.duplicate?.group else { return }
+        guard let keeper = c.pick(side) else { return }
+        withMotion(.fade, reduceMotion: reduceMotion) { compare = c }
+        library.keep(group: group, photo: keeper)
+        let name = library.photo(keeper)?.filename ?? ""
+        AccessibilityNotification.Announcement(String(format: library.tr("a11yKeeperPicked"), name)).post()
+    }
+
+    func closeCompare() {
+        compare = nil
+        zoom = false
+        if compareOnly { compareOnly = false; library.reviewFilter = nil }
+        focused = true
+    }
+
+    /// The photo leaves in the direction of its key (→ keep, ← leave out); with Reduce Motion, or for a skip or
+    /// Back, it cross-fades.
+    var photoTransition: AnyTransition {
+        guard !reduceMotion, let a = lastAction, a != .skip else { return .opacity }
+        let removal = AnyTransition.opacity.combined(with: .offset(x: a == .keep ? Space.huge : -Space.huge))
+        return .asymmetric(insertion: .opacity, removal: removal)
+    }
+
     // MARK: helpers
 
     func mainFaces(_ p: Photo) -> [Photo.Faces.Box]? {
         guard let boxes = p.faces?.boxes else { return nil }
         let main = boxes.filter { $0.main != false }
         return Array((main.isEmpty ? boxes : main).prefix(4))
-    }
-
-    /// Hold Z zooms on the main face, else on the centre.
-    func zoomAnchor(_ p: Photo) -> UnitPoint {
-        guard let b = mainFaces(p)?.max(by: { $0.w * $0.h < $1.w * $1.h }) else { return .center }
-        return UnitPoint(x: b.x + b.w / 2, y: b.y + b.h / 2)
     }
 
     func momentFrames(_ p: Photo) -> [Photo]? {
@@ -330,16 +473,18 @@ struct EndCard: View {
 /// Every key of the quick review on one card.
 struct KeysCard: View {
     @EnvironmentObject var library: LibraryModel
+    var context: ReviewContext = .single
     let close: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(library.tr("reviewKeys")).font(.title2.weight(.bold))
-            ForEach([("→", "keyKeep"), ("←", "keyLeaveOut"), ("⌫  ⌘Z", "keyBack"), ("␣", "keySkip"), ("F", "keyFavourite"),
-                     ("Z", "keyZoom"), ("E", "keyFaces"), ("?", "keyKeys"), ("esc", "keyClose")], id: \.0) { k, t in
+            // The same table the keys are handled with (`ReviewKeymap`), so the card can't drift.
+            ForEach(ReviewKeymap.entries(context), id: \.textKey) { e in
                 HStack {
-                    Text(k).font(.system(.body, design: .rounded).weight(.semibold)).frame(width: 80, alignment: .leading)
-                    Text(library.tr(t)).foregroundStyle(.secondary)
+                    Text(e.keys).font(.system(.body, design: .rounded).weight(.semibold)).frame(width: 80, alignment: .leading)
+                    Text(library.tr(e.textKey)).foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
             }
             Button(library.tr("done"), action: close).buttonStyle(.glassProminent).padding(.top, 6)
         }

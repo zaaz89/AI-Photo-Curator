@@ -81,7 +81,11 @@ struct MomentsPanel: View {
         .onKeyPress(.downArrow) { moveMoment(1); return .handled }
         .onKeyPress(.return) { keepAndNext(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "fF")) { _ in keepToo(); return .handled }
-        .task(id: "\(library.tripId ?? "")\(library.analysing)") { await load() }
+        // Also after the quick review or compare view closes: keepers picked there show here (M12d).
+        .task(id: "\(library.tripId ?? "")\(library.analysing)\(library.reviewFilter == nil)") {
+            if library.reviewFilter == nil { await library.writesSettled() }
+            await load()
+        }
     }
 
     var list: some View {
@@ -108,6 +112,9 @@ struct MomentsPanel: View {
                         .foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
+                // M12d: the moment's frames two at a time, at 100%, 1 or 2 picks (the quick review's compare view).
+                Button { library.startCompare(group: g.id) } label: { Label(library.tr("compare"), systemImage: "rectangle.split.2x1") }
+                    .buttonStyle(.glass).controlSize(.large).help(library.tr("compareHelp")).disabled(g.members.count < 2)
                 Button(library.tr("acceptRest")) { acceptRest() }.buttonStyle(.glass).controlSize(.large)
                     .help(library.tr("acceptRestHelp"))
             }

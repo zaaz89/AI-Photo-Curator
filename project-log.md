@@ -205,3 +205,38 @@ Fixes (minimal, no design changes): M12b `scripts/check-design-tokens.sh` used `
 Results: M12b 67 Swift tests, M12c 74 Swift tests, all pass, no warnings in changed files; `scripts/build-mac-app.sh` OK on both; `uv run pytest` 156 passed; token check OK.
 PRs: #16 "M12b: design system + UX audit" (base `claude/m12-sorting-stage`), #17 "M12c: UX P0 fixes" (base `claude/m12b-design-system`). Merge in order #15, #16, #17.
 Open: nothing was looked at in the app. Visual checks are listed in each PR (stage timing with named springs, new status colours in light/dark, Reduce Motion, "Left out" wording, stopped/failed states, Skip, grid above 400, undo toast, VoiceOver).
+
+### 2026-11-24 — M12d: UX audit P1 for Quick Review and compare (#9, #11, #12, #18, #19) (Claude (Cowork))
+Branch `claude/m12d-ux-p1` (on top of M12c). Another agent edits the grid, stage, export, album home and menus in
+parallel; this one only touched Quick Review, a new compare view, and minimal hooks in Selection and LibraryModel.
+- #12 + #19 Real 100%: Z now toggles (no key-up to lose) between the whole photo and 100% of the original, decoded with
+  ImageIO (`CGImageSourceCreateThumbnailAtIndex` at full size, orientation applied, read only) off the main thread, only
+  for the photo on screen. Centred on the largest main face (no saliency in the model yet), drag pans, the 2048 px
+  thumbnail is shown enlarged with a spinner until the original is ready, and stays with a note if it can't be decoded.
+  Resets on photo change, focus loss and scene-phase change. `PhotoCurator/ZoomablePhoto.swift`, maths in
+  `CuratorCore/ReviewZoom.swift` (`ZoomMath`).
+- #11 Compare: `PhotoCurator/CompareView.swift` + `CompareSession` (CuratorCore). Keeper left, challenger right, synced
+  zoom and pan (one shared centre), 1/2 pick through `LibraryModel.keep(group:photo:)` (the call Selection uses),
+  ←/→ cycle the challenger, Esc or C exits. Opened with C or the "Compare" button in Quick Review's moment panel, and
+  from Selection's moment card ("Compare", `LibraryModel.startCompare(group:)`: the quick review opens on the compare
+  view and closes with it; Selection reloads its moments after pending writes).
+- #9 VoiceOver: main photo label = `gridTileAccessibilityLabel`; value = zoom state + decision while it flashes;
+  named actions keep / leave out / skip / back / zoom / compare; announcement after each decision ("Kept, 12 of 80"),
+  after Back and after a pick. Keys not in the keymap (up/down, anything with ⌘⌥⌃) are no longer swallowed.
+- #18 (review side): `ReviewKeymap` in CuratorCore, used by Quick Review, compare, the automation channel and the
+  keys card; documented in `notes/m12b-design-system.md` ("Review keymap"). Grid side left to the other agent.
+- Reduce Motion: the decision flash scales only without Reduce Motion (cross-fade with it); the photo leaves in the
+  direction of its key (→ / ←) only without Reduce Motion.
+- Automation keys added: `compare`, `pick1`, `pick2`. 26 new strings EN + SL, `keyZoom` reworded (toggle, not hold).
+Tests: `ReviewKeymapTests.swift` (12 tests: keymap, pass-through, keys card, announcements, zoom target/fit/100%/clamp/
+pan, compare cycling and picks). Token check OK (cornerRadius 34 → 33, baseline not lowered to avoid a conflict with the
+parallel branch).
+NOT compiled, NOT run (Linux container, no Swift toolchain): run `scripts/test-mac.sh` and `scripts/build-mac-app.sh`.
+Check visually (test-10, near-duplicate pair): Z on a Sony A7 IV file shows real 100% (pixel-sharp, not the blurry
+thumbnail), spinner then sharp; centred on the face; drag pans and stops at the edges; Z again fits; zoom resets after
+→, after Cmd+Tab and after clicking the filter picker. C on the pair: two panes, Z zooms both on the same spot, drag in
+one pans both, ← → change the right frame, 2 makes it the keeper (badge moves left, Selection shows "chosen by you"
+after closing), Esc returns. Selection → "Compare" → Esc returns to Selection. Reduce Motion on: flash and photo change
+cross-fade. VoiceOver: the photo reads file, time, owner, status; Kept/Left out is announced; VO-arrows still move.
+Memory: a 61 MP original is about 240 MB while zoomed (two in compare); check Activity Monitor on the 236 folder only if
+the owner asks.

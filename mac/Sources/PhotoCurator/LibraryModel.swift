@@ -491,6 +491,19 @@ enum AssistantSheet: String, Identifiable {
     var decisionsCount: Int { photos.filter(needsDecision).count }
     func startReview(_ f: ReviewFilter = .decisions) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }
 
+    /// The moment (duplicate group id) whose compare view Selection asked for (M12d). The quick review opens on
+    /// that compare view and closes with it.
+    @Published var compareRequest: Int?
+    func startCompare(group: Int) {
+        guard loadedTripId != nil, !photos.isEmpty else { return }
+        compareRequest = group
+        if reviewFilter == nil { reviewFilter = .decisions }
+    }
+
+    /// Returns once every queued write reached the engine and the album was reloaded (M12d: Selection reloads
+    /// its moments after keepers were picked in the compare view).
+    func writesSettled() async { await writeQueue?.value }
+
     /// A photo's marks before a quick-review decision (Back restores them exactly).
     func marksOf(_ id: Int) -> [String: MarkValue] {
         guard let p = photo(id) else { return [:] }

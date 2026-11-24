@@ -9,7 +9,8 @@ import Foundation
 ///   photocurator://replay                                   (the sorting stage plays again)
 ///   photocurator://album?id=<album id>
 ///   photocurator://review?filter=decisions|all|leftOut      photocurator://review?close=1
-///   photocurator://key?k=right|left|back|skip|favourite|faces|zoom|unzoom|keys|esc
+///   photocurator://key?k=right|left|back|skip|favourite|faces|zoom|unzoom|keys|esc|compare|pick1|pick2
+///   (keys go through `ReviewKeymap`, so in the compare view right/left change the frame on the right)
 ///   photocurator://window?w=1500&h=980
 ///   photocurator://reload
 public enum AutomationCommand: Equatable, Sendable {
@@ -24,7 +25,8 @@ public enum AutomationCommand: Equatable, Sendable {
 
     public static let scheme = "photocurator"
     public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut", "settings", "sorting"]
-    public static let keys: Set<String> = ["right", "left", "back", "skip", "favourite", "faces", "zoom", "unzoom", "keys", "esc"]
+    public static let keys: Set<String> = ["right", "left", "back", "skip", "favourite", "faces", "zoom", "unzoom", "keys", "esc",
+                                             "compare", "pick1", "pick2"]
 
     /// nil for anything that is not a known, well-formed command.
     public init?(url: URL) {
