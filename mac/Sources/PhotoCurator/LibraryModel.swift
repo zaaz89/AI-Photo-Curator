@@ -86,14 +86,19 @@ enum AssistantSheet: String, Identifiable {
     @Published var searchFocusRequest = 0               // ⌘F: the window moves focus to the search field
     @Published private(set) var searchResult: SearchResult? { didSet { recompute() } }
     @Published private(set) var searching = false
-    @Published var settings: EngineSettings?
+    @Published var settings: EngineSettings? {
+        // Remembered so the start screen speaks the owner's language before the engine answers (M12e).
+        didSet { if let l = settings?.uiLanguage { UserDefaults.standard.set(l, forKey: "uiLanguage") } }
+    }
     /// The measured speed of this Mac for the time estimate (nil before the first analysis).
     @Published var speed: EngineSpeed?
     /// The sorting stage should play again from the folders when it next shows (or now, when it shows already).
     @Published var pendingReplay = false
     /// Changes after an analysis of this album ended and its photos were read again (the stage's cue).
     @Published private(set) var analysisFinishedTick = 0
-    @Published var message: String?                     // transient error or info for the user
+    @Published var message: String?                     // transient info for the user ("moved to …")
+    /// The error on screen (M12e): a human sentence, Details and Try Again; stays until dismissed.
+    @Published var errorBanner: ErrorBannerInfo?
     /// The last reversible action, confirmed with an Undo button (`UndoToast`, M12c).
     @Published var undoToast: UndoToastInfo?
     @Published private(set) var job = JobStatus(running: false, status: "")
@@ -108,7 +113,7 @@ enum AssistantSheet: String, Identifiable {
 
     init(api: APIClient) { self.api = api }
 
-    var lang: Lang { Lang(rawValue: settings?.uiLanguage ?? "en") ?? .en }
+    var lang: Lang { Lang(rawValue: settings?.uiLanguage ?? UserDefaults.standard.string(forKey: "uiLanguage") ?? "en") ?? .en }
     func tr(_ key: String) -> String { Strings.text(key, lang) }
     /// A text for a value from the engine; the engine's own words when there is no translation.
     func trOr(_ key: String, _ fallback: String) -> String { Strings.table[key] == nil ? fallback : Strings.text(key, lang) }
@@ -129,7 +134,7 @@ enum AssistantSheet: String, Identifiable {
             if tripId == nil || !trips.contains(where: { $0.id == tripId }) {
                 tripId = trips.first(where: { $0.id == saved })?.id ?? trips.first?.id
             }
-        } catch { message = describe(error) }
+        } catch { report(error) { Task { await self.loadTrips() } } }
     }
 
     private func tripChanged() {
@@ -173,7 +178,7 @@ enum AssistantSheet: String, Identifiable {
             sources = src
             loadedTripId = tripId
             trimSelection()
-        } catch { message = describe(error) }
+        } catch { report(error) { Task { await self.reload() } } }
     }
 
     // MARK: what the grid shows
@@ -329,7 +334,7 @@ enum AssistantSheet: String, Identifiable {
         writeGeneration += 1
         writeQueue = Task { [weak self] in
             await previous?.value
-            do { try await write(api) } catch { self?.message = self?.describe(error) }
+            do { try await write(api) } catch { self?.report(error) }
             guard let self else { return }
             self.pendingWrites -= 1
             if self.pendingWrites == 0 { await self.reload() }
@@ -394,7 +399,7 @@ enum AssistantSheet: String, Identifiable {
         guard let trip, !n.isEmpty, n != trips.first(where: { $0.id == trip })?.name else { return }
         Task {
             do { try await api.renameAlbum(trip: trip, name: n); trips = (try? await api.trips()) ?? trips }
-            catch { message = describe(error) }
+            catch { report(error) }
         }
     }
 
@@ -489,7 +494,10 @@ enum AssistantSheet: String, Identifiable {
 
     /// How many photos need a yes or no (the quick review's default).
     var decisionsCount: Int { photos.filter(needsDecision).count }
-    func startReview(_ f: ReviewFilter = .decisions) { if loadedTripId != nil && !photos.isEmpty { reviewFilter = f } }
+    func startReview(_ f: ReviewFilter = .decisions) {
+        reviewSubset = nil                                  // a plain review goes through the filter's whole queue
+        if loadedTripId != nil && !photos.isEmpty { reviewFilter = f }
+    }
 
     /// The moment (duplicate group id) whose compare view Selection asked for (M12d). The quick review opens on
     /// that compare view and closes with it.
@@ -607,7 +615,9 @@ enum AssistantSheet: String, Identifiable {
                 await reload()
                 await pollOnce()
             }
-            if !problems.isEmpty { message = problems.joined(separator: " · ") }
+            if !problems.isEmpty {
+                errorBanner = ErrorBannerInfo(error: HumanError(kind: .invalid, message: problems.joined(separator: "\n"), details: ""))
+            }
         }
     }
 
@@ -644,7 +654,7 @@ enum AssistantSheet: String, Identifiable {
                 try await api.move(trip: tripId, ids: ids, toEvent: event, newName: newName)
                 message = "\(ids.count) → \(newName ?? events.first { $0.id == event }?.name ?? "")"
                 await reload()
-            } catch { message = describe(error) }
+            } catch { report(error) }
         }
     }
 
@@ -673,7 +683,7 @@ enum AssistantSheet: String, Identifiable {
         } catch {
             // A half-made album (a folder was refused) is removed so it does not linger unseen.
             if let id = created, tripId != id { _ = try? await api.finishAlbum(trip: id) }
-            message = describe(error)
+            report(error)
             return false
         }
     }
@@ -725,7 +735,7 @@ enum AssistantSheet: String, Identifiable {
             tripId = trips.first?.id
             let mb = max(1, Int((Double(r.freedBytes) / 1_048_576).rounded()))
             message = String(format: tr("albumFinished"), name, mb)
-        } catch { message = describe(error) }
+        } catch { report(error) { Task { await self.finishAlbum() } } }
     }
 
     // MARK: search
@@ -750,7 +760,7 @@ enum AssistantSheet: String, Identifiable {
                 pendingSearch = nil
                 searchResult = r
                 destination = .search
-            } catch { message = describe(error) }
+            } catch { report(error) { [weak self] in self?.runSearch() } }
         }
     }
 
@@ -765,9 +775,16 @@ enum AssistantSheet: String, Identifiable {
 
     func analyse() {
         guard let tripId else { return }
-        Task { do { try await api.startAnalysis(trip: tripId); await pollOnce() } catch { message = describe(error) } }
+        Task { do { try await api.startAnalysis(trip: tripId); await pollOnce() } catch { report(error) { [weak self] in self?.analyse() } } }
     }
-    func stopJob() { guard let tripId else { return }; Task { try? await api.stopJob(trip: tripId) } }
+    /// Stops the running job (analysis or export); a failure to stop is shown, never swallowed (M12e).
+    func stopJob() {
+        guard let tripId else { return }
+        Task {
+            do { try await api.stopJob(trip: tripId); await pollOnce() }
+            catch { report(error) { [weak self] in self?.stopJob() } }
+        }
+    }
 
     private func startPolling() {
         pollTask?.cancel()
@@ -804,7 +821,7 @@ enum AssistantSheet: String, Identifiable {
     func save(_ changes: [String: Any], then: (() async -> Void)? = nil) {
         guard let json = try? JSONSerialization.data(withJSONObject: changes) else { return }
         Task {
-            do { settings = try await api.saveSettings(json: json); await then?() } catch { message = describe(error) }
+            do { settings = try await api.saveSettings(json: json); await then?() } catch { report(error) }
         }
     }
 
@@ -820,12 +837,48 @@ enum AssistantSheet: String, Identifiable {
         save(["quality_strictness": level]) { [weak self] in await self?.reload() }
     }
 
-    func describe(_ error: Error) -> String {
-        switch error {
-        case APIError.engine(let e): return e
-        case APIError.unreachable: return tr("engineUnreachable")
-        case APIError.http(let c): return "HTTP \(c)"
-        default: return error.localizedDescription
-        }
+    /// The human sentence for an error (CuratorCore `humanError`); the raw text goes to the banner's Details.
+    func describe(_ error: Error) -> String { humanError(error, lang).message }
+
+    /// Shows an error in the sticky banner (M12e, #8), with Try Again when `retry` is given.
+    func report(_ error: Error, retry: (@MainActor () -> Void)? = nil) {
+        errorBanner = ErrorBannerInfo(error: humanError(error, lang), retry: retry)
     }
+
+    // MARK: M12e flow helpers
+
+    /// A tray of the sorting stage to open when the stage shows (the funnel's "screenshots" opens "Left out").
+    @Published var pendingTray: SortVerdict?
+    func openTray(_ tray: SortVerdict) {
+        reviewFilter = nil
+        pendingTray = tray
+        destination = .sorting
+    }
+
+    /// Photos the next quick review goes through instead of the filter's queue (a tray's photos). The review
+    /// takes them once with `takeReviewSubset()` when it starts.
+    private(set) var reviewSubset: [Int]?
+    func startReview(_ f: ReviewFilter, ids: [Int]) {
+        guard !ids.isEmpty, loadedTripId != nil, !photos.isEmpty else { return }
+        reviewSubset = ids
+        reviewFilter = f
+    }
+    func takeReviewSubset() -> [Int]? {
+        defer { reviewSubset = nil }
+        return reviewSubset
+    }
+
+    /// Quick Look on photos that are not the grid's (the stage, a tray), starting at `id`.
+    func quickLook(ids: [Int], at id: Int) {
+        let urls = ids.compactMap(photo).map(\.fileURL)
+        guard let url = photo(id)?.fileURL, !urls.isEmpty else { return }
+        if quickLookURL == url { quickLookURL = nil; return }
+        quickLookItems = urls
+        quickLookURL = url
+    }
+
+    /// K in the grid: the targets go back into the album (same as Put back), confirmed with Undo.
+    func keepTargets() { offerUndo(.putBack, count: setInAlbum(targets.map(\.id), true)) }
+    /// X in the grid: the targets leave the album (no toggle: K brings them back), confirmed with Undo.
+    func leaveOutTargets() { offerUndo(.leaveOut, count: setInAlbum(targets.map(\.id), false)) }
 }

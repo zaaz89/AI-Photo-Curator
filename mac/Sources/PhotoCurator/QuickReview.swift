@@ -85,7 +85,7 @@ struct QuickReviewView: View {
         // owner never saw). Keys the keymap does not know are .ignored and reach VoiceOver and the menus.
         .onKeyPress(phases: .down) { press in handle(press) }
         .onAppear {
-            begin(filter, ids: nil); focused = true
+            begin(filter, ids: library.takeReviewSubset()); focused = true
             openRequestedCompare()
         }
         .onChange(of: library.compareRequest) { _, _ in openRequestedCompare() }

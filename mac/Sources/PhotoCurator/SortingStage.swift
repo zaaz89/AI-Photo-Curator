@@ -356,6 +356,8 @@ struct SortingStage: View {
     @StateObject private var stage = StageModel()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var openTray: SortVerdict?
+    /// The album tile with keyboard focus once the stage has settled (M12e, #14): arrows move, Space is Quick Look.
+    @FocusState private var focusedTile: Int?
 
     var body: some View {
         GeometryReader { g in
@@ -374,7 +376,7 @@ struct SortingStage: View {
                     ForEach(Array(library.sources.enumerated()), id: \.element.id) { i, s in
                         SourceChip(owner: s.owner, count: scene.bySource[s.id]?.arrived ?? 0, total: scene.bySource[s.id]?.total ?? 0)
                             .position(geo.sourcePoint(i))
-                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .motionTransition(.move(edge: .leading).combined(with: .opacity))
                     }
                 }
                 if grid {
@@ -396,26 +398,36 @@ struct SortingStage: View {
                                  arrowEdge: .top) { TrayContents(verdict: v, ids: scene.trays[v] ?? []) { openTray = nil } }
                 }
                 ForEach(stage.shown) { p in
-                    if let f = frames[p.id] {
-                        StageTile(photo: p, image: stage.images[p.id], size: f.rect.size,
-                                  verdict: stage.revealed.contains(p.id) ? stage.verdicts[p.id] : nil,
-                                  scanning: stage.scanning.contains(p.id) || sweep.contains(p.id),
-                                  lifted: stage.lifting.contains(p.id),
-                                  stacked: scene.stackedBehind[p.id] ?? 0, lang: library.lang)
-                            .rotationEffect(.degrees(f.rotation))
-                            .position(x: f.rect.midX, y: f.rect.midY)
-                            .zIndex(f.z)
-                            .opacity(scene.places[p.id] == .source || f.hidden ? 0 : 1)
-                            .allowsHitTesting(!f.hidden)
-                            .accessibilityHidden(scene.places[p.id] == .source || f.hidden)
-                            .animation(reduceMotion ? nil : Motion.settle, value: f)
-                            .onTapGesture { tapped(p, scene) }
-                            .accessibilityAction { tapped(p, scene) }
-                    }
+                    if let f = frames[p.id] { tile(p, f, scene, sweep: sweep) }
                 }
             }
         }
         .clipped()
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { press in
+            guard stage.settled, let id = focusedTile else { return .ignored }
+            let order = albumOrder()
+            guard let i = order.firstIndex(of: id), !order.isEmpty else { return .ignored }
+            let step = press.key == .leftArrow || press.key == .upArrow ? -1 : 1
+            focusedTile = order[max(0, min(order.count - 1, i + step))]
+            return .handled
+        }
+        .onKeyPress(.space) {
+            guard stage.settled, let id = focusedTile else { return .ignored }
+            library.quickLook(ids: albumOrder(), at: id)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            guard stage.settled, let id = focusedTile, let p = library.photo(id) else { return .ignored }
+            tapped(p, makeScene())
+            return .handled
+        }
+        // The funnel's "screenshots" (and any other caller) opens a tray when the stage shows (M12e, #17).
+        .task(id: library.pendingTray) {
+            guard let t = library.pendingTray else { return }
+            try? await Task.sleep(for: .milliseconds(350))         // the tray card is laid out before its popover opens
+            openTray = t
+            library.pendingTray = nil
+        }
         .onAppear { stage.motion = !reduceMotion; stage.attach(library) }
         .onChange(of: library.photos) { _, _ in stage.sync() }
         .onChange(of: library.tripId) { _, _ in stage.attach(library) }
@@ -543,9 +555,50 @@ struct SortingStage: View {
         return Set(ordered[max(0, at - 2)...at].map(\.id))
     }
 
+    /// One flying tile (split out of `body` to keep it quick to type-check).
+    private func tile(_ p: Photo, _ f: TileFrame, _ scene: StageScene, sweep: Set<Int>) -> some View {
+        StageTile(photo: p, image: stage.images[p.id], size: f.rect.size,
+                  verdict: stage.revealed.contains(p.id) ? stage.verdicts[p.id] : nil,
+                  scanning: stage.scanning.contains(p.id) || sweep.contains(p.id),
+                  lifted: stage.lifting.contains(p.id),
+                  stacked: scene.stackedBehind[p.id] ?? 0, lang: library.lang,
+                  focused: focusedTile == p.id)
+            .rotationEffect(.degrees(f.rotation))
+            .position(x: f.rect.midX, y: f.rect.midY)
+            .zIndex(f.z)
+            .opacity(scene.places[p.id] == .source || f.hidden ? 0 : 1)
+            .allowsHitTesting(!f.hidden)
+            .accessibilityHidden(scene.places[p.id] == .source || f.hidden)
+            .animation(reduceMotion ? nil : Motion.settle, value: f)
+            // Settled album tiles take the keyboard (Tab, arrows, Space); a click previews (M12e, #14).
+            .focusable(stage.settled && scene.places[p.id] == .album)
+            .focusEffectDisabled()
+            .focused($focusedTile, equals: p.id)
+            .onTapGesture { tapped(p, scene) }
+            .accessibilityAction { tapped(p, scene) }
+            .accessibilityAction(named: library.tr("quickLook")) { preview(p.id, scene) }
+    }
+
+    /// A tray photo opens its tray, a photo to check opens "Have a look"; any other album photo is previewed in
+    /// Quick Look (M12e, #14: no dead end).
     private func tapped(_ p: Photo, _ scene: StageScene) {
         if case .tray(let v, _) = scene.places[p.id] { openTray = v; return }
-        if stage.revealed.contains(p.id) && stage.verdicts[p.id] == .check { openTray = .check }
+        if stage.revealed.contains(p.id) && stage.verdicts[p.id] == .check { openTray = .check; return }
+        if scene.places[p.id] == .album {
+            if stage.settled { focusedTile = p.id }
+            preview(p.id, scene)
+        }
+    }
+
+    private func preview(_ id: Int, _ scene: StageScene) {
+        let ids = stage.shown.filter { scene.places[$0.id] == .album }.map(\.id)
+        library.quickLook(ids: ids.isEmpty ? [id] : ids, at: id)
+    }
+
+    /// The album photos in the order they are laid out (by day, then time), for the arrow keys and Quick Look.
+    private func albumOrder() -> [Int] {
+        let scene = makeScene()
+        return albumItems(scene).map(\.id)
     }
 
     private func dayLabel(_ day: String) -> String {
@@ -610,17 +663,23 @@ struct StageBackground: View {
 }
 
 private struct ScanBand: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var x: CGFloat = -1.2
     var body: some View {
-        GeometryReader { g in
-            LinearGradient(colors: [.clear, .white.opacity(0.55), stageColors[1].opacity(0.35), .clear],
-                           startPoint: .leading, endPoint: .trailing)
-                .frame(width: g.size.width * 0.55)
-                .offset(x: x * g.size.width)
-                .blendMode(.plusLighter)
+        if reduceMotion {
+            // Reduce Motion (M12e, #10): the photo being analysed is lit, nothing sweeps across it.
+            Rectangle().fill(stageColors[1].opacity(0.22)).blendMode(.plusLighter).allowsHitTesting(false)
+        } else {
+            GeometryReader { g in
+                LinearGradient(colors: [.clear, .white.opacity(0.55), stageColors[1].opacity(0.35), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: g.size.width * 0.55)
+                    .offset(x: x * g.size.width)
+                    .blendMode(.plusLighter)
+            }
+            .onAppear { withMotion(.sweep, reduceMotion: reduceMotion) { x = 1.4 } }
+            .allowsHitTesting(false)
         }
-        .onAppear { withMotion(.sweep) { x = 1.4 } }
-        .allowsHitTesting(false)
     }
 }
 
@@ -633,6 +692,8 @@ private struct StageTile: View {
     let lifted: Bool
     let stacked: Int
     let lang: Lang
+    /// Keyboard focus (M12e, #14): a visible ring, since the system focus effect is off on rotated tiles.
+    var focused = false
 
     var corner: CGFloat { min(12, size.height * 0.12) }
 
@@ -650,6 +711,11 @@ private struct StageTile: View {
                 .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(Color.white.opacity(0.14)),
                               lineWidth: verdict == .check ? 2 : 1)
         }
+        .overlay {
+            if focused {
+                RoundedRectangle(cornerRadius: corner).strokeBorder(StatusColor.accent, lineWidth: 3)
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if let verdict, verdict != .stacked, size.height > 34 {
                 Image(systemName: symbol(verdict))
@@ -657,7 +723,7 @@ private struct StageTile: View {
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(verdict == .check ? StatusColor.onLook : .white, color(verdict))
                     .shadow(radius: 3).padding(4)
-                    .transition(.scale.combined(with: .opacity))
+                    .motionTransition(.scale.combined(with: .opacity))
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -665,7 +731,7 @@ private struct StageTile: View {
                 Text("×\(stacked + 1)").font(.system(size: 11, weight: .bold, design: .rounded))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.ultraThinMaterial, in: .capsule).padding(5)
-                    .transition(.scale.combined(with: .opacity))
+                    .motionTransition(.scale.combined(with: .opacity))
             }
         }
         .overlay(alignment: .bottomLeading) {
@@ -686,6 +752,8 @@ private struct StageTile: View {
         .scaleEffect(lifted ? 1.08 : 1)
         .accessibilityElement()
         .accessibilityLabel(stageTileAccessibilityLabel(photo, verdict: verdict, stacked: stacked, lang))
+        .accessibilityHint(Strings.text("stageTileHint", lang))
+        .accessibilityAddTraits(.isButton)
     }
 
     func symbol(_ v: SortVerdict) -> String {
@@ -710,6 +778,8 @@ private struct StageGrid: View {
     let ids: [Int]
     let stackedBehind: [Int: Int]
     let open: (SortVerdict) -> Void
+    /// Keyboard focus on a tile (M12e, #14): Tab reaches the tiles, arrows move, Space is Quick Look.
+    @FocusState private var focused: Int?
 
     private struct Day: Identifiable { let id: String; var ids: [Int] }
 
@@ -741,6 +811,17 @@ private struct StageGrid: View {
             .padding(.bottom, Space.xl)
         }
         .scrollIndicators(.visible)
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { press in
+            guard let id = focused, let i = ids.firstIndex(of: id) else { return .ignored }
+            let step = press.key == .leftArrow || press.key == .upArrow ? -1 : 1
+            focused = ids[max(0, min(ids.count - 1, i + step))]
+            return .handled
+        }
+        .onKeyPress(.space) {
+            guard let id = focused else { return .ignored }
+            library.quickLook(ids: ids, at: id)
+            return .handled
+        }
     }
 
     func tile(_ p: Photo) -> some View {
@@ -769,12 +850,28 @@ private struct StageGrid: View {
                         .padding(Space.xs)
                 }
             }
+            .overlay {
+                if focused == p.id {
+                    RoundedRectangle(cornerRadius: Radius.small).strokeBorder(StatusColor.accent, lineWidth: 3)
+                }
+            }
             .contentShape(.rect)
-            .onTapGesture { if verdict == .check { open(.check) } }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($focused, equals: p.id)
+            // A photo to check opens "Have a look"; any other photo is previewed (M12e, #14: no dead end).
+            .onTapGesture { focused = p.id; activate(p, verdict) }
             .accessibilityElement()
             .accessibilityLabel(stageTileAccessibilityLabel(p, verdict: verdict, stacked: stacked, library.lang))
-            .accessibilityAddTraits(verdict == .check ? .isButton : [])
-            .accessibilityAction { if verdict == .check { open(.check) } }
+            .accessibilityHint(library.tr("stageTileHint"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { activate(p, verdict) }
+    }
+}
+
+extension StageGrid {
+    func activate(_ p: Photo, _ verdict: SortVerdict?) {
+        if verdict == .check { open(.check) } else { library.quickLook(ids: ids, at: p.id) }
     }
 }
 
@@ -835,7 +932,7 @@ private struct StageHeader: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.7)
-                        .id(title).transition(.push(from: .bottom).combined(with: .opacity))
+                        .id(title).motionTransition(.push(from: .bottom).combined(with: .opacity))
                     Text(subtitle)
                         .foregroundStyle(.white.opacity(0.65)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
@@ -991,28 +1088,38 @@ private struct TrayCard: View {
     }
 }
 
-/// A tray opened: its photos with the reason, put back one or all; "Have a look" goes to the quick review.
+/// A tray opened: its photos with the reason, put back one or all; "Have a look" reviews exactly these photos.
+/// Keyboard (M12e, #13): arrows move between photos, Space opens Quick Look on the focused one, Esc closes.
 private struct TrayContents: View {
     @EnvironmentObject var library: LibraryModel
     let verdict: SortVerdict
     let ids: [Int]
     let close: () -> Void
+    @FocusState private var focused: Int?
+    /// Cells per row (fixed, so ↑ / ↓ move by a row).
+    private let columns = 3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(library.tr("tray_" + verdict.rawValue)).font(.title3.weight(.semibold))
             Text(library.tr("trayHint_" + verdict.rawValue)).font(.callout).foregroundStyle(.secondary)
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 14) {
-                    ForEach(ids, id: \.self) { id in
-                        if let p = library.photo(id) { cell(p) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.l), count: columns), spacing: Space.xl) {
+                        ForEach(ids, id: \.self) { id in
+                            if let p = library.photo(id) { cell(p).id(id) }
+                        }
                     }
+                    .padding(Space.xs)
                 }
+                .frame(minHeight: 220, maxHeight: 560)
+                .onChange(of: focused) { _, id in if let id { withMotion(.quick) { proxy.scrollTo(id) } } }
             }
-            .frame(minHeight: 180, maxHeight: 460)
+            Text(library.tr("trayKeys")).font(TypeRole.caption).foregroundStyle(.secondary)
             HStack {
                 if verdict == .check {
-                    Button(library.tr("quickReview")) { close(); library.startReview() }.buttonStyle(.borderedProminent)
+                    Button(library.tr("reviewThese")) { close(); library.startReview(.decisions, ids: ids) }
+                        .buttonStyle(.borderedProminent)
                 } else {
                     Button(library.tr("putBackAll")) { library.offerUndo(.putBack, count: library.setInAlbum(ids, true)) }
                 }
@@ -1021,12 +1128,50 @@ private struct TrayContents: View {
             }
         }
         .padding(18)
-        .frame(width: 560)
+        .frame(width: 680)
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { press in
+            guard !ids.isEmpty else { return .ignored }
+            let i = focused.flatMap { ids.firstIndex(of: $0) } ?? -1
+            let step = switch press.key {
+            case .leftArrow: -1
+            case .rightArrow: 1
+            case .upArrow: -columns
+            default: columns
+            }
+            focused = ids[max(0, min(ids.count - 1, i < 0 ? 0 : i + step))]
+            return .handled
+        }
+        .onKeyPress(.space) {
+            guard let id = focused ?? ids.first else { return .ignored }
+            library.quickLook(ids: ids, at: id)
+            return .handled
+        }
+        .task {
+            try? await Task.sleep(for: .milliseconds(150))      // after the popover is on screen
+            if focused == nil { focused = ids.first }
+        }
     }
 
     func cell(_ p: Photo) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Thumbnail(url: p.fileURL, side: 260).frame(height: 104).clipShape(.rect(cornerRadius: 8))
+            Thumbnail(url: p.fileURL, side: 520)
+                .frame(height: 150).frame(maxWidth: .infinity)
+                .clipShape(.rect(cornerRadius: Radius.small))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Radius.small)
+                        .strokeBorder(StatusColor.accent, lineWidth: focused == p.id ? 3 : 0)
+                }
+                .contentShape(.rect)
+                .focusable()
+                .focusEffectDisabled()
+                .focused($focused, equals: p.id)
+                .onTapGesture(count: 2) { library.quickLook(ids: ids, at: p.id) }
+                .onTapGesture { focused = p.id }
+                .accessibilityElement()
+                .accessibilityLabel(p.filename + ", " + reason(p))
+                .accessibilityHint(library.tr("stageTileHint"))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { library.quickLook(ids: ids, at: p.id) }
             Text(reason(p)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             if verdict == .check {
                 HStack(spacing: 6) {

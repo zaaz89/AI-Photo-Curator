@@ -55,12 +55,14 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         CommandMenu(library.tr("photoMenu")) {
-            // F, X and B work in the photo grid (see PhotoGrid); here they are listed for the menu.
+            // K, X, F, B and Space work in the photo grid (see PhotoGrid); here they are listed for the menu.
+            // K / X are the grid's keep / leave out, the same family as → / ← in the quick review (M12e, #18).
+            Button(library.tr("keepInAlbum") + "  (K)") { library.keepTargets() }
+            Button(library.tr("leaveOut") + "  (X)") { library.leaveOutTargets() }
             Button(library.tr("favourite") + "  (F)") { library.toggleFavourite() }
-            Button(library.tr("leaveOut") + "  (X)") { library.toggleLeaveOut() }
             Button(library.tr("wallpaper") + "  (B)") { library.toggleWallpaper() }
             Divider()
-            Button(library.tr("quickLook")) { library.toggleQuickLook() }
+            Button(library.tr("quickLook") + "  (Space)") { library.toggleQuickLook() }
                 .keyboardShortcut("y", modifiers: .command)
             Divider()
             Button(library.tr("analyseAgain")) { library.analyse() }.disabled(library.job.running)
@@ -71,15 +73,14 @@ struct AppCommands: Commands {
             Button(library.tr("quickReview")) { library.startReview() }.keyboardShortcut("r")
             Button(library.tr("quickReviewEverything")) { library.startReview(.all) }.keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
-            Button(library.tr("albumHome")) { library.reviewFilter = nil; library.destination = .home }.keyboardShortcut("0")
-            ForEach(GuideStep.allCases) { s in
-                Button("\(s.number). " + library.tr("step_" + s.rawValue)) { library.reviewFilter = nil; library.destination = .step(s) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(s.number)")))
+            // The pages in the order of the flow (M12e, #15): Home, People & Clocks, Sorting, the three steps,
+            // Settings. Digits come from `FlowPage.menuDigit`, not from the step numbers.
+            ForEach(FlowPage.allCases, id: \.self) { page in
+                flowButton(page)
             }
-            Button(library.tr("step_photos")) { library.reviewFilter = nil; library.destination = .people }.keyboardShortcut("4")
             Divider()
-            Button(library.tr("allPhotos")) { library.reviewFilter = nil; library.destination = .all }.keyboardShortcut("5")
-            Button(library.tr("leftOut")) { library.reviewFilter = nil; library.destination = .leftOut }.keyboardShortcut("6")
+            Button(library.tr("allPhotos")) { go(.all) }.keyboardShortcut(digit(allPhotosMenuDigit))
+            Button(library.tr("leftOut")) { go(.leftOut) }.keyboardShortcut(digit(leftOutMenuDigit))
         }
         CommandGroup(replacing: .undoRedo) {
             // In the quick review ⌘Z is Back: it shows the photo again and undoes its decision.
@@ -101,6 +102,40 @@ struct AppCommands: Commands {
             Button(library.tr("showLog")) { engine.openLog() }
         }
     }
+}
+
+@MainActor extension AppCommands {
+    @ViewBuilder func flowButton(_ page: FlowPage) -> some View {
+        let b = Button(title(page)) { go(destination(page)) }
+        if let d = page.menuDigit { b.keyboardShortcut(digit(d)) } else { b }
+    }
+
+    func title(_ page: FlowPage) -> String {
+        switch page {
+        case .home: library.tr("albumHome")
+        case .people: library.tr("step_photos")
+        case .sorting: library.tr("stage")
+        case .settings: library.tr("settings")
+        case .selection, .story, .export: library.tr("step_" + page.rawValue)
+        }
+    }
+
+    func destination(_ page: FlowPage) -> Destination {
+        if let s = page.guideStep { return .step(s) }
+        switch page {
+        case .people: return .people
+        case .sorting: return .sorting
+        case .settings: return .settings
+        default: return .home
+        }
+    }
+
+    func go(_ d: Destination) {
+        library.reviewFilter = nil
+        if d == .sorting { library.showSorting() } else { library.destination = d }
+    }
+
+    func digit(_ n: Int) -> KeyEquivalent { KeyEquivalent(Character(String(n))) }
 }
 
 /// Engine starting / failed / ready.
@@ -126,12 +161,24 @@ struct RootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let why):
+            // Localised (the language is remembered from the last run), the raw reason behind Details (M12e, #8).
+            let h = why.human(library.lang)
             ContentUnavailableView {
                 Label(library.tr("engineFailed"), systemImage: "bolt.horizontal.circle")
-            } description: { Text(why) } actions: {
+            } description: {
+                VStack(spacing: Space.m) {
+                    Text(h.message)
+                    DisclosureGroup(library.tr("details")) {
+                        Text(h.details).font(TypeRole.caption.monospaced()).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: 420)
+                }
+            } actions: {
                 Button(library.tr("tryAgain")) { engine.start() }.buttonStyle(.glassProminent)
                 Button(library.tr("showLog")) { engine.openLog() }
             }
+            .task(id: h) { AccessibilityNotification.Announcement(library.tr("engineFailed") + ". " + h.message).post() }
         }
     }
 }

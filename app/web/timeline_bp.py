@@ -439,8 +439,14 @@ def export_preview(cid):
     return jsonify(plan)
 
 
+class _ExportCancelled(Exception):
+    """The owner cancelled the export (DELETE .../index); raised between two files, never during a copy."""
+
+
 def _run_smart_export(cid, opts, dest, resume_dir, write_meta=False):
     def progress(msg, i, n):
+        if _job['cancel']:
+            raise _ExportCancelled()
         _job['status'] = f'{msg} ({i}/{n})' if n else msg
         _job['progress'] = int(i / n * 100) if n else _job['progress']
     try:
@@ -459,6 +465,9 @@ def _run_smart_export(cid, opts, dest, resume_dir, write_meta=False):
                           f'Export incomplete: {res.verified} verified, {res.failed} failed, {res.skipped} skipped. '
                           f'See {res.manifest}')
         _job['progress'] = 100
+    except _ExportCancelled:
+        # Files copied so far stay in the job folder (its manifest says "planned", so the export can resume).
+        _job['status'] = 'Cancelled'
     except Exception as e:
         _job['error'] = str(e)
         _job['status'] = f'Error: {e}'
