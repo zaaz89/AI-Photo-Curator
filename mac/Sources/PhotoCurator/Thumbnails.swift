@@ -25,7 +25,7 @@ import CuratorCore
     }
 
     /// Why a thumbnail could not be made (M12g, audit #33): shown as a short label instead of a bare icon.
-    enum Failure: Equatable { case unreadable, noPreview }
+    enum Failure: Error, Equatable { case unreadable, noPreview }
 
     private static func bucket(_ side: CGFloat) -> Int { side <= 260 ? 260 : (side <= 520 ? 520 : (side <= 1024 ? 1024 : 2048)) }   // few sizes, many hits
 
