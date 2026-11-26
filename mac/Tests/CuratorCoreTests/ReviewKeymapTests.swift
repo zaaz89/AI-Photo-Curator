@@ -15,27 +15,50 @@ private func near(_ a: ZoomPoint, _ x: Double, _ y: Double) -> Bool { abs(a.x - 
     func c(_ k: ReviewKey, _ m: ReviewKeyModifiers = []) -> ReviewCommand? { ReviewKeymap.command(for: k, modifiers: m, in: .single) }
     #expect(c(.right) == .keep && c(.left) == .leaveOut && c(.delete) == .back && c(.space) == .skip && c(.escape) == .close)
     #expect(c(.character("z")) == .zoom && c(.character("Z")) == .zoom && c(.character("f")) == .favourite)
-    #expect(c(.character("e")) == .faces && c(.character("c")) == .compare)
+    #expect(c(.character("e")) == .faces && c(.character("c")) == .survey)
+    // M14c: K and X mean keep and leave out, as in the grid and in Survey.
+    #expect(c(.character("k")) == .keep && c(.character("X")) == .leaveOut)
     #expect(c(.character("?"), .shift) == .keys && c(.character("/")) == .keys)
 }
 
 @Test func keysThatAreNotTheReviewsPassThrough() {
     // Up and down, Return, digits outside compare, and anything with ⌘ ⌥ ⌃ (VoiceOver, menus, ⌘Z) are not handled.
-    for k in [ReviewKey.up, .down, .returnKey, .character("1"), .character("x")] {
+    for k in [ReviewKey.up, .down, .returnKey, .tab, .character("1"), .digit(1), .character("q")] {
         #expect(ReviewKeymap.command(for: k, in: .single) == nil)
     }
     #expect(ReviewKeymap.command(for: .right, modifiers: [.control, .option], in: .single) == nil)
     #expect(ReviewKeymap.command(for: .character("z"), modifiers: .command, in: .single) == nil)
-    #expect(ReviewKeymap.command(for: .left, modifiers: .option, in: .compare) == nil)
+    #expect(ReviewKeymap.command(for: .left, modifiers: .option, in: .survey) == nil)
+    #expect(ReviewKeymap.action(for: .digit(1), modifiers: .command, in: .survey) == nil)     // ⌘1 stays the menu's
+    #expect(ReviewKeymap.action(for: .digit(1), in: .single) == nil)
 }
 
-@Test func reviewKeysInCompareMode() {
-    func c(_ k: ReviewKey) -> ReviewCommand? { ReviewKeymap.command(for: k, in: .compare) }
-    #expect(c(.character("1")) == .pickFirst && c(.character("2")) == .pickSecond)
-    #expect(c(.right) == .nextChallenger && c(.left) == .previousChallenger)
-    #expect(c(.escape) == .close && c(.character("c")) == .close && c(.character("z")) == .zoom)
-    // No decision on the whole photo by accident while comparing.
-    #expect(c(.space) == nil && c(.delete) == nil && c(.character("3")) == nil)
+@Test func surveyKeys() {
+    func a(_ k: ReviewKey, _ m: ReviewKeyModifiers = []) -> KeyAction? { ReviewKeymap.action(for: k, modifiers: m, in: .survey) }
+    #expect(a(.character("1")) == .pick(1) && a(.digit(9)) == .pick(9))
+    #expect(a(.digit(3), .shift) == .toggleKeeper(3) && a(.character("3"), .shift) == .toggleKeeper(3))
+    #expect(a(.character("!")) == .toggleKeeper(1) && a(.character("(")) == .toggleKeeper(9))   // ⇧1, ⇧9 on a US keyboard
+    #expect(a(.character("0")) == nil && a(.digit(0)) == nil)
+    #expect(a(.returnKey) == .command(.confirm) && a(.character("a")) == .command(.accept))
+    #expect(a(.right) == .command(.focusNext) && a(.left) == .command(.focusPrevious) && a(.tab) == .command(.nextFace))
+    #expect(a(.character("k")) == .command(.keep) && a(.character("x")) == .command(.leaveOut))
+    #expect(a(.delete) == .command(.back) && a(.character("f")) == .command(.favourite) && a(.character("s")) == .command(.skip))
+    #expect(a(.character("z")) == .command(.zoom) && a(.space) == .command(.zoomHold))
+    #expect(a(.escape) == .command(.close) && a(.character("?"), .shift) == .command(.keys))
+    #expect(a(.up) == nil && a(.character("c")) == nil)
+    #expect(ReviewKeymap.digit(forKeyCode: 18) == 1 && ReviewKeymap.digit(forKeyCode: 25) == 9 && ReviewKeymap.digit(forKeyCode: 92) == 9)
+    #expect(ReviewKeymap.digit(forKeyCode: 29) == nil)            // 0 is no frame
+}
+
+@Test func barAndCoachUseTheKeymap() {
+    for ctx in ReviewContext.allCases {
+        for e in ReviewKeymap.bar(ctx) {
+            #expect(Strings.table[e.textKey] != nil, "missing string \(e.textKey)")
+            #expect(ReviewKeymap.entries(ctx).contains { $0.command == e.command }, "bar key \(e.textKey) not on the card")
+        }
+    }
+    #expect(ReviewKeymap.coach.map(\.command) == [.pick, .confirm, .zoom, .focusNext])
+    for e in ReviewKeymap.coach { #expect(Strings.table[e.textKey] != nil) }
 }
 
 @Test func keysCardListsEveryCommandOfItsContext() {
@@ -47,9 +70,10 @@ private func near(_ a: ZoomPoint, _ x: Double, _ y: Double) -> Bool { abs(a.x - 
         }
     }
     let single = Set(ReviewKeymap.entries(.single).map(\.command))
-    #expect(single == [.keep, .leaveOut, .back, .skip, .favourite, .zoom, .faces, .compare, .keys, .close])
-    let compare = Set(ReviewKeymap.entries(.compare).map(\.command))
-    #expect(compare == [.pickFirst, .pickSecond, .nextChallenger, .previousChallenger, .zoom, .keys, .close])
+    #expect(single == [.keep, .leaveOut, .back, .skip, .favourite, .zoom, .faces, .survey, .keys, .close])
+    let survey = Set(ReviewKeymap.entries(.survey).map(\.command))
+    #expect(survey == [.pick, .addKeeper, .confirm, .accept, .focusNext, .keep, .leaveOut, .zoom, .zoomHold, .nextFace,
+                       .back, .favourite, .skip, .keys, .close])
 }
 
 @Test func announcementsAndValue() {
@@ -101,34 +125,4 @@ private func near(_ a: ZoomPoint, _ x: Double, _ y: Double) -> Bool { abs(a.x - 
     // Far beyond the edge stops at the edge.
     let edge = ZoomMath.pan(.centre, by: ZoomSize(width: 99_999, height: -99_999), content: content, view: view)
     #expect(near(edge, 0.125, 0.875))
-}
-
-// MARK: compare
-
-@Test func compareCyclesTheChallengerAndSkipsTheKeeper() {
-    var s = CompareSession(frames: [1, 2, 3, 4], keeper: 2)
-    #expect(s.keeper == 2 && s.challenger == 3 && s.others == [1, 3, 4] && s.position == (2, 3))
-    s.next(); #expect(s.challenger == 4)
-    s.next(); #expect(s.challenger == 1)       // wraps, never shows the keeper against itself
-    s.previous(); #expect(s.challenger == 4)
-    s.previous(); s.previous(); #expect(s.challenger == 1)
-}
-
-@Test func comparePickKeepsTheWinnerAndBringsTheNextFrame() {
-    var s = CompareSession(frames: [1, 2, 3], keeper: 1, challenger: 2)
-    #expect(s.pick(1) == 1 && s.keeper == 1 && s.challenger == 3)
-    #expect(s.pick(2) == 3 && s.keeper == 3 && s.challenger == 1)
-    #expect(s.pick(5) == nil && s.keeper == 3)
-    var two = CompareSession(frames: [7, 8], keeper: 7)
-    #expect(two.pick(2) == 8 && two.challenger == 7)
-    #expect(two.pick(1) == 8 && two.challenger == 7)
-}
-
-@Test func compareStartsSafelyFromAnyInput() {
-    let unknownKeeper = CompareSession(frames: [5, 6, 6], keeper: 9)
-    #expect(unknownKeeper.frames == [5, 6] && unknownKeeper.keeper == 5 && unknownKeeper.challenger == 6)
-    var single = CompareSession(frames: [5], keeper: 5)
-    #expect(single.challenger == nil && single.pick(2) == nil && single.pick(1) == 5)
-    let chosen = CompareSession(frames: [1, 2, 3], keeper: 1, challenger: 3)
-    #expect(chosen.challenger == 3)
 }

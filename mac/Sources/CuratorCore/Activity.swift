@@ -11,12 +11,15 @@ public struct JobStatus: Decodable, Equatable, Sendable {
     /// Where a finished export went (from the job result), for "Show in Finder".
     public let exportFolder: String?
     public let exportOK: Bool?
+    /// M14c: the analysis's phase plan (`app/analysis_progress.py`); nil from an older engine or another job.
+    public let stage: EngineStage?
 
-    public init(running: Bool, collection: String? = nil, status: String, progress: Double = 0, error: String? = nil) {
+    public init(running: Bool, collection: String? = nil, status: String, progress: Double = 0, error: String? = nil,
+                kind: String? = nil, stage: EngineStage? = nil) {
         self.running = running; self.collection = collection; self.status = status; self.progress = progress; self.error = error
-        self.exportFolder = nil; self.exportOK = nil; self.kind = nil
+        self.exportFolder = nil; self.exportOK = nil; self.kind = kind; self.stage = stage
     }
-    enum CodingKeys: String, CodingKey { case running, collection, kind, status, progress, error, result }
+    enum CodingKeys: String, CodingKey { case running, collection, kind, status, progress, error, result, stage }
     struct Result: Decodable { struct Export: Decodable { let ok: Bool?; let dest: String? }; let export: Export? }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -29,6 +32,7 @@ public struct JobStatus: Decodable, Equatable, Sendable {
         let result = try? c.decodeIfPresent(Result.self, forKey: .result)
         exportFolder = result?.export?.dest
         exportOK = result?.export?.ok
+        stage = try? c.decodeIfPresent(EngineStage.self, forKey: .stage)
     }
 
     /// The phase for the live activity view.

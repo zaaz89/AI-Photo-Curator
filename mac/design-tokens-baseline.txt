@@ -1,5 +1,5 @@
 # Design-token ratchet baseline (scripts/check-design-tokens.sh). Counts may only go down.
-padding=110
-cornerRadius=27
+padding=108
+cornerRadius=26
 fontSystemSize=5
 animationCurve=0

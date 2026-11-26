@@ -428,3 +428,121 @@ Imported `claude/m14-album-journey` from the Cowork bundle and rebased it onto m
 Results: `scripts/test-mac.sh` 132 Swift tests (122 + 10) pass, incl. `AlbumJourneyTests` (21); `scripts/build-mac-app.sh` OK; `uv run pytest` 168 passed; token check OK with the lowered baseline (110/27/5/0); no new compiler warnings. No code fix needed: every compile-risk spot of the M14a entry compiled as written.
 PR #22 "M14a: one album, one path (new IA, journey, remove album/folder)", base main. Not merged (owner merges).
 Open: nothing was looked at in the running app; visual checklist in #22 (empty state and drop, rail and primary button per station, questions card stack, remove folder and album with `test-photos` unchanged, View menu, close-while-analysing, light/dark, VoiceOver).
+
+### 2026-11-26 (late night) — M14c Survey: decide a moment with every frame side by side (Claude (Cowork))
+Branch `claude/m14c-survey` on M14a (#22). Owner feedback: choosing which frame to keep was not good enough; wanted
+two or more photos side by side, smarter, easier, and to be told the shortcuts. Design: `notes/m14c-survey.md`
+(critique, layout, decision model, the whole-app keymap table, motion, copy).
+- Survey is the default for moments in the Questions station: all frames side by side at equal height (> 6: filmstrip,
+  focused frame larger), recommended frame pre-selected with "Best", 1–3 reason chips per frame, a "Why" line,
+  confidence pill and "Close call" (margin < 0.05: opens on the faces at 100 %), face strip per frame aligned per
+  person, synced 100 % zoom (Z, hold Space, Tab cycles faces, drag pans all), progress ring "Moment 3 of 12",
+  completion card that moves on by itself. Moments ordered by impact (close calls, more frames, lower margin).
+- Selection: click / 1–9 only keeper, ⇧ adds, K / X on the focused frame, Return confirms (keepers stay, the rest go
+  to Left Out), A accepts the suggestion, S skips, ⌫ / ⌘Z back with undo, F favourite, Esc close, ? keys. Always-visible
+  shortcut bar (Survey and single review) and a one-time coach (1–9, ↩, Z, ← →).
+- Multi-keep: the engine stores one keeper per moment, so the first keeper (the recommended one when kept) is the
+  engine keeper (`keep(group:photo:)`), the other keepers get `keep = true` ("keep too"), the rest `rejected = true`.
+  Back restores every frame's marks and the earlier keeper (`applySurvey` / `undoSurvey`).
+- Single review: K / X aliases, the shortcut bar; C opens Survey for the photo's moment. Clock questions unchanged.
+  Moments page: "Survey" opens Survey from the selected moment on.
+- Removed: `CompareView`, `CompareSession`, the compare keymap context and commands, 12 strings only they used,
+  `questionIds()` (now `questions()`), `compareRequest` / `startCompare` (now `surveyRequest` / `startSurvey`).
+- CuratorCore: `Survey.swift` (new), `ReviewKeymap.swift` (`.survey`, `KeyAction`, `bar`, `coach`, key codes),
+  `ReviewZoom.swift` (compare session removed), `Automation.swift` (keys `confirm`, `accept`), 61 strings EN + SL at
+  the end under `// M14c survey` (no duplicates; every used key exists, checked with the test's regex).
+- Tests: new `SurveyTests.swift` (14: engine moment and confidence, moment from photos, impact order, pick / ⇧ toggle,
+  focus / K / X / Tab, confirm with multi-keep, primary rule, accept, back over skip and decision, finished safety,
+  chips, face columns and Tab target, layout, coach); `ReviewKeymapTests` updated (K / X in single, Survey keys,
+  ⇧ digits, key codes, bar and coach consistent with the card; compare tests removed).
+- Token check OK, unchanged (110 / 27 / 5 / 0). Python untouched (another agent works on SortingStage, Thumbnails and
+  Python in parallel; none of those files were edited).
+NOT compiled, Swift tests NOT run (Linux): run `scripts/test-mac.sh`, `scripts/build-mac-app.sh`. Compile-risk spots:
+`onKeyPress(phases: [.down, .up])` with `press.phase == .up` and `KeyEquivalent.tab` (Tab may go to the focus system
+first); `NSApp.currentEvent?.keyCode` inside `onKeyPress`; `let cells = ForEach(...)` reused in two branches of a
+`@ViewBuilder` func (SurveyView.row); `.motionTransition(.asymmetric(insertion: .offset(x:).combined(with:), removal:
+.identity))`; `.accessibilityAddTraits(focused ? [.isImage, .isSelected] : .isImage)`; `withMotion { e = session.back() }`
+assigning a captured local; `ActiveSurvey` (non-Equatable) in `@State`; `SurveyFrame.ratio` passed to `map`;
+`Text(...).monospaced()`; `ShortcutBar` / `KeysCard` names; `[Int: [String: MarkValue]]` comparisons in tests.
+Visual checklist (test-10 has one near-duplicate pair; window capture, no synthetic input;
+`photocurator://go?page=questions`, then `key?k=pick1|pick2|confirm|accept|back|zoom|unzoom|esc`):
+1. Answer questions → Survey: both frames side by side, equal height, "Best" on the recommended one, chips under each,
+   face strip with eye rings; coach card on first open only (gone after any key; `defaults delete si.beehive.photocurator surveyCoachSeen.v1` to see it again).
+2. 1 / 2 move the green ✓ and ring; ⇧2 adds (tally "2 kept · 0 to Left Out"); X on the focused frame → "Nothing kept"
+   in orange.
+3. Z: both frames at 100 % on the same face, drag pans both; hold Space zooms, release returns; Tab rings the next
+   person (needs a moment with two faces).
+4. Return: keepers lift, others drop, next moment slides in; on the last one the completion card shows, then the
+   path moves to Album (or to the Have a look photos first). ⌫ during the card goes back.
+5. Left Out view lists the frames left out; put one back; Back in Survey restores marks and keeper (engine reload).
+6. Single review: bar at the bottom, K / X work, C opens Survey for a moment frame and Esc returns to the photo.
+7. Moments page "Survey" button opens from the selected moment; Esc closes back to the page.
+8. Reduce Motion: cross-fades only, no sink / bounce; VoiceOver reads "Frame 1 of 2: …, Best, Keep"; light and dark.
+9. A moment with 7+ frames (full 236-photo set only with the owner's OK): filmstrip, focused frame larger, scrolls.
+Open: Smiling / Horizon chips need engine fields; up to six originals decode at 100 % when zoomed; a moment with nothing
+kept keeps its engine keeper (all frames rejected) until the question review finishes.
+
+### 2026-11-26 (late) — M14c: Analysis station fixes from the owner's screenshot (Claude (Cowork))
+Branch `claude/m14c-stage-fixes` (base: M14a PR #22). Screenshot: album "Tuscany, 22–28 Oct 2026", 236 photos, 3 folders.
+Root causes and fixes:
+1. All photos under "No date", "day 1 of 1": not the day plan (it runs after clocks). The app last fetched the photos
+   while the folders were read (photo count changed), before `resolve_all` wrote any capture time, and fetched them
+   again only on the first event, after clocks + places + events; the overview counted the untimed photos as one
+   "unknown" day. Fix: engine phase plan (below); the app reloads photos (and overview) when the phase moves to
+   clocks / places / days (`reloadsPhotos`, `LibraryModel.pollOnce`); `_analysis_days` answers 0 days while any photo
+   has no capture time (`app/assistant.py`).
+2. Tiles over the trays: `stageFlow` grew past the rect below 28 pt and the grid fallback only applied once settled;
+   every row also reserved the day-label band. Fix: label band only on rows where a day begins, gaps shrink with small
+   tiles, `StageFlow.fits`; the stage uses the clipped scrolling grid whenever the flow does not fit (running too),
+   and the stage model goes instant then (`StageModel.overflowing`).
+3. Chips: the New Album suggestion takes the person from EXIF Artist (a hired photographer's name in every file) and
+   the stage chip showed only that name; "…" was the only state for "no count". Fix: `app/source_chips.py`
+   (`pretty_device`: "Sony A7 IV"; `chip_labels`: person · camera, folder name on a clash, then a number; a folder
+   name used as the person is not shown as a person; `source_state`: waiting / reading n of m / read / empty / failed
+   with reason); `/sources` returns `chip`, `read_state`, pretty `devices`; the app shows them (stage chip, folder
+   chips, remove confirmation) with an older-engine fallback (`sourceChipName`, `sourceChipDetail`).
+   Not known: why "Toskana 2026" had 0 photos in the stage on the Mac; the chip now says which state it is in.
+4./5. "Aligning clocks 100%" next to "Working": two readings of the status text (the stage had no title for the
+   clocks phase) and a progress that was the last stage's share (100 % left over into day 1). Fix:
+   `app/analysis_progress.py` `PhasePlan` (reading → clocks → places → days (step) → finishing, fixed shares, never
+   goes back), job status `stage`; CuratorCore `AnalysisStatus.swift` (`analysisStatus`, `analysisTitle` "Reading
+   photos / Aligning cameras / Finding places / Sorting day 3 of 7 / Comparing similar shots", `analysisDetail`,
+   `activityFraction`). Stage header, toolbar pill and `AnalysisCard` read it; the pill hides while the Analysis
+   station shows the album being analysed.
+6. Polish: the tile the engine is at (day N, step counter) gets the scan band plus a lit edge (`analysing`), day
+   headers light up with a check and one glow when `settled_day` arrives (`StageDayLabel`, grid too, also above 400),
+   subtitle and counters roll (numericText); Motion tokens only, Reduce Motion = lit/check without movement, overlays
+   do not take hits; shimmer off when instant (skipped, > 400, or overflowing).
+Python: `uv run pytest -q` 177 passed (168 + 9 in `tests/test_m14c_stage.py`: real days at the first clocks/places
+report with a 4-day, 3-folder fixture incl. just-after-midnight photos, overview 0 days while reading, phase order and
+monotonic progress, PhasePlan unit, job `stage`, device names, chip labels, chip states, `/sources` chip + state).
+`tests/conftest.py`: `make=` option for the fake EXIF (default unchanged). Token check OK (baseline lowered 110→108,
+27→26).
+Swift NOT compiled, Swift tests NOT run (Linux). New: `CuratorCore/AnalysisStatus.swift`,
+`Tests/CuratorCoreTests/M14cStageTests.swift` (11). Compile-risk spots: `Cell` struct local to the nested func in
+`stageFlow`; `try? c.decodeIfPresent` for `JobStatus.stage` / `SourceInfo.readState` (optional flattening);
+`SourceInfo` now has an explicit `init(from:)`; `JobStatus.init` gained `kind:`/`stage:` defaults; `AnalysisPhase`
+`Comparable` via `allCases.firstIndex`; `StageTile` memberwise order (`analysing` after `scanning`); `StageGrid`
+memberwise with `settledDays` before the trailing `open` closure; `ActivityPill` body wrapped in `Group { if … }` with
+`.popover` inside; `.symbolBounce(on: Bool)`; `StageModel.setOverflowing` called from the grid's `onAppear`.
+Visual checklist (test-10 and, with the owner's OK, the 236-photo folder; no synthetic input):
+1. While reading: chips say "Waiting" / "Reading 12 of 80", names distinct; header "Reading photos", one bar.
+2. When clocks start: photos regroup under real days at once; sidebar never says "day 1 of 1".
+3. Header "Aligning cameras" → "Finding places" → "Sorting day 3 of 7" / "Comparing similar shots"; bar only grows;
+   no toolbar pill on the Analysis station; pill shows the same words on another view.
+4. 236 photos in a small window: tiles never over the trays (flow shrinks or the clipped grid scrolls); > 400 grid.
+5. A lit edge + band on one tile per moment, moving through the day; day header turns bright with a check per
+   settled day; Reduce Motion: no band movement, no bounce; clicks on tiles still work during it.
+6. Folder chips on the Photos station and the remove confirmation use the same names.
+Open: why the third folder had no photos on the Mac; StepPhotos (People & Clocks) cards still show the raw owner.
+
+### 2026-11-26, Claude (Cowork): M14c = Survey + stage fixes merged
+- `claude/m14c-survey` now holds both halves: Survey (multi-frame decisions, synced zoom, one keymap, shortcut bar, coach) and the stage fixes (real days instead of "No date", no overlap with trays, distinct source chips, one phase status, stage polish). Conflicts only in appended blocks (Strings: 660 keys, no duplicates; log). Token check OK (108/26/5/0). pytest on the stage branch: 177 passed.
+- Not compiled. Both halves' compile-risk spots are in their own entries above.
+
+### 2026-11-26 (night, later) — M14c compiled on the Mac, PR #23 (Claude)
+Imported `claude/m14c-survey` from the Cowork bundle. #22 had no new commits on GitHub, so no rebase (the branch already sits on its tip a6bc0ca).
+Fix: `SurveyTests.swift` had a single-line raw string `#"…"#` split over two lines (unterminated literal); now a multi-line raw string `#"""…"""#`, same JSON. The only compile error; every risk spot of both M14c entries compiled as written.
+Results: `scripts/test-mac.sh` 155 Swift tests (145 + 10) pass, incl. `SurveyTests` (14) and `M14cStageTests` (11); `scripts/build-mac-app.sh` OK; `uv run pytest` 177 passed; token check OK (108/26/5/0); no new compiler warnings compared with #22.
+PR #23 "M14c: Survey (multi-frame decisions) + analysis stage fixes", base `claude/m14-album-journey`. Not merged (owner merges; #22 first).
+Open: nothing was looked at in the running app; visual checklists (Survey and Analysis station) in #23.

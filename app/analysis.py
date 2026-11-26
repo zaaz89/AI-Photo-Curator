@@ -22,18 +22,36 @@ from app.importers.local_importer import index_collection
 from app.timeline.clock_sync import sync_clocks
 
 
-def _prepare(conn, progress, cancelled, res: dict, timings: dict) -> bool:
-    """index -> screenshots -> clocks -> places/events; False when cancelled."""
+def _prepare(conn, progress, cancelled, res: dict, timings: dict, plan=None, report=None) -> bool:
+    """index -> screenshots -> clocks -> places/events; False when cancelled. `plan` (a PhasePlan) and
+    `report(state)` follow the phases (M14c)."""
+    def enter(phase):
+        if plan is not None:
+            plan.enter(phase)
+            if report:
+                report(plan.state())
+
+    def on_source(k, n, sid):
+        if plan is not None:
+            plan.start_source(k, n, sid)
+            if report:
+                report(plan.state())
     t = time.time()
-    res.update(index_collection(conn, progress, cancelled))
+    res.update(index_collection(conn, progress, cancelled, on_source=on_source))
     timings['index'] = time.time() - t
     if cancelled():
         return False
+    # M14c: capture times are known from here on (resolve_all ran inside index_collection); the app reloads the
+    # photos on this phase change, so the stage groups them by day before any event arrives.
+    enter('clocks')
     from app.quality.screenshots import detect as detect_screenshots
     t = time.time()
     res['screenshots'] = detect_screenshots(conn)
     res['clocks'] = sync_clocks(conn, progress, cancelled)
     timings['clocks'] = time.time() - t
+    if cancelled():
+        return False
+    enter('places')                      # clock corrections are applied from here on
     from app.places.places import assign_places
     from app.timeline.event_detector import detect_events
     t = time.time()
@@ -58,16 +76,28 @@ def _add(total: dict, part) -> None:
 
 def analyze_collection(conn, progress: Optional[Callable] = None,
                        cancelled: Callable[[], bool] = lambda: False,
-                       overall: Optional[Callable[[float], None]] = None) -> dict:
-    """The per-day pipeline. `overall(fraction)` (optional) reports the share of days done (0-1)."""
+                       overall: Optional[Callable[[float], None]] = None,
+                       report: Optional[Callable[[dict], None]] = None) -> dict:
+    """The per-day pipeline. `overall(fraction)` (optional) reports the share of days done (0-1); `report(state)`
+    (optional, M14c) the phase plan's state after every step (`app/analysis_progress.py`)."""
     from app import analysis_events as ev
+    from app.analysis_progress import PhasePlan
     from app.quality.faces import compute_faces, compute_videos
     from app.quality.scoring import compute_quality
     from app.timeline.event_detector import asset_days
     res: dict = {}
     timings: dict = {}
     res['timings_s'] = timings
-    if not _prepare(conn, progress, cancelled, res, timings):
+    phases = PhasePlan(conn.execute('SELECT COUNT(*) FROM sources').fetchone()[0])
+    user_progress = progress
+
+    def progress(msg, a, n):              # noqa: F811 - the caller's callback plus the phase plan
+        phases.update(msg, a, n)
+        if user_progress:
+            user_progress(msg, a, n)
+        if report:
+            report(phases.state())
+    if not _prepare(conn, progress, cancelled, res, timings, phases, report):
         return res
     plan = ev.day_plan(conn)
     ev.emit_read(conn, plan)
@@ -83,6 +113,9 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
         if cancelled():
             break
         shas = {a['sha256'] for a in assets if a['sha256']}
+        phases.start_day(i, len(plan))
+        if report:
+            report(phases.state())
 
         def p(msg, a, n, _i=i):
             if progress:
@@ -126,7 +159,13 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
                 days['first_settled_s'] = round(time.time() - started, 2)
         if overall:
             overall((i + 1) / max(1, len(plan)))
+        phases.day_done(i)
+        if report:
+            report(phases.state())
     if not cancelled():
+        phases.enter('finishing')
+        if report:
+            report(phases.state())
         # Days that no longer exist (photos removed or moved by a clock change) are forgotten.
         ev.forget_days(conn, [d for d in ev.settled_days(conn) if d not in {d for d, _ in plan}])
         t = time.time()

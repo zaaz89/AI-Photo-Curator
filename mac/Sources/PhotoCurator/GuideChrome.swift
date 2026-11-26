@@ -170,14 +170,14 @@ struct AnalysisCard: View {
     var compact = false
     var body: some View {
         HStack(spacing: 16) {
-            AIRing(symbol: library.job.phase.symbol, size: compact ? 40 : 56, spinning: true, progress: library.job.progress / 100)
+            AIRing(symbol: library.job.phase.symbol, size: compact ? 40 : 56, spinning: true, progress: activityFraction(library.job))
             VStack(alignment: .leading, spacing: 4) {
-                Text(library.tr("phase_" + library.job.phase.rawValue)).font(compact ? .headline : .title3.weight(.semibold))
+                Text(activityTitle(library.job, library.lang)).font(compact ? .headline : .title3.weight(.semibold))
                 Text(library.tr("analysingHint")).foregroundStyle(.secondary).lineLimit(3)
             }
             Spacer()
-            Text("\(Int(library.job.progress))%").scaledFont(compact ? 22 : 30, weight: .semibold, design: .rounded, relativeTo: .title2)
-                .monospacedDigit().contentTransition(.numericText(value: library.job.progress))
+            Text("\(Int((activityFraction(library.job) * 100).rounded()))%").scaledFont(compact ? 22 : 30, weight: .semibold, design: .rounded, relativeTo: .title2)
+                .monospacedDigit().contentTransition(.numericText(value: activityFraction(library.job)))
         }
         .padding(compact ? 14 : 20)
         .background(.background.secondary, in: .rect(cornerRadius: 22))

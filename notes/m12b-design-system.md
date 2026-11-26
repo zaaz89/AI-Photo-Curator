@@ -94,6 +94,9 @@ could not be compiled when this was written. Plan, one small PR each, compiled a
 
 ## Review keymap (M12d)
 
+M14c replaced the compare context with Survey (`.survey`) and added K / X to the single review; the current
+whole-app table is in `notes/m14c-survey.md` section 5. The table below is the M12d state.
+
 One keymap for Quick Review and its compare view: `ReviewKeymap` in `mac/Sources/CuratorCore/ReviewKeymap.swift`
 (pure, tested in `ReviewKeymapTests.swift`). The view maps a key press to `ReviewKey`, asks
 `ReviewKeymap.command(for:modifiers:in:)` and returns `.ignored` for anything that is not the review's, so VoiceOver,

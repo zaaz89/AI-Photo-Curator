@@ -34,8 +34,17 @@ import SwiftUI
     var busy: Bool { act != .idle }
     /// More photos than the stage animates one by one (`stageChoreographyLimit`): shown at once in a grid.
     var large: Bool { !stageAnimatesEachPhoto(shown.count) }
-    /// No per-photo animation: skipped, or too many photos.
-    var instant: Bool { skipped || large }
+    /// M14c: the photos do not fit above the trays even at the smallest tile, so the stage shows its scrolling
+    /// grid (set by the grid while it is on screen). No flying tiles then: nothing could be seen of them.
+    @Published private(set) var overflowing = false
+    /// No per-photo animation: skipped, too many photos, or they do not fit.
+    var instant: Bool { skipped || large || overflowing }
+
+    func setOverflowing(_ on: Bool) {
+        guard on != overflowing else { return }
+        overflowing = on
+        if on { sync() } else { reconcile() }
+    }
 
     weak var library: LibraryModel?
     var motion = true
@@ -379,9 +388,10 @@ struct SortingStage: View {
             let geo = StageGeometry(size: g.size, settled: stage.settled)
             let scene = makeScene()
             let flow = stage.large ? StageFlow() : stageFlow(albumItems(scene), in: geo.albumRect, maxHeight: stage.settled ? 230 : 170)
-            // Too many photos, or a settled album that does not fit: a scrollable grid by day instead of the
-            // flying tiles, so no photo is cut off (M12c). Up to the limit the animation stays as it was.
-            let grid = stage.large || (stage.settled && flow.height > geo.albumRect.height + 1)
+            // Too many photos, or photos that do not fit above the trays even at the smallest tile (M14c: while
+            // the analysis runs too, not only once settled): a scrollable grid by day, clipped to the album area,
+            // so no photo is drawn over the trays. Up to the limit and while they fit, the animation stays.
+            let grid = stage.large || !flow.fits || flow.height > geo.albumRect.height + 1
             let frames = grid ? [:] : tileFrames(scene, flow: flow, geo: geo)
             let sweep = grid ? [] : sweepIds()
             ZStack(alignment: .topLeading) {
@@ -389,22 +399,26 @@ struct SortingStage: View {
                 StageHeader(stage: stage, counts: scene.counts).frame(width: g.size.width)
                 if !stage.settled {
                     ForEach(Array(library.sources.enumerated()), id: \.element.id) { i, s in
-                        SourceChip(owner: s.owner, count: scene.bySource[s.id]?.arrived ?? 0, total: scene.bySource[s.id]?.total ?? 0)
+                        SourceChip(source: s, index: i, name: sourceChipName(s, among: library.sources),
+                                   detail: sourceChipDetail(s, arrived: scene.bySource[s.id]?.arrived ?? 0,
+                                                            shown: scene.bySource[s.id]?.total ?? 0, library.lang),
+                                   count: scene.bySource[s.id]?.arrived ?? 0)
                             .position(geo.sourcePoint(i))
                             .motionTransition(.move(edge: .leading).combined(with: .opacity))
                     }
                 }
                 if grid {
                     StageGrid(stage: stage, ids: stage.shown.filter { scene.places[$0.id] == .album }.map(\.id),
-                              stackedBehind: scene.stackedBehind) { openTray = $0 }
+                              stackedBehind: scene.stackedBehind, settledDays: settledDays) { openTray = $0 }
                         .frame(width: geo.albumRect.width, height: geo.albumRect.height)
+                        .clipped()
                         .position(x: geo.albumRect.midX, y: geo.albumRect.midY)
+                        .onAppear { stage.setOverflowing(!stage.large) }
+                        .onDisappear { stage.setOverflowing(false) }
                 }
                 ForEach(Array((grid ? [] : flow.days).enumerated()), id: \.offset) { _, d in
-                    Text(dayLabel(d.day))
-                        .font(.system(size: stage.settled ? 15 : 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .lineLimit(1)
+                    StageDayLabel(text: dayLabel(d.day), settled: settledDays.contains(d.day), large: stage.settled,
+                                  lang: library.lang)
                         .modifier(LeadingAnchor(x: d.origin.x, y: d.origin.y + 11))
                 }
                 ForEach(SortVerdict.trays, id: \.self) { v in
@@ -562,13 +576,23 @@ struct SortingStage: View {
         return out
     }
 
-    /// During the analysis the sweep follows the engine's progress through the photos, in time order.
+    /// The days whose photos have their final place (the engine's `settled_day` events; every day once nothing
+    /// runs and the stage has settled), for the day headers that light up (M14c).
+    private var settledDays: Set<String> {
+        if !library.analysing && stage.settled { return Set(stage.shown.map(\.day)) }
+        return library.sortStream.settledDays
+    }
+
+    /// M14c: the shimmer sits on the photo the engine is looking at now: the plan says "day 3 of 7, focus 12 of
+    /// 40", so it is the twelfth fortieth of day 3's photos in time order. Nothing between days, during moments
+    /// (no counter) or above the choreography limit.
     private func sweepIds() -> Set<Int> {
-        guard library.analysing, [.quality, .faces, .working].contains(library.job.phase) else { return [] }
-        let ordered = stage.shown.filter { stage.arrived.contains($0.id) && !$0.isVideo }
-        guard !ordered.isEmpty else { return [] }
-        let at = min(ordered.count - 1, Int(Double(ordered.count) * library.job.progress / 100))
-        return Set(ordered[max(0, at - 2)...at].map(\.id))
+        guard library.analysing, !stage.instant, let status = analysisStatus(library.job) else { return [] }
+        let days = analysisDayOrder(stage.shown.map(\.day))
+        guard let day = currentAnalysisDay(status, days: days) else { return [] }
+        let photos = stage.shown.filter { $0.day == day && stage.arrived.contains($0.id) && (!$0.isVideo || status.step == "videos") }
+        guard let at = analysedIndex(status, photosInDay: photos.count) else { return [] }
+        return [photos[at].id]
     }
 
     /// One flying tile (split out of `body` to keep it quick to type-check).
@@ -576,6 +600,7 @@ struct SortingStage: View {
         StageTile(photo: p, image: stage.images[p.id], size: f.rect.size,
                   verdict: stage.revealed.contains(p.id) ? stage.verdicts[p.id] : nil,
                   scanning: stage.scanning.contains(p.id) || sweep.contains(p.id),
+                  analysing: sweep.contains(p.id),
                   lifted: stage.lifting.contains(p.id),
                   stacked: scene.stackedBehind[p.id] ?? 0, lang: library.lang,
                   focused: focusedTile == p.id)
@@ -706,6 +731,8 @@ private struct StageTile: View {
     let size: CGSize
     let verdict: SortVerdict?
     let scanning: Bool
+    /// M14c: the engine is looking at this photo now (a soft lit edge while the scan band passes).
+    var analysing = false
     let lifted: Bool
     let stacked: Int
     let lang: Lang
@@ -735,6 +762,17 @@ private struct StageTile: View {
                 RoundedRectangle(cornerRadius: corner).strokeBorder(StatusColor.accent, lineWidth: 3)
             }
         }
+        .overlay {
+            // M14c: the photo being analysed glows at its edge; the band itself is `ScanBand` (Reduce Motion: lit).
+            if analysing {
+                RoundedRectangle(cornerRadius: corner)
+                    .strokeBorder(stageColors[1].opacity(0.9), lineWidth: 2)
+                    .shadow(color: stageColors[1].opacity(0.8), radius: 6)
+                    .allowsHitTesting(false)
+                    .motionTransition(.opacity)
+            }
+        }
+        .motionAnimation(.fade, value: analysing)
         .overlay(alignment: .bottomTrailing) {
             // Small tiles keep a glyph for "to look at" and "left out" (shape, not only colour), and every state
             // glyph when the system asks for it (M12g, #25); under 34 pt it is the minimum size of 10 pt.
@@ -772,7 +810,8 @@ private struct StageTile: View {
         .shadow(color: .black.opacity(lifted ? 0.6 : 0.3), radius: lifted ? 16 : 6, y: lifted ? 10 : 3)
         .scaleEffect(lifted ? 1.08 : 1)
         .accessibilityElement()
-        .accessibilityLabel(stageTileAccessibilityLabel(photo, verdict: verdict, stacked: stacked, lang))
+        .accessibilityLabel(stageTileAccessibilityLabel(photo, verdict: verdict, stacked: stacked, lang)
+                            + (analysing ? ", " + Strings.text("m14c_analysingPhoto", lang) : ""))
         .accessibilityHint(Strings.text("stageTileHint", lang))
         .accessibilityAddTraits(.isButton)
     }
@@ -799,6 +838,8 @@ private struct StageGrid: View {
     @ObservedObject var stage: StageModel
     let ids: [Int]
     let stackedBehind: [Int: Int]
+    /// M14c: days whose photos have their final place; their headers light up (also above 400 photos).
+    var settledDays: Set<String> = []
     let open: (SortVerdict) -> Void
     /// Keyboard focus on a tile (M12e, #14): Tab reaches the tiles, arrows move, Space is Quick Look.
     @FocusState private var focused: Int?
@@ -819,9 +860,8 @@ private struct StageGrid: View {
             LazyVStack(alignment: .leading, spacing: Space.xxl) {
                 ForEach(days) { d in
                     VStack(alignment: .leading, spacing: Space.m) {
-                        Text(d.id == Photo.undated ? library.tr("stageUndated") : formatDay(d.id, library.lang, style: .short))
-                            .font(TypeRole.cardTitle).foregroundStyle(.white.opacity(0.85))
-                            .accessibilityAddTraits(.isHeader)
+                        StageDayLabel(text: d.id == Photo.undated ? library.tr("stageUndated") : formatDay(d.id, library.lang, style: .short),
+                                      settled: settledDays.contains(d.id), large: true, lang: library.lang)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: Space.m)], spacing: Space.m) {
                             ForEach(d.ids, id: \.self) { id in
                                 if let p = library.photo(id) { tile(p) }
@@ -897,28 +937,67 @@ extension StageGrid {
     }
 }
 
+/// One folder on the stage (M14c): a name that tells it apart from the others ("Jarek Pawlak · Ceremony",
+/// "iPhone 15 Pro · Toskana 2026") and what the engine does with it: waiting, reading 12 of 80, 120/212, no photos
+/// found, or why it could not be read. Never a bare "…".
 private struct SourceChip: View {
-    @EnvironmentObject var library: LibraryModel
     @Environment(\.colorSchemeContrast) private var contrast
-    let owner: String
+    let source: SourceInfo
+    let index: Int
+    let name: String
+    let detail: String
     let count: Int
-    let total: Int
+    var failed: Bool { source.readState?.state == "failed" }
     var body: some View {
-        HStack(spacing: 10) {
-            PersonBadge(name: owner, index: 0, size: 30)
+        HStack(spacing: Space.m) {
+            PersonBadge(name: source.owner.isEmpty ? name : source.owner, index: index, size: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text(owner).font(.callout.weight(.semibold)).lineLimit(1)
-                Text(total == 0 ? "…" : "\(count)/\(total)").font(.caption).foregroundStyle(StageInk.secondary(contrast)).monospacedDigit()
+                Text(name).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                Text(detail).font(.caption).monospacedDigit().lineLimit(1)
+                    .foregroundStyle(failed ? AnyShapeStyle(StatusColor.warning) : AnyShapeStyle(StageInk.secondary(contrast)))
                     .contentTransition(.numericText(value: Double(count)))
+                    .motionAnimation(.quick, value: detail)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .frame(width: 196, alignment: .leading)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 16))
-        // One element: "Name, 3 of 10 photos read" (M12g, #24).
+        .padding(.horizontal, Space.l).padding(.vertical, Space.m)
+        .frame(width: 212, alignment: .leading)
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: Radius.large))
+        .help(name)
+        // One element: "Jarek Pawlak · Ceremony, Reading 12 of 80" (M12g, #24).
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(owner)
-        .accessibilityValue(total == 0 ? library.tr("chipWaiting") : String(format: library.tr("chipProgress"), count, total))
+        .accessibilityLabel(name)
+        .accessibilityValue(detail)
+    }
+}
+
+/// A day's header on the stage (M14c): dim while the day is still being sorted, lit with a check once its photos
+/// have their final place (`settled_day`). The light comes with one soft glow (`settle`); Reduce Motion: the check
+/// and the brighter text only. Shown in the grid above 400 photos too.
+private struct StageDayLabel: View {
+    @Environment(\.colorSchemeContrast) private var contrast
+    let text: String
+    let settled: Bool
+    var large = false
+    let lang: Lang
+    var body: some View {
+        HStack(spacing: Space.xs) {
+            if settled {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(StatusColor.kept)
+                    .symbolBounce(on: settled)
+                    .motionTransition(.scale.combined(with: .opacity))
+                    .accessibilityHidden(true)
+            }
+            Text(text).lineLimit(1)
+        }
+        .font(large ? TypeRole.cardTitle : TypeRole.label.weight(.semibold))
+        .foregroundStyle(.white.opacity(settled ? 0.95 : (contrast == .increased ? 0.8 : 0.6)))
+        .shadow(color: StatusColor.kept.opacity(settled ? 0.45 : 0), radius: settled ? 8 : 0)
+        .motionAnimation(.settle, value: settled)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(settled ? String(format: Strings.text("m14c_daySettled", lang), text) : text)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -933,17 +1012,13 @@ private struct StageHeader: View {
         stageState(job: library.job, analysing: library.analysing, trip: library.tripId, photos: stage.shown)
     }
 
+    /// M14c: the one status of the analysis (the toolbar pill and the sidebar read the same).
+    var status: AnalysisStatus? { library.analysing ? analysisStatus(library.job) : nil }
+
     var title: String {
         if !stage.busy, let t = stageStateTexts(state, library.lang) { return t.title }
-        if library.analysing {
-            switch library.job.phase {
-            case .reading: return library.tr("stagePhase_reading")
-            case .quality: return library.tr("stagePhase_quality")
-            case .faces, .working: return library.tr("stagePhase_faces")
-            case .paused: return library.tr("phase_paused")
-            default: return library.tr("stagePhase_other")
-            }
-        }
+        // "Reading photos", "Aligning cameras", "Finding places", "Sorting day 3 of 7", "Comparing similar shots".
+        if let status { return analysisTitle(status, library.lang) }
         switch stage.act {
         case .arrival: return library.tr("stagePhase_reading")
         case .quality: return library.tr("stagePhase_reveal")
@@ -956,13 +1031,16 @@ private struct StageHeader: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 16) {
                 AIRing(symbol: state.needsRestart ? "exclamationmark" : (stage.settled ? "checkmark" : "sparkles"), size: 46,
-                       spinning: library.analysing || stage.busy, progress: library.analysing ? library.job.progress / 100 : 1)
+                       spinning: library.analysing || stage.busy, progress: library.analysing ? activityFraction(library.job) : 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).scaledFont(26, weight: .bold, relativeTo: .title).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.7)
                         .id(title).motionTransition(.push(from: .bottom).combined(with: .opacity))
                     Text(subtitle)
                         .foregroundStyle(StageInk.secondary(contrast)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .motionAnimation(.quick, value: subtitle)
                 }
                 .motionAnimation(.quick, value: title)
                 Spacer()
@@ -983,7 +1061,11 @@ private struct StageHeader: View {
                         .buttonStyle(.glass)
                 } else {
                     if library.analysing {
-                        ProgressView(value: library.job.progress, total: 100).tint(stageColors[1]).frame(maxWidth: 520)
+                        // M14c: the plan's progress (one bar over reading, clocks, places and every day; it never
+                        // jumps back for a new folder or day).
+                        ProgressView(value: activityFraction(library.job), total: 1).tint(stageColors[1]).frame(maxWidth: 520)
+                            .motionAnimation(.settle, value: activityFraction(library.job))
+                            .accessibilityLabel(title)
                     }
                     Spacer()
                     if showSkip { skipButton }
@@ -998,8 +1080,13 @@ private struct StageHeader: View {
 
     var subtitle: String {
         if !stage.busy, let t = stageStateTexts(state, library.lang) { return t.subtitle }
-        if library.analysing, let days = stageDaysText(library.sortStream, library.lang) {
-            return library.albumName + " · " + days                // M13: the album fills day by day
+        if let status {
+            // M14c: album · days sorted · what the step does and its counter ("Day 3 of 7 · checking focus · 12 / 40").
+            var parts = [library.albumName]
+            if let days = stageDaysText(library.sortStream, library.lang) { parts.append(days) }
+            let detail = analysisDetail(status, library.lang)
+            if !detail.isEmpty { parts.append(detail) }
+            return parts.joined(separator: " · ")
         }
         return stage.settled ? library.tr("stageDoneSub") : library.albumName
     }

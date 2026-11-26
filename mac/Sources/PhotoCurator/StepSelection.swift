@@ -113,8 +113,8 @@ struct MomentsPanel: View {
                         .foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
-                // M12d: the moment's frames two at a time, at 100%, 1 or 2 picks (the quick review's compare view).
-                Button { library.startCompare(group: g.id) } label: { Label(library.tr("compare"), systemImage: "rectangle.split.2x1") }
+                // M14c: Survey from this moment on (all frames side by side, 1–9 picks, Return confirms).
+                Button { surveyFromHere() } label: { Label(library.tr("compare"), systemImage: "rectangle.split.3x1") }
                     .buttonStyle(.glass).controlSize(.large).help(library.tr("compareHelp")).disabled(g.members.count < 2)
                 Button(library.tr("acceptRest")) { acceptRest() }.buttonStyle(.glass).controlSize(.large)
                     .help(library.tr("acceptRestHelp"))
@@ -216,6 +216,11 @@ struct MomentsPanel: View {
     func keepToo() {
         guard let g = current, g.members.indices.contains(frame) else { return }
         library.toggleKeepToo(g.members[frame].id)
+    }
+
+    func surveyFromHere() {
+        guard let i = currentIndex else { return }
+        library.startSurvey(groups[i...].filter { $0.members.count > 1 }.map { SurveyMoment($0) }, ordered: false)
     }
 
     func acceptRest() {

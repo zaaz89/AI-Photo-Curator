@@ -269,11 +269,16 @@ def link_relationships(conn: sqlite3.Connection) -> dict:
 
 
 def index_collection(conn: sqlite3.Connection, progress: Optional[Progress] = None,
-                     cancelled: Callable[[], bool] = lambda: False) -> dict:
+                     cancelled: Callable[[], bool] = lambda: False,
+                     on_source: Optional[Callable[[int, int, int], None]] = None) -> dict:
+    """`on_source(index, count, source_id)` (optional, M14c) is called before each folder is read."""
     out = {'sources': {}}
-    for s in conn.execute('SELECT id, path, owner FROM sources ORDER BY id').fetchall():
+    sources = conn.execute('SELECT id, path, owner FROM sources ORDER BY id').fetchall()
+    for k, s in enumerate(sources):
         if cancelled():
             break
+        if on_source:
+            on_source(k, len(sources), s['id'])
         step = (lambda msg, i, n, o=s['owner']: progress(f'[{o}] {msg}', i, n)) if progress else None
         out['sources'][s['owner'] + ' · ' + s['path']] = index_source(conn, s['id'], step, cancelled)
     if progress:
