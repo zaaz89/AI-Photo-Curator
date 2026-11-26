@@ -1,10 +1,12 @@
 import CuratorCore
 import SwiftUI
 
-/// Quick review (M10): the album one photo at a time, full window. → keeps, ← leaves out, ⌫ or ⌘Z goes back
-/// and undoes, Space skips, F favourite, Z toggles 100% on the subject, E shows the faces large, C compares the
-/// frames of a moment, ? the keys. Every key comes from `ReviewKeymap` (M12d); keys it does not know pass
-/// through (VoiceOver, menus). Every decision is written at once; nothing is ever deleted.
+/// Quick review (M10): the album one photo at a time, full window. → or K keeps, ← or X leaves out, ⌫ or ⌘Z goes
+/// back and undoes, Space skips, F favourite, Z toggles 100% on the subject, E shows the faces large, C opens Survey
+/// for the frames of a moment, ? the keys. Every key comes from `ReviewKeymap` (M12d, M14c); keys it does not know
+/// pass through (VoiceOver, menus). Every decision is written at once; nothing is ever deleted.
+/// M14c: moments are decided in Survey (`SurveyView`): the question review opens on it, then goes on here with the
+/// other photos.
 struct QuickReviewView: View {
     @EnvironmentObject var library: LibraryModel
     @State var filter: ReviewFilter
@@ -17,12 +19,10 @@ struct QuickReviewView: View {
     @State private var flashTask: Task<Void, Never>?
     /// The last decision, for the direction the photo leaves in (none with Reduce Motion: a cross-fade).
     @State private var lastAction: ReviewAction?
-    /// What is in the middle of the view at 100% (unit coordinates); shared by both panes of the compare view.
+    /// What is in the middle of the view at 100% (unit coordinates).
     @State private var zoomCentre = ZoomPoint.centre
-    /// Compare mode (M12d): two frames of a moment side by side.
-    @State private var compare: CompareSession?
-    /// Compare was opened from Selection: leaving it closes the review too.
-    @State private var compareOnly = false
+    /// Survey on screen (M14c), and where it came from.
+    @State private var survey: ActiveSurvey?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The session goes through a chosen subset (e.g. the skipped photos), not the filter's whole queue.
@@ -35,10 +35,12 @@ struct QuickReviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 0) {
-                if let c = compare {
-                    CompareView(session: c, zoomed: zoom, centre: $zoomCentre, pick: pickInCompare,
-                                toggleZoom: toggleZoom, showKeys: { showKeys.toggle() }, close: closeCompare)
-                        .padding(.horizontal, Space.xxl).padding(.vertical, Space.l)
+                if let s = survey {
+                    SurveyView(request: s.request, singlesNext: s.origin == .questions ? max(0, session.queue.count - session.index) : 0) { finished in
+                        surveyEnded(s, finished: finished)
+                    }
+                    .id(s.id)
+                    .transition(.opacity)
                 } else {
                     topBar.padding(.horizontal, 22).padding(.top, 14)
                     if session.finished && started {
@@ -54,7 +56,7 @@ struct QuickReviewView: View {
                                         Text(String(format: library.tr("compareFrames"), siblings.count))
                                             .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                                         Spacer(minLength: 0)
-                                        Button { openCompare() } label: {
+                                        Button { openSurvey() } label: {
                                             Label(library.tr("compare") + "  C", systemImage: "rectangle.split.2x1")
                                         }
                                         .buttonStyle(.glass).help(library.tr("compareHelp"))
@@ -77,7 +79,7 @@ struct QuickReviewView: View {
                     }
                 }
             }
-            if showKeys { KeysCard(context: compare == nil ? .single : .compare) { showKeys = false } }
+            if showKeys && survey == nil { KeysCard(context: .single) { showKeys = false } }
         }
         .stageDarkSurface()
         .focusable().focusEffectDisabled().focused($focused)
@@ -86,15 +88,17 @@ struct QuickReviewView: View {
         .onKeyPress(phases: .down) { press in handle(press) }
         .onAppear {
             begin(filter, ids: library.takeReviewSubset()); focused = true
-            openRequestedCompare()
+            openRequestedSurvey()
         }
-        .onChange(of: library.compareRequest) { _, _ in openRequestedCompare() }
-        .onChange(of: library.reviewUndoRequest) { _, _ in if compare == nil { back() } }
+        .onChange(of: library.surveyRequest) { _, _ in openRequestedSurvey() }
+        // In Survey, ⌘Z is Survey's Back (it listens itself).
+        .onChange(of: library.reviewUndoRequest) { _, _ in if survey == nil { back() } }
         // Zoom never sticks: a new photo, focus moving away or the app going to the background resets it (#19).
         .onChange(of: session.current) { _, _ in zoom = false }
         .onChange(of: focused) { _, f in if !f { zoom = false } }
         .onChange(of: scenePhase) { _, _ in zoom = false }
         .onChange(of: library.automationKeyTick) { _, _ in
+            guard survey == nil else { return }          // Survey maps the keys itself
             let k: ReviewKey? = switch library.automationKey {
             case "right": ReviewKey.right
             case "left": ReviewKey.left
@@ -105,13 +109,11 @@ struct QuickReviewView: View {
             case "faces": ReviewKey.character("e")
             case "keys": ReviewKey.character("?")
             case "compare": ReviewKey.character("c")
-            case "pick1": ReviewKey.character("1")
-            case "pick2": ReviewKey.character("2")
             default: nil
             }
             if library.automationKey == "zoom" && !zoom { toggleZoom() }
             if library.automationKey == "unzoom" { zoom = false }
-            if let k, let cmd = ReviewKeymap.command(for: k, in: compare == nil ? .single : .compare) { perform(cmd) }
+            if let k, let cmd = ReviewKeymap.command(for: k, in: .single) { perform(cmd) }
         }
         // Another album: the ids mean something else. Close without touching any bookmark.
         .onChange(of: library.loadedTripId) { _, _ in library.reviewFilter = nil }
@@ -187,7 +189,7 @@ struct QuickReviewView: View {
             .accessibilityAction(named: Text(library.tr("skip"))) { decide(.skip) }
             .accessibilityAction(named: Text(library.tr("back"))) { back() }
             .accessibilityAction(named: Text(library.tr(zoom ? "a11yZoomFit" : "zoomToggle"))) { toggleZoom() }
-            .accessibilityAction(named: Text(library.tr("compare"))) { openCompare() }
+            .accessibilityAction(named: Text(library.tr("compare"))) { openSurvey() }
             .id(p.id)
             .transition(photoTransition)
         .padding(.horizontal, 22).padding(.vertical, 6)
@@ -237,6 +239,7 @@ struct QuickReviewView: View {
                     .buttonStyle(.glassProminent).tint(StatusColor.kept).controlSize(.extraLarge)
                 }
             }
+            ShortcutBar(context: .single)
         }
     }
 
@@ -302,17 +305,17 @@ struct QuickReviewView: View {
         library.reviewFilter = nil
     }
 
-    // MARK: keys, zoom and compare (M12d)
+    // MARK: keys, zoom and Survey (M12d, M14c)
 
     /// One key press through the keymap. Not the review's key: .ignored, so it reaches VoiceOver and the menus.
     func handle(_ press: KeyPress) -> KeyPress.Result {
-        guard let key = reviewKey(press) else { return .ignored }
+        guard survey == nil, let key = reviewKey(press) else { return .ignored }
         var mods: ReviewKeyModifiers = []
         if press.modifiers.contains(.shift) { mods.insert(.shift) }
         if press.modifiers.contains(.command) { mods.insert(.command) }
         if press.modifiers.contains(.option) { mods.insert(.option) }
         if press.modifiers.contains(.control) { mods.insert(.control) }
-        guard let cmd = ReviewKeymap.command(for: key, modifiers: mods, in: compare == nil ? .single : .compare) else {
+        guard let cmd = ReviewKeymap.command(for: key, modifiers: mods, in: .single) else {
             return .ignored
         }
         perform(cmd)
@@ -343,70 +346,58 @@ struct QuickReviewView: View {
         case .favourite: favourite()
         case .faces: showFaces.toggle()
         case .zoom: toggleZoom()
-        case .compare: openCompare()
+        case .survey: openSurvey()
         case .keys: showKeys.toggle()
         case .close:
-            if showKeys { showKeys = false } else if compare != nil { closeCompare() } else { close() }
-        case .pickFirst: pickInCompare(1)
-        case .pickSecond: pickInCompare(2)
-        case .nextChallenger: compare?.next()
-        case .previousChallenger: compare?.previous()
+            if showKeys { showKeys = false } else { close() }
+        default: break                                 // Survey's own commands
         }
     }
 
     /// Z: 100% of the original on the main face (or the centre), or back to the whole photo.
     func toggleZoom() {
         if zoom { zoom = false; return }
-        let target: Photo?
-        if let c = compare { target = library.photo(c.keeper) } else { target = photo }
-        guard let p = target, !p.isVideo else { return }
+        guard let p = photo, !p.isVideo else { return }
         zoomCentre = ZoomMath.target(faces: p.faces?.boxes)
         zoom = true
     }
 
-    /// Opens the compare view for the current photo's moment (the current frame on the right), or for `group`.
-    @discardableResult
-    func openCompare(group: Int? = nil) -> Bool {
-        let current = group == nil ? photo : nil
-        let frames: [Photo]
-        if let group {
-            frames = library.photos.filter { $0.duplicate?.group == group && !$0.isVideo }
-        } else if let p = current, let siblings = momentFrames(p) {
-            frames = siblings.filter { !$0.isVideo }
-        } else {
-            frames = []
-        }
-        guard frames.count > 1 else { return false }
-        let keeper = frames.first { $0.duplicate?.keeper == true }?.id
-        compare = CompareSession(frames: frames.map(\.id), keeper: keeper, challenger: current?.id)
+    /// C: Survey over the current photo's moment; leaving it comes back here.
+    func openSurvey() {
+        guard let p = photo, let g = p.duplicate?.group, momentFrames(p) != nil,
+              let m = SurveyMoment.from(photos: library.photos, group: g) else { return }
         zoom = false
         showFaces = false
-        return true
+        survey = ActiveSurvey(request: SurveyRequest(moments: [m], standalone: true), origin: .fromSingle)
     }
 
-    /// Selection asked for a moment's compare view.
-    func openRequestedCompare() {
-        guard let g = library.compareRequest else { return }
-        library.compareRequest = nil
-        compareOnly = true
-        if !openCompare(group: g) { compareOnly = false; library.reviewFilter = nil }
-    }
-
-    /// 1 or 2: that frame is the one for the album, through the same call as Selection's "Keep This One".
-    func pickInCompare(_ side: Int) {
-        guard var c = compare, let group = library.photo(c.keeper)?.duplicate?.group else { return }
-        guard let keeper = c.pick(side) else { return }
-        withMotion(.fade, reduceMotion: reduceMotion) { compare = c }
-        library.keep(group: group, photo: keeper)
-        let name = library.photo(keeper)?.filename ?? ""
-        AccessibilityNotification.Announcement(String(format: library.tr("a11yKeeperPicked"), name)).post()
-    }
-
-    func closeCompare() {
-        compare = nil
+    /// The question review or the Moments page asked for Survey.
+    func openRequestedSurvey() {
+        guard let r = library.surveyRequest else { return }
+        library.surveyRequest = nil
         zoom = false
-        if compareOnly { compareOnly = false; library.reviewFilter = nil }
+        survey = ActiveSurvey(request: r, origin: r.standalone ? .standalone : .questions)
+    }
+
+    /// Survey ended. From the question review: on to the other photos, or the review is done and the path moves
+    /// on. Opened on its own: the review closes. From here (C): back to this photo.
+    func surveyEnded(_ s: ActiveSurvey, finished: Bool) {
+        survey = nil
         focused = true
+        switch s.origin {
+        case .fromSingle:
+            break
+        case .standalone:
+            library.reviewClosed(finished: false)
+            library.reviewFilter = nil
+        case .questions:
+            if !finished {
+                library.reviewClosed(finished: false)
+                library.reviewFilter = nil
+            } else if session.finished {
+                close()                                    // nothing else to ask: the questions are answered
+            }
+        }
     }
 
     /// The photo leaves in the direction of its key (→ keep, ← leave out); with Reduce Motion, or for a skip or
@@ -443,6 +434,14 @@ struct QuickReviewView: View {
         default: "exclamationmark.circle"
         }
     }
+}
+
+/// Survey on screen in the quick review, and where it came from (M14c).
+struct ActiveSurvey {
+    enum Origin { case questions, standalone, fromSingle }
+    let id = UUID()
+    let request: SurveyRequest
+    let origin: Origin
 }
 
 /// The end of a review: what was decided, and what to do next.

@@ -1,6 +1,6 @@
 import Foundation
 
-// M12d (UX audit #12, #19, #11): real 100% zoom and the compare mode's position among the frames of a moment.
+// M12d (UX audit #12, #19): real 100% zoom (shared by the single review and Survey, M14c).
 // Pure maths in points and unit coordinates, so the zoom target, clamping and panning are unit-tested.
 
 /// A point in unit image coordinates: 0...1, origin top-left (like the engine's face boxes).
@@ -67,70 +67,5 @@ public enum ZoomMath {
 
     static func clampUnit(_ p: ZoomPoint) -> ZoomPoint {
         ZoomPoint(x: min(max(p.x, 0), 1), y: min(max(p.y, 0), 1))
-    }
-}
-
-// MARK: compare mode
-
-/// Two frames of a moment side by side: the keeper on the left, a challenger on the right. ←/→ change the
-/// challenger, 1 or 2 picks the one for the album ("winner stays"): after a pick the next frame comes in.
-public struct CompareSession: Equatable, Sendable {
-    public let frames: [Int]
-    public private(set) var keeper: Int
-    public private(set) var challenger: Int?
-
-    /// `keeper` defaults to the first frame; `challenger` to the frame after the keeper.
-    public init(frames: [Int], keeper: Int?, challenger: Int? = nil) {
-        var seen = Set<Int>()
-        let unique = frames.filter { seen.insert($0).inserted }
-        self.frames = unique
-        let k = keeper.flatMap { unique.contains($0) ? $0 : nil } ?? unique.first ?? 0
-        self.keeper = k
-        if let c = challenger, c != k, unique.contains(c) {
-            self.challenger = c
-        } else {
-            self.challenger = nil
-            self.challenger = following(k)
-        }
-    }
-
-    /// The frames that can be the challenger, in the moment's order.
-    public var others: [Int] { frames.filter { $0 != keeper } }
-
-    /// The challenger's place among the others, 1-based, and how many there are.
-    public var position: (index: Int, count: Int) {
-        let o = others
-        return ((challenger.flatMap { o.firstIndex(of: $0) } ?? 0) + 1, o.count)
-    }
-
-    /// The next frame after `id` in the moment's order that is not the keeper, wrapping around.
-    func following(_ id: Int, step: Int = 1) -> Int? {
-        guard !frames.isEmpty else { return nil }
-        let start = frames.firstIndex(of: id) ?? 0
-        for i in 1...frames.count {
-            let f = frames[((start + step * i) % frames.count + frames.count) % frames.count]
-            if f != keeper { return f }
-        }
-        return nil
-    }
-
-    public mutating func next() { if let c = challenger { challenger = following(c) } }
-    public mutating func previous() { if let c = challenger { challenger = following(c, step: -1) } }
-
-    /// 1 keeps the left frame, 2 makes the right one the keeper. Returns the keeper after the pick
-    /// (nil for any other number or without a challenger).
-    @discardableResult
-    public mutating func pick(_ side: Int) -> Int? {
-        guard let c = challenger else { return side == 1 ? keeper : nil }
-        switch side {
-        case 1:
-            challenger = following(c)
-        case 2:
-            keeper = c
-            challenger = following(c)
-        default:
-            return nil
-        }
-        return keeper
     }
 }

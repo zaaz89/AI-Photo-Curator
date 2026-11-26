@@ -11,8 +11,9 @@ import Foundation
 ///   photocurator://replay                                   (the sorting stage plays again)
 ///   photocurator://album?id=<album id>
 ///   photocurator://review?filter=decisions|all|leftOut      photocurator://review?close=1
-///   photocurator://key?k=right|left|back|skip|favourite|faces|zoom|unzoom|keys|esc|compare|pick1|pick2
-///   (keys go through `ReviewKeymap`, so in the compare view right/left change the frame on the right)
+///   photocurator://key?k=right|left|back|skip|favourite|faces|zoom|unzoom|keys|esc|compare|pick1|pick2|confirm|accept
+///   (keys go through `ReviewKeymap`: in Survey right/left move the focus, pick1/pick2 press 1/2, confirm is Return,
+///   accept is A, skip is S; compare (C) opens Survey from the single review)
 ///   photocurator://window?w=1500&h=980
 ///   photocurator://reload
 ///   photocurator://firstrun?page=0|1|2                      photocurator://firstrun?close=1   (M12f)
@@ -32,7 +33,7 @@ public enum AutomationCommand: Equatable, Sendable {
     public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut", "settings", "sorting",
                                             "journey", "photos", "analysis", "decisions", "questions", "album", "moments", "chapters"]
     public static let keys: Set<String> = ["right", "left", "back", "skip", "favourite", "faces", "zoom", "unzoom", "keys", "esc",
-                                             "compare", "pick1", "pick2"]
+                                             "compare", "pick1", "pick2", "confirm", "accept"]
 
     /// nil for anything that is not a known, well-formed command.
     public init?(url: URL) {

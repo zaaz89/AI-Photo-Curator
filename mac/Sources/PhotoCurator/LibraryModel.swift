@@ -510,13 +510,16 @@ enum SelectionView: String, CaseIterable, Identifiable {
         if loadedTripId != nil && !photos.isEmpty { reviewFilter = f }
     }
 
-    /// The moment (duplicate group id) whose compare view Selection asked for (M12d). The quick review opens on
-    /// that compare view and closes with it.
-    @Published var compareRequest: Int?
-    func startCompare(group: Int) {
-        guard loadedTripId != nil, !photos.isEmpty else { return }
-        compareRequest = group
-        if reviewFilter == nil { reviewFilter = .decisions }
+    /// The moments a Survey should open on (M14c), taken once by the quick review when it starts. `standalone`:
+    /// the survey was opened on its own (Moments page) and closing it closes the review too.
+    @Published var surveyRequest: SurveyRequest?
+    func startSurvey(_ moments: [SurveyMoment], standalone: Bool = true, ordered: Bool = true) {
+        guard loadedTripId != nil, !photos.isEmpty, !moments.isEmpty else { return }
+        surveyRequest = SurveyRequest(moments: moments, standalone: standalone, ordered: ordered)
+        if reviewFilter == nil {
+            reviewSubset = []                          // nothing after the survey: it closes the review
+            reviewFilter = .decisions
+        }
     }
 
     /// Returns once every queued write reached the engine and the album was reloaded (M12d: Selection reloads
@@ -711,6 +714,36 @@ enum SelectionView: String, CaseIterable, Identifiable {
         reviewedMoments.insert(group)
         pulse(.pick)
         enqueue { api in try await api.keep(trip: tripId, group: group, photo: photo) }
+    }
+
+    /// M14c Survey: Return on a moment. The engine keeps one keeper per moment, so the first keeper (the
+    /// recommended one when kept) becomes it; other keepers get the "keep" mark ("keep too"), so the export
+    /// takes them as well; the rest are left out (`rejected`, reversible in Left Out). Only marks that change
+    /// are written; every write is undoable through the menu as well.
+    func applySurvey(_ d: SurveyDecision) {
+        guard let tripId, tripId == loadedTripId else { return }
+        if let primary = d.primary {
+            keep(group: d.moment, photo: primary)
+            if let p = photo(primary), p.rejected { mark([p], ["rejected": .bool(false)], name: tr("keep")) }
+        } else {
+            reviewedMoments.insert(d.moment)
+        }
+        let extras = d.extras.compactMap(photo).filter { !$0.keep || $0.rejected }
+        mark(extras, ["keep": .bool(true), "rejected": .bool(false)], name: tr("keepToo"))
+        let out = d.leftOut.compactMap(photo).filter { !$0.rejected || $0.keep }
+        mark(out, ["rejected": .bool(true), "keep": .bool(false)], name: tr("leaveOut"))
+        if d.primary == nil { pulse(.leaveOut) }
+    }
+
+    /// M14c Survey: Back over a confirmed moment. Every frame gets its earlier marks, the keeper goes back to the
+    /// owner's earlier choice (or the recommendation).
+    func undoSurvey(_ e: SurveyEntry) {
+        guard let tripId, tripId == loadedTripId, let d = e.decision else { return }
+        for (id, previous) in e.previous where marksOf(id) != previous { restore(id, previous) }
+        if d.primary != nil {
+            let keeper = e.previousKeeper
+            enqueue { api in try await api.keep(trip: tripId, group: d.moment, photo: keeper) }
+        }
     }
 
     func markStep(_ step: String, _ done: Bool = true) {
@@ -1084,27 +1117,30 @@ enum SelectionView: String, CaseIterable, Identifiable {
     /// The question review runs for the path: when it ends, the questions count as answered.
     private var questionReview = false
 
-    /// The photos behind the open questions, in time order: every frame of a moment without a clear best frame,
-    /// and the "Have a look" photos.
-    func questionIds() async -> [Int] {
-        guard let trip = shownTrip else { return [] }
-        let unclear = ((try? await api.moments(trip: trip)) ?? []).filter { !$0.clear }
-        var ids = Set(unclear.flatMap { $0.members.map(\.id) })
-        for p in photos where sortVerdict(p) == .check { ids.insert(p.id) }
-        return photos.map(\.id).filter { ids.contains($0) }
+    /// The open questions (M14c): moments without a clear best frame go to Survey, the "Have a look" photos that
+    /// are not frames of those moments to the single review afterwards (time order).
+    func questions() async -> (moments: [SurveyMoment], singles: [Int]) {
+        guard let trip = shownTrip else { return ([], []) }
+        let unclear = ((try? await api.moments(trip: trip)) ?? []).filter { !$0.clear && $0.members.count > 1 }
+        let inMoments = Set(unclear.flatMap { $0.members.map(\.id) })
+        let singles = photos.filter { sortVerdict($0) == .check && !inMoments.contains($0.id) }.map(\.id)
+        return (unclear.map { SurveyMoment($0) }, singles)
     }
 
-    /// "Answer N questions": a quick review of exactly those photos (moments open in compare with C).
+    /// "Answer N questions": Survey over the unclear moments, then a quick review of the other photos.
     func answerQuestions() {
         Task {
-            let ids = await questionIds()
-            if ids.isEmpty {
+            let q = await questions()
+            if q.moments.isEmpty && q.singles.isEmpty {
                 // Only clocks are left: they are answered on People & Clocks.
                 if journeyInput.unsureClocks > 0 { destination = .people } else { acceptQuestions() }
                 return
             }
+            guard loadedTripId != nil, !photos.isEmpty else { return }
             questionReview = true
-            startReview(.decisions, ids: ids)
+            reviewSubset = q.singles
+            surveyRequest = q.moments.isEmpty ? nil : SurveyRequest(moments: q.moments, standalone: false)
+            reviewFilter = .decisions
         }
     }
 
