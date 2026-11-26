@@ -70,3 +70,21 @@ import Testing
     #expect(Strings.count(1, .day, .sl) == "1 dan" && Strings.count(2, .day, .sl) == "2 dneva" && Strings.count(5, .day, .sl) == "5 dni")
     #expect(Strings.count(2, .event, .sl) == "2 dogodka" && Strings.count(1, .video, .en) == "1 video")
 }
+
+// M12g (audit #28): an engine code without a translation shows a generic text, never the raw code.
+@Test func codeTextFallsBackToGenericText() {
+    let known = Strings.codeText(prefix: "why2_", code: "movement_blur", otherKey: "reason_other", .en)
+    #expect(known.known && known.text == "Blurred by movement")
+    let unknown = Strings.codeText(prefix: "why2_", code: "brand_new_code", otherKey: "reason_other", .en)
+    #expect(!unknown.known && unknown.text == "Other reason")
+    #expect(Strings.codeText(prefix: "why2_", code: "brand_new_code", otherKey: "reason_other", .sl).text == "Drug razlog")
+    #expect(Strings.codeText(prefix: "warn_", code: "x", otherKey: "warn_other", .en).text == "Other note")
+}
+
+@Test func m12gKeysExistInBothLanguages() {
+    for key in ["eyes_closed", "eyes_unsure", "eyes_open", "eyes_away", "reason_other", "warn_other", "problem_other",
+                "chipProgress", "chipWaiting", "thumbUnreadable", "thumbNoPreview", "thumbLoading"] {
+        #expect(Strings.table[key] != nil, "missing \(key)")
+    }
+    #expect(String(format: Strings.text("chipProgress", .en), 3, 10) == "3 of 10 photos read")
+}

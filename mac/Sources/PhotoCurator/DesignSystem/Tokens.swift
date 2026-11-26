@@ -81,3 +81,59 @@ enum StatusColor {
         })
     }
 }
+
+// MARK: M12g: scaled display text, stage ink
+
+/// A fixed point size that still follows the user's text size (`ScaledMetric`). For display text only (hero and
+/// stage titles, big numbers); decorative symbols keep fixed sizes. `relativeTo` picks the text style whose
+/// scaling curve is used.
+private struct ScaledSystemFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, relativeTo style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    /// `.font(.system(size:))` that scales with text size. Use for text, never for decorative glyphs.
+    func scaledFont(_ size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default,
+                    relativeTo style: Font.TextStyle = .body) -> some View {
+        modifier(ScaledSystemFont(size: size, weight: weight, design: design, relativeTo: style))
+    }
+
+    /// The Sorting Stage and Quick Review stay dark in every system appearance (M12g, audit #31): one place
+    /// for that decision. Increase Contrast is handled by `StageInk`, the glows and the tile outlines.
+    func stageDarkSurface() -> some View {
+        environment(\.colorScheme, .dark)
+    }
+}
+
+private struct DefaultActionKey: ViewModifier {
+    let isOn: Bool
+    func body(content: Content) -> some View {
+        if isOn { content.keyboardShortcut(.defaultAction) } else { content }
+    }
+}
+
+extension View {
+    /// Return triggers this button when `isOn` (M12g, audit #32): one default action per screen.
+    func defaultActionKey(if isOn: Bool = true) -> some View { modifier(DefaultActionKey(isOn: isOn)) }
+}
+
+/// Text and outline opacities on the dark stage. Secondary text is 0.78 white (was 0.6); with Increase
+/// Contrast it goes to 0.92. Contrast ratios still to be measured on a Mac over the brightest glows.
+enum StageInk {
+    static func secondaryOpacity(_ contrast: ColorSchemeContrast) -> Double { contrast == .increased ? 0.92 : 0.78 }
+    static func secondary(_ contrast: ColorSchemeContrast) -> Color { .white.opacity(secondaryOpacity(contrast)) }
+    static func outline(_ contrast: ColorSchemeContrast) -> Color { .white.opacity(contrast == .increased ? 0.5 : 0.14) }
+    static func glowOpacity(_ contrast: ColorSchemeContrast) -> Double { contrast == .increased ? 0.12 : 0.3 }
+}

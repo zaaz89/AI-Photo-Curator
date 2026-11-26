@@ -120,3 +120,26 @@ Zoom (`ZoomMath`, `ReviewZoom.swift`): 100% = one image pixel on one screen pixe
 the largest main face (`target`), clamped so no empty band shows (`clamp`/`offset`), drag moves the centre (`pan`).
 The original is decoded with ImageIO off the main thread only for the photo on screen
 (`PhotoCurator/ZoomablePhoto.swift`); zoom resets on a new photo, focus loss and scene-phase change.
+
+## M12g: accessibility and copy (UX audit P2 rows 23 to 33)
+
+- **Scaled display text** (#26): `.scaledFont(size, weight:, design:, relativeTo:)` (DesignSystem/Tokens.swift) is a
+  `ScaledMetric`-backed replacement for `.font(.system(size:))` on text. Used for stage and page titles, the stage
+  counters and the progress percent. Fixed `.system(size:)` stays only for decorative glyphs (hero symbols, flash
+  icon, badge glyphs sized from the badge). Ratchet `fontSystemSize` 20 to 13. Not done (file owned by the motion
+  pass): AlbumHome 42 / 26 pt hero and step titles (lines 69, 77, 135, 199, 320).
+- **Dark stage decision** (#31): the Sorting Stage and Quick Review stay dark in every appearance (photos are judged
+  on a dark surface; the stage glows are the product's look). `stageDarkSurface()` is the one place that forces it, so
+  Quick Review and the Stage cannot drift. They respect Increase Contrast through `StageInk`: secondary text 0.78 to
+  0.92 white, tile outlines 0.14 to 0.5, glow opacity 0.3 to 0.12, tray scrim 0.25 to 0.45 (0.7 with Reduce
+  Transparency). System text styles (`.secondary`) already adapt. Hard-coded white opacities on the stage must use
+  `StageInk`, not a literal.
+- **Colour is never the only state** (#25): small stage tiles keep a 10 pt glyph for "to look at" and "left out"; with
+  Differentiate Without Colour every state glyph shows at any size.
+- **Engine codes without a translation** (#28): `LibraryModel.trCode(prefix, code, other:)` shows "Other reason" /
+  "Other note" and logs the code (`Strings.codeText`, tested). Never show a raw engine code.
+- **Default action key** (#32): `.defaultActionKey(if:)` / `.keyboardShortcut(.defaultAction)`: Next on the settled Stage
+  (Resume / Analyse Again while those are the prominent action) and Align on the first pending clock lane.
+- **Thumbnails** (#33): `ThumbnailCache.result(for:side:)` reports `.unreadable` ("Cannot read file") or `.noPreview`;
+  `Thumbnail` shows the label (symbol only when the cell is too small), uses the cached 260 px image as a stand-in
+  while a large one loads, and a spinner for sides above 520 (Quick Review).

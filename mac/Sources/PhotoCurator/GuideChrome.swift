@@ -200,7 +200,7 @@ struct StepPage<Content: View>: View {
                 Image(systemName: step?.symbol ?? "person.2.crop.square.stack").font(.title.weight(.semibold))
                     .foregroundStyle((step?.tint ?? .teal).gradient)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(step.map { library.tr("stepTitle_" + $0.rawValue) } ?? library.tr("stepTitle_photos")).font(.system(size: 30, weight: .bold))
+                    Text(step.map { library.tr("stepTitle_" + $0.rawValue) } ?? library.tr("stepTitle_photos")).scaledFont(30, weight: .bold, relativeTo: .title)
                     Text(lead).font(.title3).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
@@ -268,7 +268,7 @@ struct AnalysisCard: View {
                 Text(library.tr("analysingHint")).foregroundStyle(.secondary).lineLimit(3)
             }
             Spacer()
-            Text("\(Int(library.job.progress))%").font(.system(size: compact ? 22 : 30, weight: .semibold, design: .rounded))
+            Text("\(Int(library.job.progress))%").scaledFont(compact ? 22 : 30, weight: .semibold, design: .rounded, relativeTo: .title2)
                 .monospacedDigit().contentTransition(.numericText(value: library.job.progress))
         }
         .padding(compact ? 14 : 20)
@@ -301,6 +301,7 @@ struct FaceCrop: View {
     let url: URL
     let box: Photo.Faces.Box
     var size: CGFloat = 58
+    @EnvironmentObject private var library: LibraryModel
     @State private var image: NSImage?
 
     var body: some View {
@@ -326,7 +327,13 @@ struct FaceCrop: View {
             }
         }
         .task(id: url.path + "\(box.x)\(box.y)") { image = await crop() }
-        .accessibilityLabel(state == "closed" ? "eyes closed" : (state == "unsure" ? "eyes unclear" : "eyes open"))
+        .accessibilityLabel(eyesLabel(state))
+    }
+
+    /// "Eyes closed" (and ", looking away"), from Strings in the app language (M12g, #23).
+    func eyesLabel(_ state: String) -> String {
+        let eyes = library.tr(state == "closed" ? "eyes_closed" : (state == "unsure" ? "eyes_unsure" : "eyes_open"))
+        return box.lookingAway == true ? eyes + ", " + library.tr("eyes_away") : eyes
     }
 
     func crop() async -> NSImage? {

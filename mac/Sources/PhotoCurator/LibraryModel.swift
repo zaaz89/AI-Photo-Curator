@@ -1,6 +1,7 @@
 import AppKit
 import CuratorCore
 import Foundation
+import os
 import SwiftUI
 
 /// Sidebar destinations.
@@ -117,6 +118,14 @@ enum AssistantSheet: String, Identifiable {
     func tr(_ key: String) -> String { Strings.text(key, lang) }
     /// A text for a value from the engine; the engine's own words when there is no translation.
     func trOr(_ key: String, _ fallback: String) -> String { Strings.table[key] == nil ? fallback : Strings.text(key, lang) }
+    /// A text for an engine code (`why2_…`, `warn_…`, `problem_…`): the translation, else a generic "Other …" text
+    /// (never the raw code, M12g #28). The unknown code goes to the log so a missing translation can be found.
+    func trCode(_ prefix: String, _ code: String, other: String) -> String {
+        let r = Strings.codeText(prefix: prefix, code: code, otherKey: other, lang)
+        if !r.known { Self.log.info("No translation for engine code \(prefix + code, privacy: .public)") }
+        return r.text
+    }
+    private static let log = Logger(subsystem: "si.beehive.photocurator", category: "strings")
 
     // MARK: loading
 
@@ -603,7 +612,7 @@ enum AssistantSheet: String, Identifiable {
             var problems: [String] = [], added = 0
             do {
                 let s = try await api.suggest(paths: urls.map(\.path))
-                problems += s.rejected.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \(trOr("problem_" + $0.problem, $0.problem))" }
+                problems += s.rejected.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \(trCode("problem_", $0.problem, other: "problem_other"))" }
                 for f in s.folders {
                     let name = URL(fileURLWithPath: f.path).lastPathComponent
                     do { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? name : f.owner); added += 1 }
