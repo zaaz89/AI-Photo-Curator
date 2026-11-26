@@ -98,15 +98,29 @@ def list_sources(cid):
     rows = conn.execute(
         "SELECT s.*, (SELECT COUNT(*) FROM assets a WHERE a.source_id = s.id AND a.status = 'present') AS assets "
         'FROM sources s ORDER BY s.id').fetchall()
+    from app.source_chips import chip_labels, pretty_device, source_state
+    job = _job if _job['collection'] == cid and _job['running'] and (_job.get('kind') or 'analysis') == 'analysis' \
+        else None
     out = []
-    for r in rows:
+    for i, r in enumerate(rows):
         d = dict(r)
         # M14: the cameras and phones in the folder, most photos first (the album's folder chips show them).
-        d['devices'] = [x[0] for x in conn.execute(
-            "SELECT COALESCE(NULLIF(model, ''), make) AS device, COUNT(*) AS n FROM assets "
-            "WHERE source_id = ? AND status = 'present' AND COALESCE(NULLIF(model, ''), make, '') != '' "
-            'GROUP BY device ORDER BY n DESC LIMIT 3', (r['id'],))]
+        # M14c: by the names people know ("Sony A7 IV", not "ILCE-7M4").
+        devices = []
+        for x in conn.execute(
+                "SELECT COALESCE(make, '') AS make, COALESCE(model, '') AS model, COUNT(*) AS n FROM assets "
+                "WHERE source_id = ? AND status = 'present' AND COALESCE(NULLIF(model, ''), make, '') != '' "
+                'GROUP BY make, model ORDER BY n DESC', (r['id'],)):
+            name = pretty_device(x['make'], x['model'])
+            if name and name not in devices:
+                devices.append(name)
+        d['devices'] = devices[:3]
+        # M14c: what the chip says while the album is built (waiting, reading n of m, no photos found, failed).
+        d['read_state'] = source_state(d, i, os.path.isdir(r['path']), job)
         out.append(d)
+    labels = chip_labels(out)
+    for d in out:
+        d['chip'] = labels[d['id']]
     return jsonify({'sources': out})
 
 
@@ -165,23 +179,25 @@ def remove_source(cid, sid):
 
 
 def _run_index(cid):
-    # Until the per-day loop starts, the stage's own share shows; then the share of days done (M13), so the
-    # bar does not jump back to 0 for every stage of every day.
-    days_started = [False]
+    # M14c: one phase plan for the whole analysis (app/analysis_progress.py). The bar is the plan's progress, so
+    # it never jumps back for a new folder, a new stage or a new day; `stage` says which phase, day and step runs.
+    _job['stage'] = None
 
     def progress(msg, i, n):
         _job['status'] = msg if not n else f'{msg} ({i}/{n})'
-        if not days_started[0]:
-            _job['progress'] = int(i / n * 100) if n else _job['progress']
+
+    def report(state):
+        _job['stage'] = state
+        _job['progress'] = max(_job.get('progress') or 0, state['progress'])
 
     def overall(frac):
-        days_started[0] = True
-        _job['progress'] = int(frac * 100)
+        pass
     from app.ai import throttle
     try:
         conn = col.open_db(cid)
         throttle.reset_totals()
-        _job['result'] = analyze_collection(conn, progress, cancelled=lambda: _job['cancel'], overall=overall)
+        _job['result'] = analyze_collection(conn, progress, cancelled=lambda: _job['cancel'], overall=overall,
+                                            report=report)
         if not _job['cancel']:
             # The measured speed of this Mac feeds the time estimate in Settings (M11).
             throttle.record_speed((_job['result'].get('quality') or {}).get('scored', 0),
@@ -205,7 +221,7 @@ def start_index(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"indexing {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, kind='analysis', status='Starting…', progress=0,
+        _job.update(running=True, collection=cid, kind='analysis', status='Starting…', progress=0, stage=None,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_index, args=(cid,), daemon=True).start()
     return jsonify({'ok': True})
@@ -213,7 +229,8 @@ def start_index(cid):
 
 @bp.route('/api/collections/<cid>/index', methods=['GET'])
 def index_status(cid):
-    return jsonify({k: _job.get(k) for k in ('running', 'collection', 'kind', 'status', 'progress', 'result', 'error')})
+    return jsonify({k: _job.get(k) for k in ('running', 'collection', 'kind', 'status', 'progress', 'result', 'error',
+                                             'stage')})
 
 
 @bp.route('/api/collections/<cid>/index', methods=['DELETE'])
@@ -348,7 +365,7 @@ def search_photos(cid):
     if missing:
         with _job_lock:
             if not _job['running']:
-                _job.update(running=True, collection=cid, kind='search_index', status='Preparing search…', progress=0,
+                _job.update(running=True, collection=cid, kind='search_index', status='Preparing search…', progress=0, stage=None,
                             result=None, error=None, cancel=False, started=time.time())
                 threading.Thread(target=_run_search_index, args=(cid,), daemon=True).start()
         return jsonify({'preparing': True, 'missing': missing, 'query': request.args.get('q', ''), 'results': []})
@@ -404,7 +421,7 @@ def start_describe(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, kind='describe', status='Starting local AI…', progress=0,
+        _job.update(running=True, collection=cid, kind='describe', status='Starting local AI…', progress=0, stage=None,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_describe, args=(cid, int(limit) if limit else None), daemon=True).start()
     return jsonify({'ok': True})
@@ -554,7 +571,7 @@ def start_smart_export(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, kind='export', status='Preparing export…', progress=0,
+        _job.update(running=True, collection=cid, kind='export', status='Preparing export…', progress=0, stage=None,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_smart_export,
                      args=(cid, _export_options(data), dest, data.get('resume_dir'),
@@ -640,7 +657,7 @@ def export_wallpapers(cid):
     with _job_lock:
         if _job['running']:
             return _err(f"a job for {_job['collection']} is still running", 409)
-        _job.update(running=True, collection=cid, kind='export', status='Exporting wallpapers…', progress=0,
+        _job.update(running=True, collection=cid, kind='export', status='Exporting wallpapers…', progress=0, stage=None,
                     result=None, error=None, cancel=False, started=time.time())
     threading.Thread(target=_run_wallpapers, args=(cid, dest), daemon=True).start()
     return jsonify({'ok': True})

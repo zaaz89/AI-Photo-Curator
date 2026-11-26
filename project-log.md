@@ -428,3 +428,57 @@ Imported `claude/m14-album-journey` from the Cowork bundle and rebased it onto m
 Results: `scripts/test-mac.sh` 132 Swift tests (122 + 10) pass, incl. `AlbumJourneyTests` (21); `scripts/build-mac-app.sh` OK; `uv run pytest` 168 passed; token check OK with the lowered baseline (110/27/5/0); no new compiler warnings. No code fix needed: every compile-risk spot of the M14a entry compiled as written.
 PR #22 "M14a: one album, one path (new IA, journey, remove album/folder)", base main. Not merged (owner merges).
 Open: nothing was looked at in the running app; visual checklist in #22 (empty state and drop, rail and primary button per station, questions card stack, remove folder and album with `test-photos` unchanged, View menu, close-while-analysing, light/dark, VoiceOver).
+
+### 2026-11-26 (late) — M14c: Analysis station fixes from the owner's screenshot (Claude (Cowork))
+Branch `claude/m14c-stage-fixes` (base: M14a PR #22). Screenshot: album "Tuscany, 22–28 Oct 2026", 236 photos, 3 folders.
+Root causes and fixes:
+1. All photos under "No date", "day 1 of 1": not the day plan (it runs after clocks). The app last fetched the photos
+   while the folders were read (photo count changed), before `resolve_all` wrote any capture time, and fetched them
+   again only on the first event, after clocks + places + events; the overview counted the untimed photos as one
+   "unknown" day. Fix: engine phase plan (below); the app reloads photos (and overview) when the phase moves to
+   clocks / places / days (`reloadsPhotos`, `LibraryModel.pollOnce`); `_analysis_days` answers 0 days while any photo
+   has no capture time (`app/assistant.py`).
+2. Tiles over the trays: `stageFlow` grew past the rect below 28 pt and the grid fallback only applied once settled;
+   every row also reserved the day-label band. Fix: label band only on rows where a day begins, gaps shrink with small
+   tiles, `StageFlow.fits`; the stage uses the clipped scrolling grid whenever the flow does not fit (running too),
+   and the stage model goes instant then (`StageModel.overflowing`).
+3. Chips: the New Album suggestion takes the person from EXIF Artist (a hired photographer's name in every file) and
+   the stage chip showed only that name; "…" was the only state for "no count". Fix: `app/source_chips.py`
+   (`pretty_device`: "Sony A7 IV"; `chip_labels`: person · camera, folder name on a clash, then a number; a folder
+   name used as the person is not shown as a person; `source_state`: waiting / reading n of m / read / empty / failed
+   with reason); `/sources` returns `chip`, `read_state`, pretty `devices`; the app shows them (stage chip, folder
+   chips, remove confirmation) with an older-engine fallback (`sourceChipName`, `sourceChipDetail`).
+   Not known: why "Toskana 2026" had 0 photos in the stage on the Mac; the chip now says which state it is in.
+4./5. "Aligning clocks 100%" next to "Working": two readings of the status text (the stage had no title for the
+   clocks phase) and a progress that was the last stage's share (100 % left over into day 1). Fix:
+   `app/analysis_progress.py` `PhasePlan` (reading → clocks → places → days (step) → finishing, fixed shares, never
+   goes back), job status `stage`; CuratorCore `AnalysisStatus.swift` (`analysisStatus`, `analysisTitle` "Reading
+   photos / Aligning cameras / Finding places / Sorting day 3 of 7 / Comparing similar shots", `analysisDetail`,
+   `activityFraction`). Stage header, toolbar pill and `AnalysisCard` read it; the pill hides while the Analysis
+   station shows the album being analysed.
+6. Polish: the tile the engine is at (day N, step counter) gets the scan band plus a lit edge (`analysing`), day
+   headers light up with a check and one glow when `settled_day` arrives (`StageDayLabel`, grid too, also above 400),
+   subtitle and counters roll (numericText); Motion tokens only, Reduce Motion = lit/check without movement, overlays
+   do not take hits; shimmer off when instant (skipped, > 400, or overflowing).
+Python: `uv run pytest -q` 177 passed (168 + 9 in `tests/test_m14c_stage.py`: real days at the first clocks/places
+report with a 4-day, 3-folder fixture incl. just-after-midnight photos, overview 0 days while reading, phase order and
+monotonic progress, PhasePlan unit, job `stage`, device names, chip labels, chip states, `/sources` chip + state).
+`tests/conftest.py`: `make=` option for the fake EXIF (default unchanged). Token check OK (baseline lowered 110→108,
+27→26).
+Swift NOT compiled, Swift tests NOT run (Linux). New: `CuratorCore/AnalysisStatus.swift`,
+`Tests/CuratorCoreTests/M14cStageTests.swift` (11). Compile-risk spots: `Cell` struct local to the nested func in
+`stageFlow`; `try? c.decodeIfPresent` for `JobStatus.stage` / `SourceInfo.readState` (optional flattening);
+`SourceInfo` now has an explicit `init(from:)`; `JobStatus.init` gained `kind:`/`stage:` defaults; `AnalysisPhase`
+`Comparable` via `allCases.firstIndex`; `StageTile` memberwise order (`analysing` after `scanning`); `StageGrid`
+memberwise with `settledDays` before the trailing `open` closure; `ActivityPill` body wrapped in `Group { if … }` with
+`.popover` inside; `.symbolBounce(on: Bool)`; `StageModel.setOverflowing` called from the grid's `onAppear`.
+Visual checklist (test-10 and, with the owner's OK, the 236-photo folder; no synthetic input):
+1. While reading: chips say "Waiting" / "Reading 12 of 80", names distinct; header "Reading photos", one bar.
+2. When clocks start: photos regroup under real days at once; sidebar never says "day 1 of 1".
+3. Header "Aligning cameras" → "Finding places" → "Sorting day 3 of 7" / "Comparing similar shots"; bar only grows;
+   no toolbar pill on the Analysis station; pill shows the same words on another view.
+4. 236 photos in a small window: tiles never over the trays (flow shrinks or the clipped grid scrolls); > 400 grid.
+5. A lit edge + band on one tile per moment, moving through the day; day header turns bright with a check per
+   settled day; Reduce Motion: no band movement, no bounce; clicks on tiles still work during it.
+6. Folder chips on the Photos station and the remove confirmation use the same names.
+Open: why the third folder had no photos on the Mac; StepPhotos (People & Clocks) cards still show the raw owner.

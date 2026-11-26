@@ -202,8 +202,25 @@ public struct SourceInfo: Decodable, Identifiable, Hashable, Sendable {
     public let assets: Int?
     /// M14a: cameras and phones in the folder, most photos first (nil from an older engine).
     public let devices: [String]?
-    public init(id: Int, owner: String, path: String, assets: Int? = nil, devices: [String]? = nil) {
+    /// M14c: the chip's name, unique in the album ("Jarek Pawlak · Ceremony"); nil from an older engine.
+    public let chip: String?
+    /// M14c: waiting, reading n of m, read, no photos found, failed (nil from an older engine).
+    public let readState: SourceReadState?
+    public init(id: Int, owner: String, path: String, assets: Int? = nil, devices: [String]? = nil,
+                chip: String? = nil, readState: SourceReadState? = nil) {
         self.id = id; self.owner = owner; self.path = path; self.assets = assets; self.devices = devices
+        self.chip = chip; self.readState = readState
+    }
+    enum CodingKeys: String, CodingKey { case id, owner, path, assets, devices, chip, readState = "read_state" }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        owner = try c.decode(String.self, forKey: .owner)
+        path = try c.decode(String.self, forKey: .path)
+        assets = try c.decodeIfPresent(Int.self, forKey: .assets)
+        devices = try c.decodeIfPresent([String].self, forKey: .devices)
+        chip = try c.decodeIfPresent(String.self, forKey: .chip)
+        readState = try? c.decodeIfPresent(SourceReadState.self, forKey: .readState)
     }
 }
 

@@ -21,7 +21,7 @@ os.environ['PHOTOCURATOR_DATA_DIR'] = _DATA
 def make_photo(path: Path, seed: int, dto: str | None = '2026:10:23 18:14:32',
                offset: str | None = '+02:00', datetime_ifd0: str | None = '2026:10:23 20:00:00',
                blur: bool = False, model: str = 'iPhone 15', size=(800, 600),
-               gps_utc: str | None = None):
+               gps_utc: str | None = None, make: str = 'Apple'):
     """A structured synthetic photo (shapes on a gradient) with chosen EXIF."""
     rng = np.random.default_rng(seed)
     w, h = size
@@ -40,7 +40,7 @@ def make_photo(path: Path, seed: int, dto: str | None = '2026:10:23 18:14:32',
     if blur:
         img = img.filter(ImageFilter.GaussianBlur(10))
     exif = Image.Exif()
-    exif[0x010F] = 'Apple'
+    exif[0x010F] = make
     exif[0x0110] = model
     if datetime_ifd0:
         exif[306] = datetime_ifd0
@@ -136,7 +136,7 @@ def textured_scene(path: Path, seed: int, **kw):
         col = tuple(int(c) for c in rng.integers(0, 255, 3))
         (d.rectangle if rng.random() < 0.6 else d.ellipse)([x, y, x + s, y + int(s * rng.uniform(.5, 1.5))], fill=col)
     exif = Image.Exif()
-    exif[0x010F] = 'Apple'
+    exif[0x010F] = kw.get('make', 'Apple')
     exif[0x0110] = kw.get('model', 'iPhone 15')
     sub = exif.get_ifd(0x8769)
     sub[36867] = kw.get('dto', '2026:10:23 18:00:00')
