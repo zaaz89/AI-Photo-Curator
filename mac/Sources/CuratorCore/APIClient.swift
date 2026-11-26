@@ -248,6 +248,11 @@ public final class APIClient: Sendable {
 
 
 
+    /// M13: the live per-photo event stream of the analysis, oldest first, after `since`.
+    public func analysisEvents(trip: String, since: Int, limit: Int = 500) async throws -> AnalysisEventPage {
+        try await get("api/collections/\(trip)/events", ["since": String(since), "limit": String(limit)])
+    }
+
     public func jobStatus(trip: String) async throws -> JobStatus {
         try await get("api/collections/\(trip)/index")
     }

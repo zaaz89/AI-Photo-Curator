@@ -77,7 +77,8 @@ import SwiftUI
         let ids = present(shown)
         arrived = ids
         revealed = Set(shown.filter(hasResults).map(\.id))
-        stackedShown = lib.analysing ? [] : ids
+        // M13: while the analysis runs, frames of a settled day stack at once (no per-photo animation).
+        stackedShown = lib.analysing ? Set(shown.filter { lib.sortStream.isSettled($0.id) }.map(\.id)) : ids
         act = .idle
         settled = !lib.analysing && !shown.isEmpty
         load(shown)
@@ -133,22 +134,34 @@ import SwiftUI
     /// (once the analysis is over), then the overview. Runs after every act, so nothing is left unshown.
     func reconcile() {
         guard let lib = library, !actPending, queued.isEmpty, !instant else { return }
-        let waiting = shown.filter { arrived.contains($0.id) && hasResults($0) && !revealed.contains($0.id) }
-        if !waiting.isEmpty && (!lib.analysing || shown.allSatisfy(hasResults)) {
+        let ready = readyFilter()
+        let waiting = shown.filter { arrived.contains($0.id) && hasResults($0) && !revealed.contains($0.id) && ready($0) }
+        if !waiting.isEmpty {
             schedule { gen in await self.quality(gen) }
             return
         }
-        guard !lib.analysing else { return }
-        if shown.contains(where: { verdicts[$0.id] == .stacked && arrived.contains($0.id) && !stackedShown.contains($0.id) }) {
+        // M13: the frames of a settled day stack while later days are still being read.
+        if shown.contains(where: { verdicts[$0.id] == .stacked && arrived.contains($0.id) && !stackedShown.contains($0.id) && ready($0) }) {
             schedule { gen in await self.moments(gen) }
             return
         }
+        guard !lib.analysing else { return }
         if !settled && !shown.isEmpty && present(shown).isSubset(of: arrived) {
             animate(.settle) { settled = true; act = .idle }
         }
     }
 
     private func present(_ photos: [Photo]) -> Set<Int> { Set(photos.map(\.id)) }
+
+    /// Which photos may show their verdict now (M13). Nothing runs: all. While the analysis runs: the photos of
+    /// the days the event stream reports as settled, or every photo once all have results (an engine without the
+    /// stream, as before).
+    private func readyFilter() -> (Photo) -> Bool {
+        guard let lib = library, lib.analysing else { return { _ in true } }
+        let stream = lib.sortStream
+        if shown.allSatisfy(hasResults) { return { _ in true } }
+        return { stream.isSettled($0.id) }
+    }
 
     /// "Replay the sorting": everything flies again, from the folders to the overview.
     func replay() {
@@ -265,7 +278,8 @@ import SwiftUI
         act = .quality
         await pause(0.4)
         guard gen == generation else { return }
-        let todo = shown.filter { arrived.contains($0.id) && hasResults($0) && !revealed.contains($0.id) }
+        let ready = readyFilter()
+        let todo = shown.filter { arrived.contains($0.id) && hasResults($0) && !revealed.contains($0.id) && ready($0) }
         let lift = motion && todo.filter { verdicts[$0.id] == .removed }.count <= 12
         let steps = min(todo.count, 60)
         let per = max(1, Int((Double(todo.count) / Double(max(1, steps))).rounded(.up)))
@@ -305,7 +319,8 @@ import SwiftUI
     private func moments(_ gen: Int) async {
         guard gen == generation else { return }
         act = .moments
-        let extras = shown.filter { verdicts[$0.id] == .stacked && arrived.contains($0.id) && !stackedShown.contains($0.id) }
+        let ready = readyFilter()
+        let extras = shown.filter { verdicts[$0.id] == .stacked && arrived.contains($0.id) && !stackedShown.contains($0.id) && ready($0) }
         let groups = Dictionary(grouping: extras) { $0.duplicate?.group ?? -1 }
         let gap = stagger(groups.count, total: 4.0, min: 0.05, max: 0.5)
         for (g, frames) in groups.sorted(by: { $0.key < $1.key }) {
@@ -432,6 +447,7 @@ struct SortingStage: View {
         .onChange(of: library.photos) { _, _ in stage.sync() }
         .onChange(of: library.tripId) { _, _ in stage.attach(library) }
         .onChange(of: library.analysisFinishedTick) { _, _ in stage.sawFaces = false; stage.sync() }
+        .onChange(of: library.sortStream.settledCount) { _, _ in stage.sync() }     // M13: a day settled
         .onChange(of: library.job.phase) { _, phase in
             // Focus and faces are done: read the results now, so blurry photos drop while the moments are built.
             if phase == .faces { stage.sawFaces = true }
@@ -833,7 +849,7 @@ private struct StageGrid: View {
     func tile(_ p: Photo) -> some View {
         let verdict = stage.revealed.contains(p.id) ? stage.verdicts[p.id] : nil
         let stacked = stackedBehind[p.id] ?? 0
-        return Thumbnail(url: p.fileURL, side: 260)
+        return Thumbnail(url: p.fileURL, side: 150)          // cells are 96-150 pt: the 160 bucket (M13)
             .aspectRatio(1, contentMode: .fit)
             .clipShape(.rect(cornerRadius: Radius.small))
             .overlay {
@@ -988,6 +1004,9 @@ private struct StageHeader: View {
 
     var subtitle: String {
         if !stage.busy, let t = stageStateTexts(state, library.lang) { return t.subtitle }
+        if library.analysing, let days = stageDaysText(library.sortStream, library.lang) {
+            return library.albumName + " · " + days                // M13: the album fills day by day
+        }
         return stage.settled ? library.tr("stageDoneSub") : library.albumName
     }
 
