@@ -293,7 +293,11 @@ enum AssistantSheet: String, Identifiable {
     // MARK: marks with undo
 
     func toggleFavourite() { let t = targets; mark(t, ["favorite": .bool(!t.allSatisfy(\.favorite))], name: tr("favourite")) }
-    func toggleLeaveOut() { let t = targets; mark(t, ["rejected": .bool(!t.allSatisfy(\.rejected))], name: tr("leaveOut")) }
+    func toggleLeaveOut() {
+        let t = targets, out = !t.allSatisfy(\.rejected)
+        mark(t, ["rejected": .bool(out)], name: tr("leaveOut"))
+        if !t.isEmpty { pulse(out ? .leaveOut : .keep) }
+    }
     func keep() { mark(targets, ["rejected": .bool(false)], name: tr("keep")) }
     func setFocus(_ tier: String?) { mark(targets, ["focus": tier.map { .string($0) } ?? .null], name: tr("focus")) }
     func toggleWallpaper() {
@@ -489,6 +493,7 @@ enum AssistantSheet: String, Identifiable {
             }
         case .reload: Task { await reload() }
         case .replay: showSorting(replay: true)
+        case .firstRun(let page): firstRunPage = page.flatMap(FirstRunPage.init(rawValue:))
         }
     }
 
@@ -554,8 +559,20 @@ enum AssistantSheet: String, Identifiable {
         } else {
             mark(items, ["rejected": .bool(true)], name: tr("leaveOut"))
         }
+        if !items.isEmpty { pulse(inAlbum ? .keep : .leaveOut) }
         return items.count
     }
+
+    // MARK: delight (M12f)
+
+    /// Changes on every keep / leave out / compare pick; MainWindow turns it into `.sensoryFeedback` (Force Touch
+    /// trackpads only; nothing happens elsewhere).
+    @Published private(set) var decisionPulse = DecisionPulse.none
+    func pulse(_ kind: DecisionFeedback) { decisionPulse = decisionPulse.next(kind) }
+
+    /// The first-run page on screen, nil when it is closed. Set once at launch while `FirstRun.seenKey` is unset,
+    /// and by the automation channel (`photocurator://firstrun?page=0`) for checks.
+    @Published var firstRunPage: FirstRunPage?
 
     // MARK: undo toast (M12c)
 
@@ -692,6 +709,7 @@ enum AssistantSheet: String, Identifiable {
     func keep(group: Int, photo: Int?) {
         guard let tripId, tripId == loadedTripId else { return }
         reviewedMoments.insert(group)
+        pulse(.pick)
         enqueue { api in try await api.keep(trip: tripId, group: group, photo: photo) }
     }
 

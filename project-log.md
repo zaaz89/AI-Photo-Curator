@@ -261,3 +261,44 @@ Check visually (test-10): error banner (stop the engine, then mark a photo) in l
 ### 2026-11-24, Claude (Cowork): M12d + M12e merged into one branch
 - `claude/m12d-ux-p1` now holds both P1 halves (Quick Review/compare and flow/errors/keyboard); only conflict was this log. Wired #17: Quick Review starts with `library.takeReviewSubset()`, so "Review These Photos" in the Have a look tray reviews only the tray's photos.
 - Not compiled. Build order on the Mac: `scripts/test-mac.sh`, `scripts/build-mac-app.sh`, `uv run pytest`, `bash scripts/check-design-tokens.sh`.
+
+### 2026-11-26 — M12f: motion and delight (roadmap M18.1 to M18.3, audit #30) (Claude (Cowork))
+Branch `claude/m12f-motion-delight`. Another agent edits SortingStage, GuideChrome, StepPhotos, Thumbnails and QuickReview
+in parallel; this branch touches SortingStage (TrayCard only) and GuideChrome (`CardStyle` hover only), nothing in the others.
+- Rules: `notes/m12b-design-system.md` → "Motion choreography": never block input, every motion ≤ 0.6 s (`motionBudget`),
+  one hero motion per screen, no per-photo choreography above 400 photos. Every new motion goes through `Motion` and has a
+  Reduce Motion path.
+- Micro-interactions (`DesignSystem/Interactions.swift`): `.hoverLift()`, `.buttonStyle(.pressableCard)`, `.symbolBounce(on:)`.
+  Applied to step cards, day cards, highlights, tray cards and every `.card(hover: true)` (export choices, chapters).
+  Haptics: `LibraryModel.decisionPulse` (keep / leave out / compare pick) → `.sensoryFeedback` in MainWindow.
+- Continuity: inspector photo settles in on a new selection; heart and leave-out icons use `symbolEffect(.replace)`; numbers
+  roll (`numericText`) in the funnel, home counters, step badges, day cards, export percent; tray symbols bounce once when
+  the trays settle; undo toast and error banner symbols bounce on arrival. No `matchedGeometryEffect` grid ↔ inspector or
+  into Quick Look (system panel; the tile stays in the grid): reasons in the notes.
+- Album home as a story (M18.2 without maps or new engine data): cover = `albumCover` (engine cover while in the album, else
+  a highlight, else the best kept photo) with slow parallax; dates and places under the name; counters (in album, taken,
+  days, chapters); new "Day by day" row (`dayCards`: best photo of the day, counts, chapter names); NextCard stays the one
+  primary action; funnel card kept, its header now has "Replay the sorting" / "Watch the sorting" (audit #30: always on Home).
+- First run (M18.3): three screens (what it does, "originals are never touched" with a copy-into-folder animation, start),
+  once (`FirstRun.seenKey` = `firstRunSeen.v1`), Skip / Esc, ← → and Return; "Create an Album" opens the wizard when there
+  is no album. Automation: `photocurator://firstrun?page=0|1|2`, `photocurator://firstrun?close=1`.
+- Celebration: after a verified export the cover shrinks into a folder, the folder bounces, the count rolls up; once per
+  export folder (`shouldCelebrateExport`); buttons usable at once; Reduce Motion = a still check mark.
+- CuratorCore `Delight.swift` (pure) + `DelightTests.swift` (8 tests) + 3 automation expectations. 19 new strings EN + SL
+  (block "// M12f motion and delight" at the end of `Strings.swift`). Token check OK, baseline unchanged.
+NOT compiled, Swift tests NOT run (Linux container): `scripts/test-mac.sh`, `scripts/build-mac-app.sh`,
+`bash scripts/check-design-tokens.sh`.
+Visual checklist (test-10, window capture, no synthetic input):
+1. `defaults delete si.beehive.photocurator firstRunSeen.v1`, start: first run appears once; `firstrun?page=1` shows the copy
+   travelling into the folder and the lock/folder bounce; page dots slide; relaunch: not shown again.
+2. Home: cover is a kept photo (leave the engine's cover out and reload: cover changes); scroll: cover moves slower than the
+   page, no edge shows; counters pill row legible on bright and dark covers; Day by day row: covers, counts, chips; a day
+   opens All Photos on its cover; "Replay the sorting" in the funnel header opens the stage.
+3. Hover any card: small lift, no layout jump; press a step/day card: press-in; Reduce Motion on: no scale, no parallax,
+   no bounces, celebration shows a check mark.
+4. Grid: select photos with arrows: inspector photo settles in; F / X: heart and leave-out icons morph; with a Force Touch
+   trackpad, K / X and compare 1/2 give a light tick.
+5. Sorting stage at settle: tray icons bounce once; Put back changes a count and bounces again; no bounce during fly-in.
+6. Export test-10: percent rolls; at the end the cover drops into the folder once (go to Home and back: no replay); Show in
+   Finder clickable during the moment.
+7. Undo toast and error banner: symbol bounces once.

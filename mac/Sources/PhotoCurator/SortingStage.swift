@@ -1059,7 +1059,14 @@ private struct TrayCard: View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Label(library.tr("tray_" + verdict.rawValue), systemImage: symbol).font(.headline).foregroundStyle(color)
+                    Label {
+                        Text(library.tr("tray_" + verdict.rawValue))
+                    } icon: {
+                        // Bounces when the trays settle and whenever their count changes afterwards (M12f); never
+                        // during the fly-in, so 400 photos do not make it jitter.
+                        Image(systemName: symbol).symbolBounce(on: settled ? count : -1)
+                    }
+                    .font(.headline).foregroundStyle(color)
                     Spacer()
                     Text("\(count)").font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
                         .foregroundStyle(.white)
@@ -1082,6 +1089,7 @@ private struct TrayCard: View {
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(color.opacity(count > 0 ? 0.12 : 0.03)).interactive(), in: .rect(cornerRadius: 24))
         .disabled(count == 0)
+        .hoverLift(count > 0, radius: 24)
         .position(x: rect.midX, y: rect.midY)
         .motionAnimation(.quick, value: count)
         .help(library.tr("trayHint_" + verdict.rawValue))

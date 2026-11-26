@@ -12,6 +12,9 @@ import Testing
     #expect(c("photocurator://key?k=right") == .key("right"))
     #expect(c("photocurator://window?w=1500&h=980") == .window(width: 1500, height: 980))
     #expect(c("photocurator://reload") == .reload)
+    #expect(c("photocurator://firstrun?page=1") == .firstRun(1))
+    #expect(c("photocurator://firstrun?close=1") == .firstRun(nil))
+    #expect(c("photocurator://firstrun?page=7") == nil)
     // Anything unknown or malformed is refused.
     #expect(c("photocurator://go?page=finder") == nil)
     #expect(c("photocurator://key?k=delete-all") == nil)

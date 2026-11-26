@@ -120,3 +120,45 @@ Zoom (`ZoomMath`, `ReviewZoom.swift`): 100% = one image pixel on one screen pixe
 the largest main face (`target`), clamped so no empty band shows (`clamp`/`offset`), drag moves the centre (`pan`).
 The original is decoded with ImageIO off the main thread only for the photo on screen
 (`PhotoCurator/ZoomablePhoto.swift`); zoom resets on a new photo, focus loss and scene-phase change.
+
+## Motion choreography (M12f)
+
+The app should be fun to watch without ever being slow. Three rules decide every motion:
+
+1. **Never block input.** No animation disables a control, delays a click or swallows a key. A click during a
+   motion acts at once; the motion follows the new state (SwiftUI springs retarget). Nothing waits for a motion
+   to finish before it can be used (first run, celebration, trays, home).
+2. **≤ 0.6 s.** Every motion, delays included, ends within `motionBudget` (0.6 s, CuratorCore `Delight.swift`).
+   Staggers use `staggerDelay(_:of:)` (≤ 0.24 s total, ≤ 8 steps, later items start together). Above
+   `stageChoreographyLimit` (400 photos) there is no per-photo choreography anywhere.
+3. **One hero motion per screen.** Each screen has at most one motion that draws the eye; everything else is
+   `quick` feedback or a numeric roll.
+
+| Screen | Hero motion | Supporting motion |
+|---|---|---|
+| Album home | cover parallax while scrolling (`scrollTransition`, photo enlarged 1.12, ±20 pt) | counters roll (`numericText`, `settle`); day cards fade/scale a little at the row's edges; cards lift on hover |
+| Sorting stage | the fly-in (M12, unchanged) | tray symbols bounce once when the trays settle and when a count changes afterwards; tray counts roll |
+| Grid ↔ inspector | none | inspector photo settles in (`quick`, scale 0.96 + fade); heart / leave-out icons `symbolEffect(.replace)` |
+| Export | completion: cover shrinks into a folder, folder bounces, number rolls up (`settle`, once per export) | progress percent rolls |
+| First run | page push (`arrive`) | page-dot capsule slides (`matchedGeometryEffect`); page 1 symbols stagger in; page 2 copy travels into the folder |
+| Undo toast / error banner | none | the symbol bounces once on arrival |
+
+Building blocks (`DesignSystem/Interactions.swift`):
+- `.hoverLift(_ enabled:radius:)`: hover → scale 1.015 + deeper shadow, `quick`. Reduce Motion: shadow only.
+  `.card(hover: true)` uses it, so all hover cards behave the same.
+- `.buttonStyle(.pressableCard)`: whole-card buttons (step, day cards): hover lift + press-in 0.98, `quick`.
+  Reduce Motion: press dims instead of scaling.
+- `.symbolBounce(on:)`: one bounce on appear and on every change of the trigger. Nothing under Reduce Motion.
+  Use for state changes (kept, left out, stacked, export done, error), not for decoration.
+- Haptics: `LibraryModel.decisionPulse` changes on keep / leave out / compare pick; MainWindow maps it with
+  `.sensoryFeedback` (keep and pick → `.alignment`, leave out → `.levelChange`). Force Touch trackpads only.
+- Numbers: every counter uses `.contentTransition(.numericText(value:))` inside a `motionAnimation`.
+
+Continuity: Quick Look is the system panel (it has its own zoom), and the inspector shows a second copy of the
+selected tile while the tile stays in the grid, so a `matchedGeometryEffect` between them would make a photo seem
+to travel while it is in fact in two places; the inspector uses a settle-in transition instead.
+`matchedGeometryEffect` is used only where one element really moves within one view (first-run page dots).
+Grid tile → zoomed detail with a zoom transition stays open for the Quick Review owner (M18).
+
+Reduce Motion, everywhere: springs → 0.15 s cross-fade (`Motion`), slides → cross-fade (`motionTransition`),
+parallax / edge scaling / hover scale / symbol bounces / the celebration's travel → off (the end state is shown).

@@ -33,6 +33,7 @@ struct ErrorBanner: View {
         HStack(alignment: .top, spacing: Space.l) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(StatusColor.warning)
+                .symbolBounce(on: error.message)            // M12f: once on arrival and for a new message
                 .font(TypeRole.cardTitle)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Space.xs) {

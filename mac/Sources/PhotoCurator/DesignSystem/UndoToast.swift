@@ -22,6 +22,7 @@ struct UndoToast: View {
             if let t = library.undoToast {
                 HStack(spacing: Space.l) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(StatusColor.kept)
+                        .symbolBounce(on: t.id)                 // M12f: keep / left out / put back lands
                         .accessibilityHidden(true)
                     Text(t.text).font(TypeRole.supporting).lineLimit(2)
                     Button(library.tr("undo")) { library.undoLast() }

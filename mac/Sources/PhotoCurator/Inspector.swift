@@ -9,31 +9,46 @@ struct InspectorView: View {
         if let p = library.single {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    // Grid ↔ inspector continuity (M12f): the new selection settles in with a short scale and
+                    // cross-fade (only a cross-fade under Reduce Motion). Not a matchedGeometryEffect: the grid tile
+                    // stays where it is, so nothing actually travels between the two columns.
                     Button { library.toggleQuickLook() } label: {
                         Thumbnail(url: p.fileURL, side: 520, fill: false)
                             .aspectRatio(CGFloat(p.width ?? 3) / CGFloat(max(p.height ?? 2, 1)), contentMode: .fit)
                             .frame(maxHeight: 280)
                             .clipShape(.rect(cornerRadius: 12))
+                            .id(p.id)
+                            .motionTransition(.scale(scale: 0.96).combined(with: .opacity))
                     }
                     .buttonStyle(.plain)
                     .help(library.tr("quickLook"))
+                    .motionAnimation(.quick, value: p.id)
 
                     Text(p.filename).font(.headline).lineLimit(2).textSelection(.enabled)
 
                     HStack(spacing: 8) {          // the inspector is glass already: plain buttons, no glass on glass
                         Group {
                             Button { library.toggleFavourite() } label: {
-                                Label(library.tr(p.favorite ? "unfavourite" : "favourite"), systemImage: p.favorite ? "heart.fill" : "heart")
+                                Label {
+                                    Text(library.tr(p.favorite ? "unfavourite" : "favourite"))
+                                } icon: {
+                                    Image(systemName: p.favorite ? "heart.fill" : "heart").contentTransition(.symbolEffect(.replace))
+                                }
                             }
                             .buttonStyle(.bordered)
                             .tint(p.favorite ? .pink : nil)
                             Button { library.toggleLeaveOut() } label: {
-                                Label(library.tr(p.rejected ? "keep" : "leaveOut"), systemImage: p.rejected ? "arrow.uturn.backward" : "eye.slash")
+                                Label {
+                                    Text(library.tr(p.rejected ? "keep" : "leaveOut"))
+                                } icon: {
+                                    Image(systemName: p.rejected ? "arrow.uturn.backward" : "eye.slash").contentTransition(.symbolEffect(.replace))
+                                }
                             }
                             .buttonStyle(.bordered)
                         }
                     }
                     .controlSize(.large)
+                    .motionAnimation(.quick, value: [p.favorite, p.rejected])
 
                     Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
                         row("taken", p.day == Photo.undated ? library.tr("noDate") : "\(formatDay(p.day, library.lang, style: .short))  \(p.clock)")

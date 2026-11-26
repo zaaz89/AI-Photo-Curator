@@ -19,13 +19,12 @@ extension GuideStep {
 let personColors: [Color] = [.blue, .pink, .orange, .teal, .purple, .green, .indigo, .red]
 func personColor(_ index: Int) -> Color { personColors[abs(index) % personColors.count] }
 
-/// A raised card: soft fill, hairline edge, gentle shadow; lifts a little under the pointer when `hover`.
+/// A raised card: soft fill, hairline edge, gentle shadow; lifts a little under the pointer when `hover`
+/// (the shared `.hoverLift()`, M12f).
 struct CardStyle: ViewModifier {
     var radius: CGFloat = 22
     var hover = false
     var highlight: Color? = nil
-    @State private var over = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
@@ -35,10 +34,8 @@ struct CardStyle: ViewModifier {
                     .strokeBorder(highlight.map { AnyShapeStyle($0.opacity(0.65)) } ?? AnyShapeStyle(.separator.opacity(0.6)),
                                   lineWidth: highlight == nil ? 0.5 : 1.5)
             }
-            .shadow(color: .black.opacity(over ? 0.18 : 0.08), radius: over ? 18 : 8, y: over ? 8 : 3)
-            .scaleEffect(over && !reduceMotion ? 1.012 : 1)
-            .animation(Motion.animation(.quick, reduceMotion: reduceMotion), value: over)
-            .onHover { if hover { over = $0 } }
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+            .hoverLift(hover, radius: radius)
     }
 }
 

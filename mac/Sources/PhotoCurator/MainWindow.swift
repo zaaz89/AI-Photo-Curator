@@ -7,6 +7,7 @@ struct MainWindow: View {
     @Environment(\.openWindow) private var openWindow
     @State private var showInspector = true
     @State private var newEvent = false
+    @State private var firstRunNewAlbum = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -64,6 +65,24 @@ struct MainWindow: View {
             }
         }
         .motionAnimation(.settle, value: library.reviewFilter)
+        // M12f: a light haptic on keep / leave out / compare pick (Force Touch trackpads; nothing elsewhere).
+        .sensoryFeedback(trigger: library.decisionPulse) { _, new in new.tick == 0 ? nil : new.kind.sensory }
+        // M12f first run: once, skippable; "Create an Album" opens the wizard after this sheet has closed.
+        .sheet(isPresented: Binding(get: { library.firstRunPage != nil }, set: { if !$0 { library.firstRunPage = nil } }),
+               onDismiss: firstRunClosed) {
+            FirstRunView(wantsNewAlbum: $firstRunNewAlbum)
+        }
+        .onAppear {
+            if FirstRun.shouldShow(seen: UserDefaults.standard.bool(forKey: FirstRun.seenKey)) { library.firstRunPage = .what }
+        }
+    }
+
+    func firstRunClosed() {
+        UserDefaults.standard.set(true, forKey: FirstRun.seenKey)
+        if firstRunNewAlbum {
+            firstRunNewAlbum = false
+            library.sheet = .newAlbum
+        }
     }
 
     /// Which guide page shows (grid destinations share one, so the grid keeps its state).
