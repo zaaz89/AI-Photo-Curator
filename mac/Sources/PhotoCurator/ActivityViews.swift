@@ -31,7 +31,7 @@ struct AIRing: View {
                     .stroke(.primary.opacity(0.85), style: StrokeStyle(lineWidth: line * 0.55, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .padding(line * 0.2)
-                    .animation(.easeOut(duration: 0.4), value: progress)
+                    .animation(Motion.animation(.settle, reduceMotion: reduceMotion), value: progress)
             }
             Image(systemName: symbol)
                 .font(.system(size: size * 0.42, weight: .semibold))
@@ -70,7 +70,7 @@ struct ActivityPill: View {
                     if job.running {
                         Text("\(Int(job.progress))%").font(.callout.weight(.semibold)).monospacedDigit()
                             .contentTransition(.numericText(value: job.progress))
-                            .animation(.snappy, value: job.progress)
+                            .motionAnimation(.settle, value: job.progress)
                     }
                 }
             }
@@ -79,7 +79,7 @@ struct ActivityPill: View {
         .help(job.running ? job.status : library.tr("phase_idle"))
         .accessibilityLabel(job.running ? "\(library.tr("phase_" + phase.rawValue)), \(Int(job.progress))%" : library.tr("phase_idle"))
         .popover(isPresented: $showDetails, arrowEdge: .bottom) { ActivityDetails() }
-        .animation(.spring(duration: 0.4), value: job.running)
+        .motionAnimation(.arrive, value: job.running)
     }
 }
 
@@ -145,7 +145,7 @@ struct AIGlow: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.8), value: active)
+        .animation(Motion.animation(.settle, reduceMotion: reduceMotion), value: active)
         .allowsHitTesting(false)
         .ignoresSafeArea()
         .accessibilityHidden(true)

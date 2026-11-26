@@ -50,7 +50,7 @@ struct SettingsPage: View {
             Text(library.tr("gpuHint")).font(.callout).foregroundStyle(.secondary)
             Label(estimate, systemImage: "clock").font(.callout)
                 .contentTransition(.numericText())
-                .animation(.snappy, value: currentShare)
+                .motionAnimation(.quick, value: currentShare)
             Toggle(isOn: binding(\.aiPauseOnBattery, key: "ai_pause_on_battery")) {
                 Text(library.tr("pauseOnBattery"))
                 Text(library.tr("batteryHint"))
@@ -98,12 +98,12 @@ struct SettingsPage: View {
             }
             .pickerStyle(.segmented)
             Text(library.tr("strictText_" + level)).font(.callout).foregroundStyle(.secondary)
-                .animation(.snappy, value: level)
+                .motionAnimation(.quick, value: level)
             if library.tripId != nil && !library.photos.isEmpty {
                 Label(String(format: library.tr("strictNow"), library.count(.blurry)), systemImage: "camera.aperture")
                     .font(.callout)
                     .contentTransition(.numericText(value: Double(library.count(.blurry))))
-                    .animation(.snappy, value: library.count(.blurry))
+                    .motionAnimation(.quick, value: library.count(.blurry))
             }
         } header: {
             Text(library.tr("settingsQuality"))
@@ -164,7 +164,7 @@ struct SettingsStrip: View {
                         library.tr("strict_" + (library.settings?.qualityStrictness ?? "normal")).lowercased()))
                 .foregroundStyle(.secondary)
             Spacer()
-            Button(library.tr("settingsChange")) { withAnimation(.snappy) { library.destination = .settings } }
+            Button(library.tr("settingsChange")) { withMotion(.settle) { library.destination = .settings } }
                 .buttonStyle(.link)
         }
         .font(.callout)

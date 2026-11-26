@@ -106,9 +106,9 @@ struct QuickReviewView: View {
             Spacer()
             let c = session.counts
             HStack(spacing: 14) {
-                Label("\(c.kept)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Label("\(c.kept)", systemImage: "checkmark.circle.fill").foregroundStyle(StatusColor.kept)
                 Label("\(c.leftOut)", systemImage: "xmark.circle.fill").foregroundStyle(.secondary)
-                if c.skipped > 0 { Label("\(c.skipped)", systemImage: "forward.fill").foregroundStyle(.orange) }
+                if c.skipped > 0 { Label("\(c.skipped)", systemImage: "forward.fill").foregroundStyle(StatusColor.look) }
             }
             .font(.callout.weight(.semibold)).monospacedDigit()
             VStack(alignment: .trailing, spacing: 1) {
@@ -151,13 +151,13 @@ struct QuickReviewView: View {
                     if let flash {
                         Image(systemName: flash == .keep ? "checkmark.circle.fill" : (flash == .leaveOut ? "xmark.circle.fill" : "forward.fill"))
                             .font(.system(size: 96, weight: .semibold))
-                            .foregroundStyle(flash == .keep ? Color.green : (flash == .leaveOut ? Color.white.opacity(0.7) : Color.orange))
+                            .foregroundStyle(flash == .keep ? StatusColor.kept : (flash == .leaveOut ? Color.white.opacity(0.7) : StatusColor.look))
                             .shadow(radius: 20)
                             .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .offset(x: slide)
-                .animation(.snappy(duration: 0.18), value: zoom)
+                .motionAnimation(.quick, value: zoom)
                 .id(p.id)
                 .transition(.opacity)
         }
@@ -181,12 +181,12 @@ struct QuickReviewView: View {
                 Label(library.tr(inAlbum ? "inAlbum" : "notInAlbum"), systemImage: inAlbum ? "checkmark.circle.fill" : "eye.slash.fill")
                     .font(.callout.weight(.semibold))
                     .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background((inAlbum ? Color.green : Color.gray).opacity(0.25), in: .capsule)
-                    .foregroundStyle(inAlbum ? .green : .white)
+                    .background((inAlbum ? StatusColor.kept : Color.gray).opacity(0.25), in: .capsule)
+                    .foregroundStyle(inAlbum ? StatusColor.kept : .white)
                 ForEach(reviewReasons(p), id: \.self) { r in
                     Label(reasonText(r, p), systemImage: reasonIcon(r))
                         .font(.callout).padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(.orange.opacity(0.22), in: .capsule).foregroundStyle(.orange)
+                        .background(StatusColor.look.opacity(0.22), in: .capsule).foregroundStyle(StatusColor.look)
                 }
                 if p.favorite { Image(systemName: "heart.fill").foregroundStyle(.pink) }
                 Spacer()
@@ -205,7 +205,7 @@ struct QuickReviewView: View {
                     Button { decide(.keep) } label: {
                         Label(library.tr("reviewYes"), systemImage: "arrow.right").labelStyle(TrailingIconLabel()).frame(minWidth: 150)
                     }
-                    .buttonStyle(.glassProminent).tint(.green).controlSize(.extraLarge)
+                    .buttonStyle(.glassProminent).tint(StatusColor.kept).controlSize(.extraLarge)
                 }
             }
         }
@@ -233,7 +233,7 @@ struct QuickReviewView: View {
         }
         // The decision is recorded and the next photo shown at once, so fast or held keys never land twice on
         // the same photo or skip one; the flash is only a short visual confirmation.
-        withAnimation(.snappy(duration: 0.15)) {
+        withMotion(.quick) {
             session.record(action, previous: previous)
             zoom = false
             flash = action
@@ -242,7 +242,7 @@ struct QuickReviewView: View {
         flashTask?.cancel()
         flashTask = Task {
             try? await Task.sleep(for: .milliseconds(260))
-            if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { flash = nil } }
+            if !Task.isCancelled { withMotion(.fade) { flash = nil } }
         }
     }
 

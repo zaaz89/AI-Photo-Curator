@@ -36,7 +36,7 @@ struct StepExport: View {
     var choices: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: ExportKind.allCases.count), spacing: 16) {
             ForEach(ExportKind.allCases) { k in
-                Button { withAnimation(.snappy) { choice.kind = k } } label: {
+                Button { withMotion(.quick) { choice.kind = k } } label: {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Image(systemName: icon(k)).font(.title2).foregroundStyle(choice.kind == k ? Color.green : .secondary)
@@ -178,7 +178,7 @@ struct StepExport: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
-        .animation(.snappy, value: exporting)
+        .motionAnimation(.settle, value: exporting)
     }
 
     func loadPreview() async {

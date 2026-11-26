@@ -44,7 +44,7 @@ struct PhotoGrid: View {
                 }
                 .onChange(of: library.cursor) { _, _ in
                     guard let id = library.cursorId else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(id) }
+                    withMotion(.quick) { scroller.scrollTo(id) }
                     library.quickLookFollowCursor()
                 }
             }
@@ -182,8 +182,8 @@ struct PhotoTile: View {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(Color.accentColor, lineWidth: selected ? 4 : (isCursor ? 2 : 0))
             }
-            .animation(.snappy(duration: 0.2), value: photo.favorite)
-            .animation(.snappy(duration: 0.15), value: selected)
+            .animation(Motion.animation(.quick, reduceMotion: reduceMotion), value: photo.favorite)
+            .animation(Motion.animation(.quick, reduceMotion: reduceMotion), value: selected)
             .contentShape(.rect)
             .accessibilityElement()
             .accessibilityLabel(accessibilityText)
@@ -196,11 +196,11 @@ struct PhotoTile: View {
             if let tier = photo.focus?.tier, tier != "sharp", !photo.isVideo {
                 Text(library.tr("tier_" + tier)).font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(tier == "blurry" ? Color.red : Color.orange, in: .capsule).foregroundStyle(.white)
+                    .background(tier == "blurry" ? StatusColor.removed : StatusColor.look, in: .capsule).foregroundStyle(.white)
             }
             if (photo.faces?.eyesClosed ?? 0) > 0 {
                 Image(systemName: "eye.slash.fill").font(.caption2).padding(4)
-                    .background(.orange, in: .circle).foregroundStyle(.white)
+                    .background(StatusColor.look, in: .circle).foregroundStyle(.white)
                     .help(library.tr("eyesClosed"))
             }
             if photo.duplicate?.keeper == false {

@@ -89,7 +89,7 @@ import SwiftUI
         }
         let new = shown.filter { !arrived.contains($0.id) && !queued.contains($0.id) }
         if !new.isEmpty {
-            animate(.snappy) { settled = false }
+            animate(.quick) { settled = false }
             load(new)
             queued.formUnion(new.map(\.id))
             let gen = generation
@@ -113,7 +113,7 @@ import SwiftUI
             return
         }
         if !settled && !shown.isEmpty && present(shown).isSubset(of: arrived) {
-            animate(.spring(response: 1.0, dampingFraction: 0.82)) { settled = true; act = .idle }
+            animate(.settle) { settled = true; act = .idle }
         }
     }
 
@@ -124,7 +124,7 @@ import SwiftUI
         generation += 1
         queue?.cancel(); queue = nil
         let gen = generation
-        animate(.easeInOut(duration: 0.35)) {
+        animate(.fade) {
             arrived = []; revealed = []; stackedShown = []; lifting = []; scanning = []; gathering = [:]
             settled = false; act = .idle
         }
@@ -167,8 +167,9 @@ import SwiftUI
 
     private func pause(_ s: Double) async { try? await Task.sleep(for: .milliseconds(Int(s * 1000))) }
 
-    private func animate(_ a: Animation, _ change: () -> Void) {
-        withAnimation(motion ? a : .easeInOut(duration: 0.15), change)
+    /// A named motion; with Reduce Motion on it becomes the short cross-fade (`Motion`).
+    private func animate(_ token: MotionToken, _ change: () -> Void) {
+        withMotion(token, reduceMotion: !motion, change)
     }
 
     /// Thumbnails come from macOS (Quick Look), eight at a time, in time order; they reach the page in small
@@ -217,7 +218,7 @@ import SwiftUI
         for start in stride(from: 0, to: ids.count, by: per) {
             guard gen == generation else { return }
             let chunk = ids[start..<min(ids.count, start + per)]
-            animate(.spring(response: 0.75, dampingFraction: 0.76)) { arrived.formUnion(chunk) }
+            animate(.arrive) { arrived.formUnion(chunk) }
             queued.subtract(chunk)
             await pause(gap)
         }
@@ -240,7 +241,7 @@ import SwiftUI
             guard !batch.isEmpty else { return }
             let ids = batch; batch = []
             scanning.formUnion(ids)
-            animate(.snappy(duration: 0.25)) { revealed.formUnion(ids) }
+            animate(.quick) { revealed.formUnion(ids) }
             await pause(gap)
             scanning.subtract(ids)
         }
@@ -250,10 +251,10 @@ import SwiftUI
                 await flush()
                 guard gen == generation else { return }
                 scanning.insert(p.id)
-                animate(.easeOut(duration: 0.2)) { _ = lifting.insert(p.id) }
+                animate(.quick) { _ = lifting.insert(p.id) }
                 await pause(0.3)
                 guard gen == generation else { return }
-                animate(.spring(response: 0.8, dampingFraction: 0.7)) { _ = revealed.insert(p.id); _ = lifting.remove(p.id) }
+                animate(.drop) { _ = revealed.insert(p.id); _ = lifting.remove(p.id) }
                 scanning.remove(p.id)
                 await pause(0.12)
             } else {
@@ -278,13 +279,13 @@ import SwiftUI
             let keeper = shown.first { $0.duplicate?.group == g && $0.duplicate?.keeper == true }
             let inAlbum = keeper.map { arrived.contains($0.id) && [.album, .check].contains(verdicts[$0.id]) } ?? false
             if let k = keeper, inAlbum, groups.count <= 40, motion {
-                animate(.spring(response: 0.55, dampingFraction: 0.78)) {
+                animate(.stack) {
                     for (i, f) in frames.enumerated() { gathering[f.id] = Gather(keeper: k.id, layer: i + 1) }
                 }
                 await pause(0.45)
                 guard gen == generation else { return }
             }
-            animate(.spring(response: 0.8, dampingFraction: 0.74)) {
+            animate(.stack) {
                 for f in frames { gathering[f.id] = nil; stackedShown.insert(f.id) }
             }
             await pause(gap)
@@ -363,7 +364,7 @@ struct SortingStage: View {
                             .zIndex(f.z)
                             .opacity(scene.places[p.id] == .source || f.hidden ? 0 : 1)
                             .allowsHitTesting(!f.hidden)
-                            .animation(reduceMotion ? nil : .spring(response: 0.7, dampingFraction: 0.8), value: f)
+                            .animation(reduceMotion ? nil : Motion.settle, value: f)
                             .onTapGesture { tapped(p, scene) }
                             .accessibilityAction { tapped(p, scene) }
                     }
@@ -544,7 +545,6 @@ struct StageGeometry {
 
 let stageColors: [Color] = [Color(red: 0.42, green: 0.36, blue: 1.0), Color(red: 0.0, green: 0.72, blue: 0.95),
                             Color(red: 0.98, green: 0.36, blue: 0.62), Color(red: 1.0, green: 0.62, blue: 0.2)]
-private let removedColor = Color(red: 1, green: 0.42, blue: 0.42)
 
 struct StageBackground: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -560,7 +560,7 @@ struct StageBackground: View {
                     .blur(radius: 120)
             }
         }
-        .onAppear { if !reduceMotion { withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { move = true } } }
+        .onAppear { if !reduceMotion { withAnimation(Motion.ambient) { move = true } } }
         .allowsHitTesting(false)
     }
 }
@@ -575,7 +575,7 @@ private struct ScanBand: View {
                 .offset(x: x * g.size.width)
                 .blendMode(.plusLighter)
         }
-        .onAppear { withAnimation(.easeInOut(duration: 0.55)) { x = 1.4 } }
+        .onAppear { withMotion(.sweep) { x = 1.4 } }
         .allowsHitTesting(false)
     }
 }
@@ -597,12 +597,12 @@ private struct StageTile: View {
         }
         .frame(width: size.width, height: size.height)
         .overlay { if scanning { ScanBand() } }
-        .overlay { if verdict == .removed { removedColor.opacity(0.25).blendMode(.multiply) } }
+        .overlay { if verdict == .removed { StatusColor.removed.opacity(0.25).blendMode(.multiply) } }
         .saturation(verdict == .removed ? 0.25 : 1)
         .clipShape(.rect(cornerRadius: corner))
         .overlay {
             RoundedRectangle(cornerRadius: corner)
-                .strokeBorder(verdict == .check ? AnyShapeStyle(Color.orange) : AnyShapeStyle(Color.white.opacity(0.14)),
+                .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(Color.white.opacity(0.14)),
                               lineWidth: verdict == .check ? 2 : 1)
         }
         .overlay(alignment: .bottomTrailing) {
@@ -652,7 +652,7 @@ private struct StageTile: View {
         }
     }
     func color(_ v: SortVerdict) -> Color {
-        switch v { case .album: .green; case .check: .orange; case .removed: removedColor; case .stacked: stageColors[1] }
+        switch v { case .album: StatusColor.kept; case .check: StatusColor.look; case .removed: StatusColor.removed; case .stacked: StatusColor.stacked }
     }
 }
 
@@ -711,13 +711,13 @@ private struct StageHeader: View {
                     Text(stage.settled ? library.tr("stageDoneSub") : library.albumName)
                         .foregroundStyle(.white.opacity(0.65)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
-                .animation(.snappy, value: title)
+                .motionAnimation(.quick, value: title)
                 Spacer()
                 StageCounter(value: counts.read, label: library.tr("counter_read"), color: .white)
-                StageCounter(value: counts.inAlbum, label: library.tr("counter_album"), color: .green)
-                StageCounter(value: counts.stacked, label: library.tr("counter_stacked"), color: stageColors[1])
-                StageCounter(value: counts.removed, label: library.tr("counter_removed"), color: removedColor)
-                StageCounter(value: counts.check, label: library.tr("counter_check"), color: .orange)
+                StageCounter(value: counts.inAlbum, label: library.tr("counter_album"), color: StatusColor.kept)
+                StageCounter(value: counts.stacked, label: library.tr("counter_stacked"), color: StatusColor.stacked)
+                StageCounter(value: counts.removed, label: library.tr("counter_removed"), color: StatusColor.removed)
+                StageCounter(value: counts.check, label: library.tr("counter_check"), color: StatusColor.look)
             }
             HStack(spacing: 10) {
                 if stage.settled {
@@ -761,7 +761,7 @@ private struct StageCounter: View {
             Text("\(value)").font(.system(size: 26, weight: .semibold, design: .rounded)).monospacedDigit()
                 .foregroundStyle(color)
                 .contentTransition(.numericText(value: Double(value)))
-                .animation(.snappy, value: value)
+                .motionAnimation(.quick, value: value)
             Text(label).font(.caption).foregroundStyle(.white.opacity(0.6))
         }
         .frame(minWidth: 64)
@@ -776,7 +776,7 @@ private struct TrayCard: View {
     let settled: Bool
     let open: () -> Void
 
-    var color: Color { verdict == .removed ? removedColor : (verdict == .stacked ? stageColors[1] : .orange) }
+    var color: Color { verdict == .removed ? StatusColor.removed : (verdict == .stacked ? StatusColor.stacked : StatusColor.look) }
     var symbol: String {
         switch verdict { case .removed: "drop.degreesign.slash"; case .stacked: "square.stack.3d.down.right"; default: "exclamationmark.circle" }
     }
@@ -809,7 +809,7 @@ private struct TrayCard: View {
         .glassEffect(.regular.tint(color.opacity(count > 0 ? 0.12 : 0.03)).interactive(), in: .rect(cornerRadius: 24))
         .disabled(count == 0)
         .position(x: rect.midX, y: rect.midY)
-        .animation(.snappy, value: count)
+        .motionAnimation(.quick, value: count)
         .help(library.tr("trayHint_" + verdict.rawValue))
     }
 }

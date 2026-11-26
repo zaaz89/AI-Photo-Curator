@@ -17,7 +17,7 @@ struct MainWindow: View {
             DetailPage()
                 .id(guidePage)
                 .transition(.opacity)
-                .animation(.snappy(duration: 0.25), value: guidePage)
+                .motionAnimation(.settle, value: guidePage)
                 .navigationTitle(title)
                 .navigationSubtitle(subtitle)
                 .toolbar { toolbar }
@@ -37,7 +37,7 @@ struct MainWindow: View {
                     }
                 }
                 .overlay(alignment: .top) { MessageBanner() }
-                .animation(.spring(duration: 0.35), value: library.selection.count > 1)
+                .motionAnimation(.arrive, value: library.selection.count > 1)
                 .sheet(isPresented: $newEvent) { NewEventSheet() }
                 .sheet(item: $library.sheet) { s in
                     switch s {
@@ -54,7 +54,7 @@ struct MainWindow: View {
                 QuickReviewView(filter: f).transition(.opacity)
             }
         }
-        .animation(.snappy(duration: 0.25), value: library.reviewFilter)
+        .motionAnimation(.settle, value: library.reviewFilter)
     }
 
     /// Which guide page shows (grid destinations share one, so the grid keeps its state).
@@ -288,7 +288,7 @@ struct MessageBanner: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .task(id: m) {
                     try? await Task.sleep(for: .seconds(4))
-                    withAnimation { library.message = nil }
+                    withMotion(.fade) { library.message = nil }
                 }
                 .accessibilityAddTraits(.updatesFrequently)
         }

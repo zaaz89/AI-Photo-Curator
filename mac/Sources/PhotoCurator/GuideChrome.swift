@@ -37,7 +37,7 @@ struct CardStyle: ViewModifier {
             }
             .shadow(color: .black.opacity(over ? 0.18 : 0.08), radius: over ? 18 : 8, y: over ? 8 : 3)
             .scaleEffect(over && !reduceMotion ? 1.012 : 1)
-            .animation(.snappy(duration: 0.22), value: over)
+            .animation(Motion.animation(.quick, reduceMotion: reduceMotion), value: over)
             .onHover { if hover { over = $0 } }
     }
 }
@@ -129,7 +129,7 @@ struct StepBar: View {
         HStack(spacing: 0) {
             ForEach(GuideStep.allCases) { s in
                 let st = states[s] ?? StepState(done: false, waiting: 0)
-                Button { withAnimation(.snappy) { library.destination = .step(s) } } label: {
+                Button { withMotion(.settle) { library.destination = .step(s) } } label: {
                     HStack(spacing: 8) {
                         ZStack {
                             Circle().fill(s == current ? AnyShapeStyle(s.tint.gradient) : AnyShapeStyle(.fill.tertiary))
@@ -213,7 +213,7 @@ struct StepPage<Content: View>: View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 12) {
                 Button {
-                    withAnimation(.snappy) { library.destination = step?.previous.map { .step($0) } ?? .home }
+                    withMotion(.settle) { library.destination = step?.previous.map { .step($0) } ?? .home }
                 } label: {
                     Label(step?.previous.map { library.tr("step_" + $0.rawValue) } ?? library.tr("albumHome"), systemImage: "chevron.left")
                         .padding(.horizontal, 4)
@@ -225,7 +225,7 @@ struct StepPage<Content: View>: View {
                         .contentTransition(.numericText())
                 }
                 Button {
-                    withAnimation(.snappy) { if let step { library.finishStep(step) } else { library.finishPeople() } }
+                    withMotion(.settle) { if let step { library.finishStep(step) } else { library.finishPeople() } }
                 } label: {
                     Label(step?.next.map { String(format: library.tr("nextStep"), library.tr("step_" + $0.rawValue)) } ?? library.tr("backToAlbum"),
                           systemImage: step?.next == nil ? "house" : "chevron.right")
@@ -267,7 +267,7 @@ struct AnalysisCard: View {
             RoundedRectangle(cornerRadius: 22)
                 .strokeBorder(AngularGradient(colors: aiGradientColors, center: .center), lineWidth: 1.5).opacity(0.75)
         }
-        .animation(.snappy, value: library.job.progress)
+        .motionAnimation(.settle, value: library.job.progress)
     }
 }
 
