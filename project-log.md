@@ -422,3 +422,9 @@ Visual checklist (test-10, window capture, no synthetic input; `photocurator://g
 9. Dark and light, Increase Contrast; VoiceOver on rail stations ("2. Analysis, current") and sidebar rows.
 Open: Dock reopen after closing during an analysis; ⌘⌫ inside text fields; a removed folder's cached thumbnails stay
 until the album is removed (the route never touches files); `funnelParts` stays in CuratorCore without a view.
+
+### 2026-11-26 (night) — M14a compiled on the Mac, PR #22 (Claude)
+Imported `claude/m14-album-journey` from the Cowork bundle and rebased it onto main (c6f6caf). One conflict, in this log only (both sides appended an entry); main's merge entry stays first.
+Results: `scripts/test-mac.sh` 132 Swift tests (122 + 10) pass, incl. `AlbumJourneyTests` (21); `scripts/build-mac-app.sh` OK; `uv run pytest` 168 passed; token check OK with the lowered baseline (110/27/5/0); no new compiler warnings. No code fix needed: every compile-risk spot of the M14a entry compiled as written.
+PR #22 "M14a: one album, one path (new IA, journey, remove album/folder)", base main. Not merged (owner merges).
+Open: nothing was looked at in the running app; visual checklist in #22 (empty state and drop, rail and primary button per station, questions card stack, remove folder and album with `test-photos` unchanged, View menu, close-while-analysing, light/dark, VoiceOver).
