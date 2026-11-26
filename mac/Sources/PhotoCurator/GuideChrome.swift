@@ -19,13 +19,12 @@ extension GuideStep {
 let personColors: [Color] = [.blue, .pink, .orange, .teal, .purple, .green, .indigo, .red]
 func personColor(_ index: Int) -> Color { personColors[abs(index) % personColors.count] }
 
-/// A raised card: soft fill, hairline edge, gentle shadow; lifts a little under the pointer when `hover`.
+/// A raised card: soft fill, hairline edge, gentle shadow; lifts a little under the pointer when `hover`
+/// (the shared `.hoverLift()`, M12f).
 struct CardStyle: ViewModifier {
     var radius: CGFloat = 22
     var hover = false
     var highlight: Color? = nil
-    @State private var over = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
@@ -35,10 +34,8 @@ struct CardStyle: ViewModifier {
                     .strokeBorder(highlight.map { AnyShapeStyle($0.opacity(0.65)) } ?? AnyShapeStyle(.separator.opacity(0.6)),
                                   lineWidth: highlight == nil ? 0.5 : 1.5)
             }
-            .shadow(color: .black.opacity(over ? 0.18 : 0.08), radius: over ? 18 : 8, y: over ? 8 : 3)
-            .scaleEffect(over && !reduceMotion ? 1.012 : 1)
-            .animation(Motion.animation(.quick, reduceMotion: reduceMotion), value: over)
-            .onHover { if hover { over = $0 } }
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+            .hoverLift(hover, radius: radius)
     }
 }
 
@@ -200,7 +197,7 @@ struct StepPage<Content: View>: View {
                 Image(systemName: step?.symbol ?? "person.2.crop.square.stack").font(.title.weight(.semibold))
                     .foregroundStyle((step?.tint ?? .teal).gradient)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(step.map { library.tr("stepTitle_" + $0.rawValue) } ?? library.tr("stepTitle_photos")).font(.system(size: 30, weight: .bold))
+                    Text(step.map { library.tr("stepTitle_" + $0.rawValue) } ?? library.tr("stepTitle_photos")).scaledFont(30, weight: .bold, relativeTo: .title)
                     Text(lead).font(.title3).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
@@ -268,7 +265,7 @@ struct AnalysisCard: View {
                 Text(library.tr("analysingHint")).foregroundStyle(.secondary).lineLimit(3)
             }
             Spacer()
-            Text("\(Int(library.job.progress))%").font(.system(size: compact ? 22 : 30, weight: .semibold, design: .rounded))
+            Text("\(Int(library.job.progress))%").scaledFont(compact ? 22 : 30, weight: .semibold, design: .rounded, relativeTo: .title2)
                 .monospacedDigit().contentTransition(.numericText(value: library.job.progress))
         }
         .padding(compact ? 14 : 20)
@@ -301,6 +298,7 @@ struct FaceCrop: View {
     let url: URL
     let box: Photo.Faces.Box
     var size: CGFloat = 58
+    @EnvironmentObject private var library: LibraryModel
     @State private var image: NSImage?
 
     var body: some View {
@@ -326,7 +324,13 @@ struct FaceCrop: View {
             }
         }
         .task(id: url.path + "\(box.x)\(box.y)") { image = await crop() }
-        .accessibilityLabel(state == "closed" ? "eyes closed" : (state == "unsure" ? "eyes unclear" : "eyes open"))
+        .accessibilityLabel(eyesLabel(state))
+    }
+
+    /// "Eyes closed" (and ", looking away"), from Strings in the app language (M12g, #23).
+    func eyesLabel(_ state: String) -> String {
+        let eyes = library.tr(state == "closed" ? "eyes_closed" : (state == "unsure" ? "eyes_unsure" : "eyes_open"))
+        return box.lookingAway == true ? eyes + ", " + library.tr("eyes_away") : eyes
     }
 
     func crop() async -> NSImage? {

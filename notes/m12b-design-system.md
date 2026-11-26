@@ -120,3 +120,68 @@ Zoom (`ZoomMath`, `ReviewZoom.swift`): 100% = one image pixel on one screen pixe
 the largest main face (`target`), clamped so no empty band shows (`clamp`/`offset`), drag moves the centre (`pan`).
 The original is decoded with ImageIO off the main thread only for the photo on screen
 (`PhotoCurator/ZoomablePhoto.swift`); zoom resets on a new photo, focus loss and scene-phase change.
+
+## Motion choreography (M12f)
+
+The app should be fun to watch without ever being slow. Three rules decide every motion:
+
+1. **Never block input.** No animation disables a control, delays a click or swallows a key. A click during a
+   motion acts at once; the motion follows the new state (SwiftUI springs retarget). Nothing waits for a motion
+   to finish before it can be used (first run, celebration, trays, home).
+2. **≤ 0.6 s.** Every motion, delays included, ends within `motionBudget` (0.6 s, CuratorCore `Delight.swift`).
+   Staggers use `staggerDelay(_:of:)` (≤ 0.24 s total, ≤ 8 steps, later items start together). Above
+   `stageChoreographyLimit` (400 photos) there is no per-photo choreography anywhere.
+3. **One hero motion per screen.** Each screen has at most one motion that draws the eye; everything else is
+   `quick` feedback or a numeric roll.
+
+| Screen | Hero motion | Supporting motion |
+|---|---|---|
+| Album home | cover parallax while scrolling (`scrollTransition`, photo enlarged 1.12, ±20 pt) | counters roll (`numericText`, `settle`); day cards fade/scale a little at the row's edges; cards lift on hover |
+| Sorting stage | the fly-in (M12, unchanged) | tray symbols bounce once when the trays settle and when a count changes afterwards; tray counts roll |
+| Grid ↔ inspector | none | inspector photo settles in (`quick`, scale 0.96 + fade); heart / leave-out icons `symbolEffect(.replace)` |
+| Export | completion: cover shrinks into a folder, folder bounces, number rolls up (`settle`, once per export) | progress percent rolls |
+| First run | page push (`arrive`) | page-dot capsule slides (`matchedGeometryEffect`); page 1 symbols stagger in; page 2 copy travels into the folder |
+| Undo toast / error banner | none | the symbol bounces once on arrival |
+
+Building blocks (`DesignSystem/Interactions.swift`):
+- `.hoverLift(_ enabled:radius:)`: hover → scale 1.015 + deeper shadow, `quick`. Reduce Motion: shadow only.
+  `.card(hover: true)` uses it, so all hover cards behave the same.
+- `.buttonStyle(.pressableCard)`: whole-card buttons (step, day cards): hover lift + press-in 0.98, `quick`.
+  Reduce Motion: press dims instead of scaling.
+- `.symbolBounce(on:)`: one bounce on appear and on every change of the trigger. Nothing under Reduce Motion.
+  Use for state changes (kept, left out, stacked, export done, error), not for decoration.
+- Haptics: `LibraryModel.decisionPulse` changes on keep / leave out / compare pick; MainWindow maps it with
+  `.sensoryFeedback` (keep and pick → `.alignment`, leave out → `.levelChange`). Force Touch trackpads only.
+- Numbers: every counter uses `.contentTransition(.numericText(value:))` inside a `motionAnimation`.
+
+Continuity: Quick Look is the system panel (it has its own zoom), and the inspector shows a second copy of the
+selected tile while the tile stays in the grid, so a `matchedGeometryEffect` between them would make a photo seem
+to travel while it is in fact in two places; the inspector uses a settle-in transition instead.
+`matchedGeometryEffect` is used only where one element really moves within one view (first-run page dots).
+Grid tile → zoomed detail with a zoom transition stays open for the Quick Review owner (M18).
+
+Reduce Motion, everywhere: springs → 0.15 s cross-fade (`Motion`), slides → cross-fade (`motionTransition`),
+parallax / edge scaling / hover scale / symbol bounces / the celebration's travel → off (the end state is shown).
+
+## M12g: accessibility and copy (UX audit P2 rows 23 to 33)
+
+- **Scaled display text** (#26): `.scaledFont(size, weight:, design:, relativeTo:)` (DesignSystem/Tokens.swift) is a
+  `ScaledMetric`-backed replacement for `.font(.system(size:))` on text. Used for stage and page titles, the stage
+  counters and the progress percent. Fixed `.system(size:)` stays only for decorative glyphs (hero symbols, flash
+  icon, badge glyphs sized from the badge). Ratchet `fontSystemSize` 20 to 13. Not done (file owned by the motion
+  pass): AlbumHome 42 / 26 pt hero and step titles (lines 69, 77, 135, 199, 320).
+- **Dark stage decision** (#31): the Sorting Stage and Quick Review stay dark in every appearance (photos are judged
+  on a dark surface; the stage glows are the product's look). `stageDarkSurface()` is the one place that forces it, so
+  Quick Review and the Stage cannot drift. They respect Increase Contrast through `StageInk`: secondary text 0.78 to
+  0.92 white, tile outlines 0.14 to 0.5, glow opacity 0.3 to 0.12, tray scrim 0.25 to 0.45 (0.7 with Reduce
+  Transparency). System text styles (`.secondary`) already adapt. Hard-coded white opacities on the stage must use
+  `StageInk`, not a literal.
+- **Colour is never the only state** (#25): small stage tiles keep a 10 pt glyph for "to look at" and "left out"; with
+  Differentiate Without Colour every state glyph shows at any size.
+- **Engine codes without a translation** (#28): `LibraryModel.trCode(prefix, code, other:)` shows "Other reason" /
+  "Other note" and logs the code (`Strings.codeText`, tested). Never show a raw engine code.
+- **Default action key** (#32): `.defaultActionKey(if:)` / `.keyboardShortcut(.defaultAction)`: Next on the settled Stage
+  (Resume / Analyse Again while those are the prominent action) and Align on the first pending clock lane.
+- **Thumbnails** (#33): `ThumbnailCache.result(for:side:)` reports `.unreadable` ("Cannot read file") or `.noPreview`;
+  `Thumbnail` shows the label (symbol only when the cell is too small), uses the cached 260 px image as a stand-in
+  while a large one loads, and a spinner for sides above 520 (Quick Review).

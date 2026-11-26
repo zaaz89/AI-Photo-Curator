@@ -261,3 +261,66 @@ Check visually (test-10): error banner (stop the engine, then mark a photo) in l
 ### 2026-11-24, Claude (Cowork): M12d + M12e merged into one branch
 - `claude/m12d-ux-p1` now holds both P1 halves (Quick Review/compare and flow/errors/keyboard); only conflict was this log. Wired #17: Quick Review starts with `library.takeReviewSubset()`, so "Review These Photos" in the Have a look tray reviews only the tray's photos.
 - Not compiled. Build order on the Mac: `scripts/test-mac.sh`, `scripts/build-mac-app.sh`, `uv run pytest`, `bash scripts/check-design-tokens.sh`.
+
+### 2026-11-26 — M12f: motion and delight (roadmap M18.1 to M18.3, audit #30) (Claude (Cowork))
+Branch `claude/m12f-motion-delight`. Another agent edits SortingStage, GuideChrome, StepPhotos, Thumbnails and QuickReview
+in parallel; this branch touches SortingStage (TrayCard only) and GuideChrome (`CardStyle` hover only), nothing in the others.
+- Rules: `notes/m12b-design-system.md` → "Motion choreography": never block input, every motion ≤ 0.6 s (`motionBudget`),
+  one hero motion per screen, no per-photo choreography above 400 photos. Every new motion goes through `Motion` and has a
+  Reduce Motion path.
+- Micro-interactions (`DesignSystem/Interactions.swift`): `.hoverLift()`, `.buttonStyle(.pressableCard)`, `.symbolBounce(on:)`.
+  Applied to step cards, day cards, highlights, tray cards and every `.card(hover: true)` (export choices, chapters).
+  Haptics: `LibraryModel.decisionPulse` (keep / leave out / compare pick) → `.sensoryFeedback` in MainWindow.
+- Continuity: inspector photo settles in on a new selection; heart and leave-out icons use `symbolEffect(.replace)`; numbers
+  roll (`numericText`) in the funnel, home counters, step badges, day cards, export percent; tray symbols bounce once when
+  the trays settle; undo toast and error banner symbols bounce on arrival. No `matchedGeometryEffect` grid ↔ inspector or
+  into Quick Look (system panel; the tile stays in the grid): reasons in the notes.
+- Album home as a story (M18.2 without maps or new engine data): cover = `albumCover` (engine cover while in the album, else
+  a highlight, else the best kept photo) with slow parallax; dates and places under the name; counters (in album, taken,
+  days, chapters); new "Day by day" row (`dayCards`: best photo of the day, counts, chapter names); NextCard stays the one
+  primary action; funnel card kept, its header now has "Replay the sorting" / "Watch the sorting" (audit #30: always on Home).
+- First run (M18.3): three screens (what it does, "originals are never touched" with a copy-into-folder animation, start),
+  once (`FirstRun.seenKey` = `firstRunSeen.v1`), Skip / Esc, ← → and Return; "Create an Album" opens the wizard when there
+  is no album. Automation: `photocurator://firstrun?page=0|1|2`, `photocurator://firstrun?close=1`.
+- Celebration: after a verified export the cover shrinks into a folder, the folder bounces, the count rolls up; once per
+  export folder (`shouldCelebrateExport`); buttons usable at once; Reduce Motion = a still check mark.
+- CuratorCore `Delight.swift` (pure) + `DelightTests.swift` (8 tests) + 3 automation expectations. 19 new strings EN + SL
+  (block "// M12f motion and delight" at the end of `Strings.swift`). Token check OK, baseline unchanged.
+NOT compiled, Swift tests NOT run (Linux container): `scripts/test-mac.sh`, `scripts/build-mac-app.sh`,
+`bash scripts/check-design-tokens.sh`.
+Visual checklist (test-10, window capture, no synthetic input):
+1. `defaults delete si.beehive.photocurator firstRunSeen.v1`, start: first run appears once; `firstrun?page=1` shows the copy
+   travelling into the folder and the lock/folder bounce; page dots slide; relaunch: not shown again.
+2. Home: cover is a kept photo (leave the engine's cover out and reload: cover changes); scroll: cover moves slower than the
+   page, no edge shows; counters pill row legible on bright and dark covers; Day by day row: covers, counts, chips; a day
+   opens All Photos on its cover; "Replay the sorting" in the funnel header opens the stage.
+3. Hover any card: small lift, no layout jump; press a step/day card: press-in; Reduce Motion on: no scale, no parallax,
+   no bounces, celebration shows a check mark.
+4. Grid: select photos with arrows: inspector photo settles in; F / X: heart and leave-out icons morph; with a Force Touch
+   trackpad, K / X and compare 1/2 give a light tick.
+5. Sorting stage at settle: tray icons bounce once; Put back changes a count and bounces again; no bounce during fly-in.
+6. Export test-10: percent rolls; at the end the cover drops into the folder once (go to Home and back: no replay); Show in
+   Finder clickable during the moment.
+7. Undo toast and error banner: symbol bounces once.
+
+### 2026-11-26, Claude (Cowork): M12g: UX audit P2, accessibility and copy (#23 to #29, #31 to #33)
+Branch `claude/m12g-ux-p2`. Not touched (motion pass owns them): AlbumHome, PhotoGrid, MainWindow, Inspector; row 30 skipped.
+- #23 `FaceCrop` label from Strings (`eyes_closed/unsure/open`, `eyes_away`). #24 Stage counters and source chips are one VoiceOver element each ("12 in the album", "Name, 3 of 10 photos read"). #25 small stage tiles keep a 10 pt glyph for "to look at" / "left out"; all glyphs with Differentiate Without Colour.
+- #26 `.scaledFont` (ScaledMetric) for stage/page titles, counters, percent; ratchet `fontSystemSize` 20 to 13. Not done: AlbumHome hero/step titles (file not mine).
+- #27 stage secondary text 0.6/0.65 to 0.78 (`StageInk`), dark scrim under tray glass. #31 decision: keep the dark stage, `stageDarkSurface()` shared by Stage and Quick Review, Increase Contrast handled by `StageInk` (see notes/m12b-design-system.md).
+- #28 `trCode` / `Strings.codeText`: unknown engine code shows "Other reason" / "Other note" / "This folder could not be used" and is logged. #29 `stepsProgress` was already gone; `exportHelp` lost "classic view for now"; `phase_describing` now "Working" (key kept, the phase enum still exists).
+- #32 Return: Next on the settled Stage (Resume / Analyse Again when those are primary), Align on the first pending clock lane. #33 thumbnail failure label ("Cannot read file" / "No preview available"), 260 px stand-in and spinner for the large Quick Review photo.
+- Strings: 12 new (block `// M12g a11y and copy`), 2 changed. Tests: `StringsTests` (codeText, keys). Token check OK after `--update` (fontSystemSize 13); the other agent may also touch the baseline file.
+NOT compiled, Swift tests NOT run. Compile risks: `ScaledSystemFont` init with `_size = ScaledMetric(...)`; `DefaultActionKey` ViewModifier with if/else body; `ViewThatFits` in Thumbnail; `@EnvironmentObject` now in `Thumbnail` and `FaceCrop`; `Logger` in LibraryModel; `Result<NSImage, Failure>` across the actor.
+Check visually (test-10): Stage in dark with Increase Contrast and Reduce Transparency on (tray text, glows); tiny tiles show orange/left-out glyphs; Return on the Stage after settling goes to Selection; Return on People & Clocks aligns the first clock; rename a file in test-photos then open it: "Cannot read file" label; Quick Review shows the small photo with a spinner, then sharp; VoiceOver on counters and chips; text size larger in System Settings for the stage titles.
+
+### 2026-11-26, Claude (Cowork): M12f + M12g merged
+- `claude/m12f-motion-delight` holds M12f (motion, Album Home story, first run, export celebration) and M12g (P2 a11y and copy). Conflicts were only appended blocks (Strings, notes, log); 543 string keys, no duplicates; token check OK (156/32/13/0).
+- Stack: m12c (#17) → m12d (P1) → m12f (this). None of m12d/m12f compiled yet. Build m12d first, then m12f.
+
+### 2026-11-26 (later) — M12d and M12f compiled on the Mac, PRs #18 and #19 (Claude)
+Imported `claude/m12d-ux-p1` and `claude/m12f-motion-delight` from the Cowork bundle (it was in `~/Downloads`, not on the Desktop) and ran the four checks on the Mac (Xcode 27 toolchain).
+- M12d: compiled and passed as delivered, no fix commit. 95 Swift tests (86 + 9), `scripts/build-mac-app.sh` OK, `uv run pytest` 157 passed, token check OK (156/32/20/0). Three new compiler warnings in `LibraryModel.swift` (`[weak self]` inside a `Task` that captures self strongly: `runSearch`, `analyse`, `stopJob` retry closures); harmless, left as written.
+- M12f: one compile error, fixed: `ThumbnailCache.Failure` did not conform to `Error`, which `Result<NSImage, Failure>` needs (`Thumbnails.swift`). The other M12g risk spots compiled as written. 105 Swift tests (96 + 9), build OK, pytest 157 passed, token check OK (156/32/13/0), no new warnings. No rebase needed (m12d unchanged, m12f already on its tip).
+PRs: #18 "M12d: UX P1" (base `claude/m12c-ux-p0`), #19 "M12f: motion, album story, first run, P2 a11y" (base `claude/m12d-ux-p1`). Merge order: #15, #16, #17, #18, #19.
+Open: nothing was looked at in the running app; the visual checklists are in #18 and #19.

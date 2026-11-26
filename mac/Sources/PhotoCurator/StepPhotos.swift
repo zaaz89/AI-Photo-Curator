@@ -154,7 +154,8 @@ struct ClockLanes: View {
         let span = timeSpan
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(clocks.enumerated()), id: \.element.id) { i, c in
-                ClockLane(clock: c, index: personIndex(c.owner), photos: photos(of: c), span: span, reload: reload)
+                ClockLane(clock: c, index: personIndex(c.owner), photos: photos(of: c), span: span, reload: reload,
+                          returnKeyAligns: c.id == firstPendingId)
                 if i < clocks.count - 1 { Divider().padding(.leading, 16) }
             }
             if let span {
@@ -168,6 +169,9 @@ struct ClockLanes: View {
         .padding(.vertical, 6)
         .card()
     }
+
+    /// The one lane whose Align button answers the Return key (the first pending suggestion).
+    var firstPendingId: Int? { clocks.first { $0.pending && $0.suggestedS != nil && $0.status != "reference" }?.id }
 
     func personIndex(_ owner: String) -> Int { library.sources.firstIndex { $0.owner == owner } ?? 0 }
 
@@ -198,6 +202,7 @@ struct ClockLane: View {
     let photos: [Photo]
     let span: (Date, Date)?
     let reload: () async -> Void
+    var returnKeyAligns = false
     @State private var manual = false
     @State private var seconds: Double = 0
 
@@ -252,6 +257,7 @@ struct ClockLane: View {
                 Label(library.tr("clockReferenceShort"), systemImage: "scope").font(.callout).foregroundStyle(.secondary)
             } else if clock.pending, let s = clock.suggestedS {
                 Button(String(format: library.tr("alignBy"), shiftText(s))) { act("accept") }.buttonStyle(.glassProminent)
+                    .defaultActionKey(if: returnKeyAligns)
                 Button(library.tr("no")) { act("reject") }.buttonStyle(.glass)
             } else if let a = clock.appliedS, a != 0 {
                 Button(library.tr("undo")) { act("reset") }.buttonStyle(.glass)

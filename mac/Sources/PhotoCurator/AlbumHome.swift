@@ -1,8 +1,8 @@
 import CuratorCore
 import SwiftUI
 
-/// The album's home: the cover, what goes into the album, the one thing to do next, the four steps,
-/// the best photos and who took them.
+/// The album's home as a story (M12f): the cover with dates and numbers, the one thing to do next, what goes into
+/// the album, the days, the steps, the best photos and who took them.
 struct AlbumHome: View {
     @EnvironmentObject var library: LibraryModel
 
@@ -19,6 +19,7 @@ struct AlbumHome: View {
                     if let f = library.overview?.funnel, f.taken > 0, !library.analysing {
                         SettingsStrip()
                         FunnelView(funnel: f)
+                        DayStory()
                     } else {
                         StageLink()
                         SettingsStrip()
@@ -43,16 +44,26 @@ struct AlbumHero: View {
     @State private var editTrip: String?            // the album being renamed, kept if the owner switches albums
     @FocusState private var nameFocused: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The engine's cover while it is in the album, else the best kept photo (M12f, `albumCover`).
     var cover: Photo? {
-        if let id = library.overview?.coverId, let p = library.photo(id) { return p }
-        return coverPhoto(library.photos)
+        albumCover(library.photos, coverId: library.overview?.coverId, highlights: library.overview?.highlights ?? [])
     }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             Group {
                 if let cover {
+                    // Slow parallax while the page scrolls (M12f): the photo moves at a fraction of the scroll and is
+                    // slightly enlarged so no edge shows. Still under Reduce Motion.
+                    let still = reduceMotion
                     Thumbnail(url: cover.fileURL, side: 2048)
+                        .scrollTransition(.interactive, axis: .vertical) { content, phase in
+                            content
+                                .scaleEffect(still ? 1 : 1.12)
+                                .offset(y: still ? 0 : -phase.value * 20)
+                        }
                 } else {
                     LinearGradient(colors: aiGradientColors.map { $0.opacity(0.55) }, startPoint: .topLeading, endPoint: .bottomTrailing)
                 }
@@ -83,8 +94,10 @@ struct AlbumHero: View {
                             .help(library.tr("renameAlbum")).accessibilityLabel(library.tr("renameAlbum"))
                     }
                 }
-                Text(facts).font(.title3).foregroundStyle(.white.opacity(0.88))
+                let subtitle = albumSubtitle(library)
+                Text(subtitle.isEmpty ? facts : subtitle).font(.title3).foregroundStyle(.white.opacity(0.88))
                     .contentTransition(.numericText())
+                if !library.photos.isEmpty { StoryCounters().padding(.top, Space.xs) }
             }
             .padding(28)
         }
@@ -242,8 +255,12 @@ struct FunnelView: View {
     var body: some View {
         let parts = funnelParts(funnel)
         VStack(alignment: .leading, spacing: 14) {
-            SectionTitle(title: library.tr("funnelTitle"),
-                         detail: String(format: library.tr("funnelLead"), Strings.photos(funnel.taken, library.lang), funnel.inAlbum))
+            HStack(alignment: .firstTextBaseline) {
+                SectionTitle(title: library.tr("funnelTitle"),
+                             detail: String(format: library.tr("funnelLead"), Strings.photos(funnel.taken, library.lang), funnel.inAlbum))
+                    .contentTransition(.numericText())
+                ReplaySortingButton()                      // always visible on Home (audit #30)
+            }
             GeometryReader { g in
                 HStack(spacing: 3) {
                     ForEach(parts) { p in
@@ -260,6 +277,7 @@ struct FunnelView: View {
                         HStack(spacing: 8) {
                             Circle().fill(color(p.kind)).frame(width: 10, height: 10)
                             Text("\(p.count)").font(.headline).monospacedDigit()
+                                .contentTransition(.numericText(value: Double(p.count)))
                             Text(library.tr("funnel_" + p.kind.rawValue)).foregroundStyle(.secondary)
                             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                         }
@@ -271,11 +289,10 @@ struct FunnelView: View {
                     .help(library.tr("funnelHelp_" + p.kind.rawValue))
                 }
             }
-            Divider()
-            StageLink()
         }
         .padding(22)
         .card()
+        .motionAnimation(.settle, value: funnel)
     }
 
     func color(_ k: FunnelPart.Kind) -> Color {
@@ -325,9 +342,10 @@ struct StepCards: View {
                                 Text(library.tr("step_" + s.rawValue)).font(.headline)
                                 Spacer()
                                 if st.done {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(StatusColor.kept)
                                 } else if st.waiting > 0 {
                                     Text("\(st.waiting)").font(.caption.weight(.bold)).monospacedDigit()
+                                        .contentTransition(.numericText(value: Double(st.waiting)))
                                         .padding(.horizontal, 7).padding(.vertical, 2)
                                         .background(.orange.opacity(0.2), in: .capsule).foregroundStyle(.orange)
                                 }
@@ -335,10 +353,10 @@ struct StepCards: View {
                             Text(status(s, st)).font(.callout).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
                         }
                         .padding(14)
-                        .contentShape(.rect)
+                        .card(radius: Radius.card, highlight: library.next == s ? s.tint : nil)
+                        .motionAnimation(.quick, value: st.waiting)
                     }
-                    .buttonStyle(.plain)
-                    .card(radius: 22, hover: true, highlight: library.next == s ? s.tint : nil)
+                    .buttonStyle(.pressableCard)
                 }
             }
         }
@@ -384,6 +402,7 @@ struct Highlights: View {
                             PhotoCover(photo: photo, side: 520, radius: 18)
                                 .frame(width: tileWidth(photo), height: 200)
                                 .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+                                .hoverLift(radius: 18)
                                 .onTapGesture { library.destination = .all; library.click(photo, modifiers: []) }
                                 .help(photo.filename)
                         }

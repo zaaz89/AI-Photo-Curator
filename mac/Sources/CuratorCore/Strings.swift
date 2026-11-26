@@ -10,6 +10,13 @@ public enum Strings {
         return lang == .sl ? pair.1 : pair.0
     }
 
+    /// The text for a code from the engine (`why2_movement_blur`, `warn_...`, `problem_...`). Without a translation
+    /// it is the generic text under `otherKey`, never the raw engine code (M12g, audit #28); `known` is false then,
+    /// so the caller can log the code.
+    public static func codeText(prefix: String, code: String, otherKey: String, _ lang: Lang) -> (text: String, known: Bool) {
+        table[prefix + code] != nil ? (text(prefix + code, lang), true) : (text(otherKey, lang), false)
+    }
+
     public enum Word: Sendable { case photo, moment, person, day, event, video, chapter }
 
     /// "3 moments" / "3 trenutki": English singular and plural, Slovenian singular, dual, 3–4 and plural.
@@ -195,7 +202,7 @@ public enum Strings {
         "sort_quality": ("By Quality", "Po kakovosti"),
         "thumbSize": ("Thumbnail size", "Velikost sličic"),
         "export": ("Export…", "Izvozi …"),
-        "exportHelp": ("Export for Google Photos (classic view for now)", "Izvoz za Google Photos (zaenkrat v klasičnem pogledu)"),
+        "exportHelp": ("Export for Google Photos", "Izvoz za Google Photos"),
         "inspector": ("Inspector", "Inšpektor"),
         // photo actions
         "photoMenu": ("Photo", "Fotografija"),
@@ -260,7 +267,7 @@ public enum Strings {
         "phase_faces": ("Looking at faces", "Pregledujem obraze"),
         "phase_videos": ("Reading videos", "Berem videe"),
         "phase_searchIndex": ("Learning what is in the photos", "Spoznavam vsebino fotografij"),
-        "phase_describing": ("Writing descriptions", "Pišem opise"),
+        "phase_describing": ("Working", "Delam"),
         "phase_exporting": ("Exporting", "Izvažam"),
         "phase_paused": ("Paused to keep the Mac cool", "Premor, da se Mac ohladi"),
         "phase_working": ("Working", "Delam"),
@@ -632,5 +639,43 @@ public enum Strings {
                             "Izvoz je preklican. Že kopirane datoteke ostanejo v ciljni mapi; tvoje fotografije so nedotaknjene."),
         "previewFailed": ("The preview could not be loaded.", "Predogleda ni bilo mogoče naložiti."),
         "exportFailed": ("The export stopped.", "Izvoz se je ustavil."),
+        // M12f motion and delight
+        "storyInAlbum": ("%d in the album", "%d v albumu"),
+        "storyTaken": ("%@ taken", "posneto: %@"),
+        "daysTitle": ("Day by day", "Dan za dnem"),
+        "daysLead": ("Each day's best photo and its chapters. Click a day to see its photos.",
+                     "Najboljša fotografija vsakega dne in njegova poglavja. Klikni dan, da vidiš njegove fotografije."),
+        "dayCounts": ("%@ · %d in the album", "%@ · %d v albumu"),
+        "firstRunPageA11y": ("Welcome, page %d of %d", "Dobrodošlica, stran %d od %d"),
+        "firstRunSkip": ("Skip", "Preskoči"),
+        "firstRunBack": ("Back", "Nazaj"),
+        "firstRunNext": ("Continue", "Naprej"),
+        "firstRunCreate": ("Create an Album", "Ustvari album"),
+        "firstRunStart": ("Start", "Začni"),
+        "firstRunWhatTitle": ("Your trip, sorted for you", "Tvoje potovanje, urejeno namesto tebe"),
+        "firstRunWhatText": ("Add the photos everyone took. Photo Curator keeps the best frame of each moment, sets blurry shots and screenshots aside and builds the album day by day. You only decide where it is unsure.",
+                             "Dodaj fotografije, ki so jih posneli vsi. Photo Curator obdrži najboljši posnetek vsakega trenutka, odmakne zamegljene posnetke in posnetke zaslona ter album sestavi dan za dnem. Odločiš se le tam, kjer ni prepričan."),
+        "firstRunSafeTitle": ("Your originals are never touched", "Izvirniki ostanejo nedotaknjeni"),
+        "firstRunSafeText": ("The app only reads your photos: it never moves, renames, edits or deletes them, and everything stays on this Mac. An export makes copies and checks every byte.",
+                             "Aplikacija fotografije samo bere: nikoli jih ne premakne, preimenuje, ureja ali izbriše, in vse ostane na tem Macu. Izvoz naredi kopije in preveri vsak bajt."),
+        "firstRunStartTitle": ("Start with one trip", "Začni z enim potovanjem"),
+        "firstRunStartText": ("Make an album and add a folder from each person's camera or phone. The analysis runs here, in the background, while you keep working.",
+                              "Ustvari album in dodaj mapo iz fotoaparata ali telefona vsake osebe. Analiza teče tukaj, v ozadju, medtem ko delaš naprej."),
+        "celebrateTitle": ("Album exported and verified", "Album je izvožen in preverjen"),
+        "celebrateText": ("Copied and checked byte for byte. Your originals are untouched.",
+                          "Kopirano in preverjeno bajt za bajtom. Izvirniki so nedotaknjeni."),
+        // M12g a11y and copy
+        "eyes_closed": ("Eyes closed", "Zaprte oči"),
+        "eyes_unsure": ("Eyes unclear", "Oči niso jasne"),
+        "eyes_open": ("Eyes open", "Odprte oči"),
+        "eyes_away": ("looking away", "gleda stran"),
+        "reason_other": ("Other reason", "Drug razlog"),
+        "warn_other": ("Other note", "Druga opomba"),
+        "problem_other": ("This folder could not be used", "Te mape ni mogoče uporabiti"),
+        "chipProgress": ("%d of %d photos read", "Prebranih %d od %d fotografij"),
+        "chipWaiting": ("Waiting to start", "Čaka na začetek"),
+        "thumbUnreadable": ("Cannot read file", "Datoteke ni mogoče prebrati"),
+        "thumbNoPreview": ("No preview available", "Predogled ni na voljo"),
+        "thumbLoading": ("Loading photo", "Nalagam fotografijo"),
     ]
 }

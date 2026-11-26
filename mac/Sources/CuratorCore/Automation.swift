@@ -13,6 +13,7 @@ import Foundation
 ///   (keys go through `ReviewKeymap`, so in the compare view right/left change the frame on the right)
 ///   photocurator://window?w=1500&h=980
 ///   photocurator://reload
+///   photocurator://firstrun?page=0|1|2                      photocurator://firstrun?close=1   (M12f)
 public enum AutomationCommand: Equatable, Sendable {
     case go(String)
     case album(String)
@@ -22,6 +23,8 @@ public enum AutomationCommand: Equatable, Sendable {
     case window(width: Double, height: Double)
     case reload
     case replay
+    /// Show the first run on a page (0, 1, 2), or close it (nil).
+    case firstRun(Int?)
 
     public static let scheme = "photocurator"
     public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut", "settings", "sorting"]
@@ -54,6 +57,10 @@ public enum AutomationCommand: Equatable, Sendable {
             self = .reload
         case "replay":
             self = .replay
+        case "firstrun":
+            if q["close"] != nil { self = .firstRun(nil); return }
+            guard let p = q["page"].flatMap(Int.init), (0...2).contains(p) else { return nil }
+            self = .firstRun(p)
         default:
             return nil
         }

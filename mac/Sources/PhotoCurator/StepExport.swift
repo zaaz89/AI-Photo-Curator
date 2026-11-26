@@ -15,6 +15,8 @@ struct StepExport: View {
     @State private var previewAttempt = 0
     /// The owner pressed Cancel during this export.
     @State private var cancelled = false
+    /// Exports already celebrated, by folder (M12f): the moment plays once.
+    @State private var celebrated: Set<String> = []
 
     var body: some View {
         StepPage(step: .export, lead: library.tr("lead_export"), status: status) {
@@ -120,7 +122,7 @@ struct StepExport: View {
                 if !notes.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(notes, id: \.key) { k, n in
-                            Label("\(n) " + library.trOr("warn_" + k, k), systemImage: "info.circle")
+                            Label("\(n) " + library.trCode("warn_", k, other: "warn_other"), systemImage: "info.circle")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }
@@ -158,7 +160,12 @@ struct StepExport: View {
                 HStack(spacing: 14) {
                     AIRing(symbol: "square.and.arrow.up", size: 44, spinning: true, progress: job.progress / 100)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(library.tr("exporting")).font(.headline)
+                        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                            Text(library.tr("exporting")).font(.headline)
+                            Text("\(Int(job.progress.rounded())) %").font(TypeRole.label).monospacedDigit().foregroundStyle(.secondary)
+                                .contentTransition(.numericText(value: job.progress))
+                                .motionAnimation(.quick, value: Int(job.progress.rounded()))
+                        }
                         Text(job.status).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                     }
                     Spacer()
@@ -176,6 +183,14 @@ struct StepExport: View {
                     ErrorBanner(error: humanError(engineText: error, library.lang), retry: { choose() }, floating: false)
                 }
             } else if started, let last = library.lastExport {
+                if last.ok {
+                    ExportCelebration(cover: albumCover(library.photos, coverId: library.overview?.coverId,
+                                                        highlights: library.overview?.highlights ?? []),
+                                      photos: preview?.photoIds.count ?? library.overview?.funnel?.inAlbum ?? 0,
+                                      play: shouldCelebrateExport(ok: last.ok, folder: last.folder, celebrated: celebrated),
+                                      played: { _ = celebrated.insert(last.folder) })
+                        .motionTransition(.scale(scale: 0.96).combined(with: .opacity))
+                }
                 HStack(spacing: 12) {
                     Label(library.tr(last.ok ? "exportFinished" : "exportProblems"),
                           systemImage: last.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")

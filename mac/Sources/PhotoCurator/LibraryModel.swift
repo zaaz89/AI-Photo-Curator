@@ -1,6 +1,7 @@
 import AppKit
 import CuratorCore
 import Foundation
+import os
 import SwiftUI
 
 /// Sidebar destinations.
@@ -117,6 +118,14 @@ enum AssistantSheet: String, Identifiable {
     func tr(_ key: String) -> String { Strings.text(key, lang) }
     /// A text for a value from the engine; the engine's own words when there is no translation.
     func trOr(_ key: String, _ fallback: String) -> String { Strings.table[key] == nil ? fallback : Strings.text(key, lang) }
+    /// A text for an engine code (`why2_…`, `warn_…`, `problem_…`): the translation, else a generic "Other …" text
+    /// (never the raw code, M12g #28). The unknown code goes to the log so a missing translation can be found.
+    func trCode(_ prefix: String, _ code: String, other: String) -> String {
+        let r = Strings.codeText(prefix: prefix, code: code, otherKey: other, lang)
+        if !r.known { Self.log.info("No translation for engine code \(prefix + code, privacy: .public)") }
+        return r.text
+    }
+    private static let log = Logger(subsystem: "si.beehive.photocurator", category: "strings")
 
     // MARK: loading
 
@@ -293,7 +302,11 @@ enum AssistantSheet: String, Identifiable {
     // MARK: marks with undo
 
     func toggleFavourite() { let t = targets; mark(t, ["favorite": .bool(!t.allSatisfy(\.favorite))], name: tr("favourite")) }
-    func toggleLeaveOut() { let t = targets; mark(t, ["rejected": .bool(!t.allSatisfy(\.rejected))], name: tr("leaveOut")) }
+    func toggleLeaveOut() {
+        let t = targets, out = !t.allSatisfy(\.rejected)
+        mark(t, ["rejected": .bool(out)], name: tr("leaveOut"))
+        if !t.isEmpty { pulse(out ? .leaveOut : .keep) }
+    }
     func keep() { mark(targets, ["rejected": .bool(false)], name: tr("keep")) }
     func setFocus(_ tier: String?) { mark(targets, ["focus": tier.map { .string($0) } ?? .null], name: tr("focus")) }
     func toggleWallpaper() {
@@ -489,6 +502,7 @@ enum AssistantSheet: String, Identifiable {
             }
         case .reload: Task { await reload() }
         case .replay: showSorting(replay: true)
+        case .firstRun(let page): firstRunPage = page.flatMap(FirstRunPage.init(rawValue:))
         }
     }
 
@@ -554,8 +568,20 @@ enum AssistantSheet: String, Identifiable {
         } else {
             mark(items, ["rejected": .bool(true)], name: tr("leaveOut"))
         }
+        if !items.isEmpty { pulse(inAlbum ? .keep : .leaveOut) }
         return items.count
     }
+
+    // MARK: delight (M12f)
+
+    /// Changes on every keep / leave out / compare pick; MainWindow turns it into `.sensoryFeedback` (Force Touch
+    /// trackpads only; nothing happens elsewhere).
+    @Published private(set) var decisionPulse = DecisionPulse.none
+    func pulse(_ kind: DecisionFeedback) { decisionPulse = decisionPulse.next(kind) }
+
+    /// The first-run page on screen, nil when it is closed. Set once at launch while `FirstRun.seenKey` is unset,
+    /// and by the automation channel (`photocurator://firstrun?page=0`) for checks.
+    @Published var firstRunPage: FirstRunPage?
 
     // MARK: undo toast (M12c)
 
@@ -603,7 +629,7 @@ enum AssistantSheet: String, Identifiable {
             var problems: [String] = [], added = 0
             do {
                 let s = try await api.suggest(paths: urls.map(\.path))
-                problems += s.rejected.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \(trOr("problem_" + $0.problem, $0.problem))" }
+                problems += s.rejected.map { "\(URL(fileURLWithPath: $0.path).lastPathComponent): \(trCode("problem_", $0.problem, other: "problem_other"))" }
                 for f in s.folders {
                     let name = URL(fileURLWithPath: f.path).lastPathComponent
                     do { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? name : f.owner); added += 1 }
@@ -692,6 +718,7 @@ enum AssistantSheet: String, Identifiable {
     func keep(group: Int, photo: Int?) {
         guard let tripId, tripId == loadedTripId else { return }
         reviewedMoments.insert(group)
+        pulse(.pick)
         enqueue { api in try await api.keep(trip: tripId, group: group, photo: photo) }
     }
 
