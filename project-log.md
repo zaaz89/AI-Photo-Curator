@@ -539,3 +539,10 @@ Open: why the third folder had no photos on the Mac; StepPhotos (People & Clocks
 ### 2026-11-26, Claude (Cowork): M14c = Survey + stage fixes merged
 - `claude/m14c-survey` now holds both halves: Survey (multi-frame decisions, synced zoom, one keymap, shortcut bar, coach) and the stage fixes (real days instead of "No date", no overlap with trays, distinct source chips, one phase status, stage polish). Conflicts only in appended blocks (Strings: 660 keys, no duplicates; log). Token check OK (108/26/5/0). pytest on the stage branch: 177 passed.
 - Not compiled. Both halves' compile-risk spots are in their own entries above.
+
+### 2026-11-26 (night, later) — M14c compiled on the Mac, PR #23 (Claude)
+Imported `claude/m14c-survey` from the Cowork bundle. #22 had no new commits on GitHub, so no rebase (the branch already sits on its tip a6bc0ca).
+Fix: `SurveyTests.swift` had a single-line raw string `#"…"#` split over two lines (unterminated literal); now a multi-line raw string `#"""…"""#`, same JSON. The only compile error; every risk spot of both M14c entries compiled as written.
+Results: `scripts/test-mac.sh` 155 Swift tests (145 + 10) pass, incl. `SurveyTests` (14) and `M14cStageTests` (11); `scripts/build-mac-app.sh` OK; `uv run pytest` 177 passed; token check OK (108/26/5/0); no new compiler warnings compared with #22.
+PR #23 "M14c: Survey (multi-frame decisions) + analysis stage fixes", base `claude/m14-album-journey`. Not merged (owner merges; #22 first).
+Open: nothing was looked at in the running app; visual checklists (Survey and Analysis station) in #23.
