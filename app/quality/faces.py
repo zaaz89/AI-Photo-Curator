@@ -237,15 +237,17 @@ def face_summary(faces: list, dims=None, lenses=None, annotated=None) -> Optiona
             'score': round(sum(scores) / len(scores), 3), 'boxes': face_boxes(faces, annotated=ann)}
 
 
-def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
-    """Helper results per photo (faces, aesthetics, utility, salient boxes), then the subject sharpness."""
+def compute_faces(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False,
+                  shas: Optional[set] = None) -> dict:
+    """Helper results per photo (faces, aesthetics, utility, salient boxes), then the subject sharpness.
+    `shas` (M13 per-day pipeline): only these photos."""
     from app.quality.subject import compute_subject_focus
     if not helper_available():
         res = {'skipped': 'helper not built; run scripts/build-helper.sh'}
     else:
-        res = _compute_helper(conn, progress, cancelled)
+        res = _compute_helper(conn, progress, cancelled, shas)
     if not cancelled():
-        res['subject'] = compute_subject_focus(conn, progress, cancelled)
+        res['subject'] = compute_subject_focus(conn, progress, cancelled, shas)
     return res
 
 
@@ -264,7 +266,8 @@ def helper_version() -> int:
     return _HELPER_VERSION
 
 
-def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
+def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False,
+                    shas: Optional[set] = None) -> dict:
     from app.ai.throttle import Throttle, throttled_map
     hv = helper_version()
     # A photo is measured again only when the installed helper is newer than the one that measured it
@@ -274,6 +277,8 @@ def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callab
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM faces WHERE vision_json IS NOT NULL '
         "AND COALESCE(json_extract(vision_json, '$.v'), 1) >= ?) GROUP BY a.sha256", (hv,)).fetchall()
+    if shas is not None:
+        rows = [r for r in rows if r['sha256'] in shas]
     # Apple Vision runs a few batches at once; since M11 the owner's share applies (rounds of batches with a
     # rest after each), thermal and battery pauses too.
     throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
@@ -304,13 +309,16 @@ def _compute_helper(conn, progress: Optional[Callable] = None, cancelled: Callab
     return {'analysed': done}
 
 
-def compute_videos(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False) -> dict:
+def compute_videos(conn, progress: Optional[Callable] = None, cancelled: Callable[[], bool] = lambda: False,
+                   shas: Optional[set] = None) -> dict:
     if not helper_available():
         return {'skipped': 'helper not built; run scripts/build-helper.sh'}
     rows = conn.execute(
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'video' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM video_meta) GROUP BY a.sha256').fetchall()
+    if shas is not None:
+        rows = [r for r in rows if r['sha256'] in shas]
     out_dir = data_dir() / 'cache' / 'video-thumbs'
     done = 0
     for i in range(0, len(rows), BATCH):

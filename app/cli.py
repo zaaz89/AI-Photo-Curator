@@ -7,6 +7,7 @@
   uv run python -m app.cli list
   uv run python -m app.cli search <collection> "sunset" [--limit 12]
   uv run python -m app.cli describe <collection> [--limit 20]
+  uv run python -m app.cli bench <collection> --out results.json [--mode per-day|all-at-once]   (M13)
 """
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ def main(argv=None):
     sub.add_parser('list')
     q = sub.add_parser('search'); q.add_argument('collection'); q.add_argument('query'); q.add_argument('--limit', type=int, default=12)
     d = sub.add_parser('describe'); d.add_argument('collection'); d.add_argument('--limit', type=int)
+    b = sub.add_parser('bench'); b.add_argument('collection'); b.add_argument('--out', required=True)
+    b.add_argument('--mode', choices=('per-day', 'all-at-once'), default='per-day')
     args = p.parse_args(argv)
 
     if args.cmd == 'create':
@@ -45,6 +48,12 @@ def main(argv=None):
         res = analyze_collection(conn, progress=lambda m, i, n: print(f'  {m} {i}/{n}' if n else f'  {m}',
                                                                      file=sys.stderr))
         print(json.dumps(res, indent=2, ensure_ascii=False))
+    elif args.cmd == 'bench':
+        from app.bench import run
+        rep = run(col.open_db(args.collection), args.out, args.mode,
+                  progress=lambda m, i, n: print(f'  {m} {i}/{n}' if n else f'  {m}', file=sys.stderr))
+        print(json.dumps({k: rep[k] for k in ('files', 'wall_s', 'photos_per_s', 'peak_rss_mb', 'throttle')},
+                         ensure_ascii=False))
     elif args.cmd == 'search':
         from app.ai.search import search
         res = search(col.open_db(args.collection), args.query, limit=args.limit)

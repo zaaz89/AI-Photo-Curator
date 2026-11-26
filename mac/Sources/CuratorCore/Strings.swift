@@ -677,5 +677,7 @@ public enum Strings {
         "thumbUnreadable": ("Cannot read file", "Datoteke ni mogoče prebrati"),
         "thumbNoPreview": ("No preview available", "Predogled ni na voljo"),
         "thumbLoading": ("Loading photo", "Nalagam fotografijo"),
+        // M13 scale
+        "stageDaysSorted": ("%d of %d days sorted", "Razvrščenih dni: %d od %d"),
     ]
 }

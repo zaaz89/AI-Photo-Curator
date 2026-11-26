@@ -57,6 +57,12 @@ def _rows(conn):
     return out
 
 
+def asset_days(conn) -> dict:
+    """asset id -> local day ("YYYY-MM-DD", or "unknown") with the clock corrections applied: the day the
+    per-day pipeline (M13) and the timeline events use."""
+    return {r['id']: r['day'] for r in _rows(conn)}
+
+
 def part_of_day(hour):
     if hour is None:
         return 'time unknown'

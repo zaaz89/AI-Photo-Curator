@@ -15,7 +15,6 @@ from flask import Blueprint, jsonify, render_template, request
 from app import collections as col
 from app.analysis import analyze_collection
 from app.collections import now_iso
-from app.duplicates.groups import build_groups
 from app.timeline.clock_sync import list_clocks, set_correction
 from app.timeline.timeline_engine import duplicate_groups, timeline
 from app.ai import vision_analyzer as vlm
@@ -75,6 +74,8 @@ def finish_album(cid):
     except (FileNotFoundError, ValueError) as e:
         return _err(str(e), 404)
     rows = conn.execute("SELECT s.path || '/' || a.rel_path FROM assets a JOIN sources s ON s.id = a.source_id").fetchall()
+    from app.analysis_events import prune
+    prune(conn)                     # the event stream goes first (the database follows below)
     conn.close()
     files = []
     if cache_files_for:
@@ -132,14 +133,23 @@ def update_source(cid, sid):
 
 
 def _run_index(cid):
+    # Until the per-day loop starts, the stage's own share shows; then the share of days done (M13), so the
+    # bar does not jump back to 0 for every stage of every day.
+    days_started = [False]
+
     def progress(msg, i, n):
         _job['status'] = msg if not n else f'{msg} ({i}/{n})'
-        _job['progress'] = int(i / n * 100) if n else _job['progress']
+        if not days_started[0]:
+            _job['progress'] = int(i / n * 100) if n else _job['progress']
+
+    def overall(frac):
+        days_started[0] = True
+        _job['progress'] = int(frac * 100)
     from app.ai import throttle
     try:
         conn = col.open_db(cid)
         throttle.reset_totals()
-        _job['result'] = analyze_collection(conn, progress, cancelled=lambda: _job['cancel'])
+        _job['result'] = analyze_collection(conn, progress, cancelled=lambda: _job['cancel'], overall=overall)
         if not _job['cancel']:
             # The measured speed of this Mac feeds the time estimate in Settings (M11).
             throttle.record_speed((_job['result'].get('quality') or {}).get('scored', 0),
@@ -220,10 +230,12 @@ def change_clock(cid, clock_id):
         res = set_correction(conn, clock_id, data.get('action', ''), float(sec) if sec not in (None, '') else None)
     except (ValueError, TypeError) as e:
         return _err(str(e))
-    build_groups(conn)          # burst detection uses corrected times
     from app.timeline.event_detector import detect_events
-    detect_events(conn)         # so do events
-    return jsonify({'ok': True, **res})
+    detect_events(conn)         # events use corrected times
+    # Bursts use corrected times too: only the days whose photos or times moved are rebuilt (M13).
+    from app.analysis_events import rebuild_changed_days
+    rebuilt = rebuild_changed_days(conn)
+    return jsonify({'ok': True, **res, 'rebuilt_days': rebuilt.get('rebuilt_days')})
 
 
 @bp.route('/api/collections/<cid>/duplicates')
@@ -256,8 +268,28 @@ def choose_keeper(cid, gid):
             conn.execute('INSERT INTO keeper_choices (group_key, sha256, decided_at) VALUES (?, ?, ?) '
                          'ON CONFLICT(group_key) DO UPDATE SET sha256 = excluded.sha256, '
                          'decided_at = excluded.decided_at', (g['group_key'], row['sha256'], now_iso()))
-    build_groups(conn)
+    # Only the keeper changes: choose again without comparing photos, and tell the Sorting page (M13).
+    from app.analysis_events import after_owner_change
+    after_owner_change(conn)
     return jsonify({'ok': True})
+
+
+@bp.route('/api/collections/<cid>/events', methods=['GET'])
+def analysis_events(cid):
+    """The live per-photo stream of the analysis (M13): ?since=<seq>&limit=<n> (default 500, at most 2000).
+    Answer: {events: [{seq, asset_id, kind, reason?, keeper_id?, day}], next, more, latest}."""
+    conn, err = _open(cid)
+    if err:
+        return err
+    from app.analysis_events import events_since, PAGE
+    try:
+        since = int(request.args.get('since', 0))
+        limit = int(request.args.get('limit', PAGE))
+    except ValueError:
+        return _err('since and limit must be numbers')
+    if since < 0 or limit < 1:
+        return _err('since must be >= 0 and limit >= 1')
+    return jsonify(events_since(conn, since, limit))
 
 
 

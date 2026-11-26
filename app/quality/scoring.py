@@ -108,12 +108,15 @@ def process_pool(n: int):
 
 
 def compute_quality(conn, progress: Optional[Callable] = None,
-                    cancelled: Callable[[], bool] = lambda: False) -> dict:
+                    cancelled: Callable[[], bool] = lambda: False, shas: Optional[set] = None) -> dict:
+    """Focus and ranking scores for every photo without them (`shas`: only these, M13 per-day pipeline)."""
     from app.ai.throttle import Throttle, throttled_map
     rows = conn.execute(
         "SELECT a.sha256, MIN(s.path || '/' || a.rel_path) AS path FROM assets a JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' AND a.sha256 != '' "
         'AND a.sha256 NOT IN (SELECT sha256 FROM quality) GROUP BY a.sha256').fetchall()
+    if shas is not None:
+        rows = [r for r in rows if r['sha256'] in shas]
     throttle = Throttle(cancelled, status=(lambda m: progress(m, 0, 0)) if progress else None)
     done = failed = 0
     sha_of = {r['path']: r['sha256'] for r in rows}

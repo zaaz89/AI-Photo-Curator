@@ -262,6 +262,27 @@ MIGRATIONS = [
         reason     TEXT                       -- mark (EXIF UserComment "Screenshot") | filename | NULL
     );
     """,
+    # 13: per-day pipeline and live event stream (M13). analysis_events is what the Sorting page reads
+    # (GET /api/collections/<id>/events?since=N); seq never repeats (AUTOINCREMENT), even after pruning.
+    # analysis_days records which days are settled and from which photos/times (signature), so a stopped
+    # analysis resumes at the first unsettled day and a clock change rebuilds only the days it moved.
+    """
+    CREATE TABLE analysis_events (
+        seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id   INTEGER,                   -- NULL for settled_day
+        kind       TEXT NOT NULL,             -- read | scored | removed | stacked | settled_day
+        reason     TEXT,                      -- removed: screenshot | leftOut | movement_blur | subject_blurry | whole_blurry
+        keeper_id  INTEGER,                   -- stacked: the moment's best frame
+        day        TEXT NOT NULL,             -- local day (YYYY-MM-DD or unknown)
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX analysis_events_asset ON analysis_events (asset_id, seq);
+    CREATE TABLE analysis_days (
+        day        TEXT PRIMARY KEY,
+        signature  TEXT NOT NULL,             -- hash of the day's (asset id, sha256, corrected time)
+        settled_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

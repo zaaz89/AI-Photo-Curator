@@ -192,8 +192,9 @@ def _safe(args):
 
 
 def compute_subject_focus(conn, progress: Optional[Callable] = None,
-                          cancelled: Callable[[], bool] = lambda: False) -> dict:
-    """Measure every photo that has helper results (faces table) and no subject_focus row yet."""
+                          cancelled: Callable[[], bool] = lambda: False, shas: Optional[set] = None) -> dict:
+    """Measure every photo that has helper results (faces table) and no subject_focus row yet.
+    `shas` (M13 per-day pipeline): only these photos."""
     from app.ai.throttle import Throttle, throttled_map
     from app.quality.scoring import PARALLEL_FROM, WORKERS, process_pool
     rows = conn.execute(
@@ -201,6 +202,8 @@ def compute_subject_focus(conn, progress: Optional[Callable] = None,
         "JOIN assets a ON a.sha256 = f.sha256 JOIN sources s ON s.id = a.source_id "
         "WHERE a.status = 'present' AND a.kind = 'image' "
         'AND f.sha256 NOT IN (SELECT sha256 FROM subject_focus) GROUP BY f.sha256').fetchall()
+    if shas is not None:
+        rows = [r for r in rows if r['sha256'] in shas]
     if not rows:
         return {'measured': 0}
     jobs = []

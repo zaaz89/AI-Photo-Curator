@@ -97,6 +97,10 @@ enum AssistantSheet: String, Identifiable {
     @Published var pendingReplay = false
     /// Changes after an analysis of this album ended and its photos were read again (the stage's cue).
     @Published private(set) var analysisFinishedTick = 0
+    /// M13: the engine's per-photo event stream for this album (tiles arrive, drop and stack as days settle).
+    @Published private(set) var sortStream = SortStream()
+    private var lastStreamReload = Date.distantPast
+    private var streamTrip: String?
     @Published var message: String?                     // transient info for the user ("moved to …")
     /// The error on screen (M12e): a human sentence, Details and Try Again; stays until dismissed.
     @Published var errorBanner: ErrorBannerInfo?
@@ -155,6 +159,8 @@ enum AssistantSheet: String, Identifiable {
         overview = nil
         events = []
         loadedTripId = nil
+        sortStream = SortStream()
+        streamTrip = tripId
         clearSelection()
         searchResult = nil
         searchText = ""
@@ -819,13 +825,15 @@ enum AssistantSheet: String, Identifiable {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.pollOnce()
+                if self.analysing { await self.pollEvents() }
                 if self.job.running, let id = self.tripId, self.job.collection == id, self.pollCount % 4 == 0 {
                     self.overview = (try? await self.api.overview(trip: id)) ?? self.overview
                     // New photos were read: show them while the rest of the analysis runs.
                     if let n = self.overview?.facts.photos, n != self.photos.count { await self.reload() }
                 }
                 self.pollCount += 1
-                try? await Task.sleep(for: .milliseconds(self.job.running ? 700 : 4000))
+                let wait = eventPollInterval(running: self.job.running, morePending: false) ?? 4.0
+                try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))
             }
         }
     }
@@ -838,7 +846,37 @@ enum AssistantSheet: String, Identifiable {
         let wasRunning = job.running
         if s.collection == nil || s.collection == tripId || s.running { job = s }
         // A job that ended between two polls is still noticed here (export result, reload).
-        if wasRunning && !job.running { await reload(); analysisFinishedTick += 1; jobFinished() }
+        if wasRunning && !job.running {
+            await pollEvents()                                   // the last events (final keepers) before the reload
+            await reload(); analysisFinishedTick += 1; jobFinished()
+        }
+    }
+
+    /// M13: reads the new events of the analysis (a few pages per poll at most) and fetches the photos again when
+    /// a day settled or photos were judged, at most every 2 s, so a 3,000-photo album is not reloaded per event.
+    /// Only called while this album's analysis runs and once when it ends: no polling when idle.
+    func pollEvents() async {
+        guard let trip = tripId else { return }
+        if streamTrip != trip { sortStream = SortStream(); streamTrip = trip }
+        var pages = 0
+        var change = SortStreamChange()
+        while pages < 4 {
+            guard let page = try? await api.analysisEvents(trip: trip, since: sortStream.cursor) else { break }
+            guard trip == tripId else { return }
+            var stream = sortStream
+            let c = stream.merge(page: page)
+            // Publish only when something moved (every view of the library redraws on a publish).
+            if stream.cursor != sortStream.cursor || stream.revision != sortStream.revision { sortStream = stream }
+            change.arrived += c.arrived
+            change.judged += c.judged
+            change.settledDays += c.settledDays
+            pages += 1
+            if !page.more { break }
+        }
+        if shouldReloadPhotos(after: change, secondsSinceReload: Date().timeIntervalSince(lastStreamReload)) {
+            lastStreamReload = Date()
+            await reload()
+        }
     }
     /// Analysis of this album runs (not descriptions or an export).
     var analysing: Bool { job.running && job.collection == tripId && (job.kind ?? "analysis") == "analysis" }

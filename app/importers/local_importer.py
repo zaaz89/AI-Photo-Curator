@@ -153,10 +153,11 @@ def resolve_all(conn: sqlite3.Connection) -> dict:
     tz_row = conn.execute('SELECT timezone FROM collection WHERE id = 1').fetchone()
     coll_tz = tz_row['timezone'] if tz_row else None
     rows = conn.execute(
-        'SELECT a.id, a.source_id, a.filename, a.mtime, a.kind, s.owner, m.tags_json '
+        'SELECT a.id, a.source_id, a.filename, a.mtime, a.kind, s.owner, s.path AS source_path, m.tags_json '
         'FROM assets a JOIN sources s ON s.id = a.source_id '
         "LEFT JOIN metadata_raw m ON m.asset_id = a.id WHERE a.status = 'present'").fetchall()
     tags_by_id = {r['id']: json.loads(r['tags_json'] or '{}') for r in rows}
+    shifts = bench_time_shifts()
 
     per_source: dict[int, Counter] = {}
     for r in rows:
@@ -178,6 +179,8 @@ def resolve_all(conn: sqlite3.Connection) -> dict:
             else:
                 off, why = None, ''
             res = resolve(tags_by_id[r['id']], r['filename'], r['mtime'], r['kind'] or 'image', off, why)
+            if shifts:
+                _apply_bench_shift(res, shifts, r['source_path'], r['filename'])
             counts[res.confidence] += 1
             conn.execute(
                 'INSERT INTO capture_time (asset_id, local_time, utc_time, offset_minutes, rule, confidence, '
@@ -188,6 +191,40 @@ def resolve_all(conn: sqlite3.Connection) -> dict:
                 (r['id'], res.local_time, res.utc_time, res.offset_minutes, res.rule, res.confidence,
                  json.dumps(res.notes, ensure_ascii=False), res.sort_key))
     return dict(counts)
+
+
+def bench_time_shifts() -> dict:
+    """Benchmark mode only (M13, scripts/bench.sh): PHOTOCURATOR_BENCH_TIMES names the sidecar map
+    {filename: seconds} written by scripts/make-bench-set.py. The generated variants keep the EXIF of the
+    test photos they were made from; the map spreads them over a week without writing any EXIF. Without the
+    variable (every normal run) this is empty and nothing changes."""
+    import os
+    path = os.environ.get('PHOTOCURATOR_BENCH_TIMES')
+    if not path or not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+    return {'root': os.path.realpath(os.path.dirname(path)), 'shift': data.get('shift_s') or {}}
+
+
+def _apply_bench_shift(res, shifts: dict, source_path: str, filename: str) -> None:
+    """Moves one capture time by its sidecar shift, only for files inside the bench folder."""
+    import os
+    from datetime import datetime, timedelta
+    real = os.path.realpath(source_path)
+    if not (real == shifts['root'] or real.startswith(shifts['root'] + os.sep)):
+        return
+    s = shifts['shift'].get(filename)
+    if not s or res.confidence == 'unknown':
+        return
+    for attr in ('local_time', 'utc_time'):
+        v = getattr(res, attr)
+        if v:
+            z = v.endswith('Z')
+            t = datetime.fromisoformat(v[:-1] if z else v) + timedelta(seconds=s)
+            setattr(res, attr, t.isoformat() + ('Z' if z else ''))
+    res.sort_key += s
+    res.notes.append(f'benchmark time shift {s:+.0f} s (sidecar map, EXIF untouched)')
 
 
 def link_relationships(conn: sqlite3.Connection) -> dict:

@@ -77,8 +77,11 @@ def _assets(conn):
 
 
 def compute_features(conn, progress: Optional[Callable] = None,
-                     cancelled: Callable[[], bool] = lambda: False) -> int:
+                     cancelled: Callable[[], bool] = lambda: False, shas: Optional[set] = None) -> int:
+    """Visual signatures of every photo without one (`shas`: only these, M13 per-day pipeline)."""
     rows = _assets(conn)
+    if shas is not None:
+        rows = [r for r in rows if r['sha256'] in shas]
     have = {r[0] for r in conn.execute('SELECT sha256 FROM visual_features')}
     todo, seen = [], set()
     for r in rows:
@@ -100,8 +103,20 @@ def compute_features(conn, progress: Optional[Callable] = None,
 
 
 def build_groups(conn, progress: Optional[Callable] = None,
-                 cancelled: Callable[[], bool] = lambda: False) -> dict:
+                 cancelled: Callable[[], bool] = lambda: False, day: Optional[str] = None,
+                 day_of: Optional[dict] = None) -> dict:
+    """Moments of the whole album, or (M13 per-day pipeline) of one local day: with `day` only that day's
+    photos are compared and only the groups holding one of them are replaced; the other days stay as they are.
+    A moment never spans two days in the per-day pipeline. `day_of` (asset id -> day) saves a query.
+    A cancelled day run stores nothing (the day is built again on resume)."""
     rows = _assets(conn)
+    day_ids = None
+    if day is not None:
+        if day_of is None:
+            from app.timeline.event_detector import asset_days
+            day_of = asset_days(conn)
+        day_ids = {aid for aid, d in day_of.items() if d == day}
+        rows = [r for r in rows if r['id'] in day_ids]
     feats = {r['sha256']: (r['sig'], r['sharpness'])
              for r in conn.execute('SELECT sha256, sig, sharpness FROM visual_features')}
     rows = [r for r in rows if r['sha256'] in feats]
@@ -150,6 +165,8 @@ def build_groups(conn, progress: Optional[Callable] = None,
                         similar.union(i, j)
                         evidence[key].append(f'similarity {s:.2f}, not confirmed: likely a different shot')
 
+    if day is not None and cancelled():
+        return {'cancelled': True}
     groups = []
     sig_arr = sigs if n > 1 else None
     for uf, category in ((near, None), (similar, 'similar_scene')):
@@ -167,28 +184,16 @@ def build_groups(conn, progress: Optional[Callable] = None,
                 cat = category or ('exact' if len({rows[m]['sha256'] for m in part}) == 1 else 'near')
                 groups.append((cat, part))
 
-    choices = {r['group_key']: r['sha256'] for r in conn.execute('SELECT group_key, sha256 FROM keeper_choices')}
-    from app import settings
-    from app.quality.faces import summaries, vision_info
-    from app.quality.scoring import focus_tiers
-    # Eye states compare a face with the same face in the other frames of the moment being built now.
-    face_map = summaries(conn, [[rows[m]['sha256'] for m in members] for cat, members in groups
-                                if cat != 'similar_scene'])
-    qual = {}
-    for r in conn.execute('SELECT sha256, region_sharpness, scores_json FROM quality'):
-        qual[r['sha256']] = (r['region_sharpness'], json.loads(r['scores_json']).get('aesthetic'))
-    vision = vision_info(conn)
-    verdicts = {}
-    sha_by_id = {r['id']: r['sha256'] for r in rows}
-    for aid, t in focus_tiers(conn).items():
-        if aid in sha_by_id:
-            v = vision.get(sha_by_id[aid]) or {}
-            verdicts[sha_by_id[aid]] = {'blur': t['tier'], 'sharpness': t.get('subject_sharpness'),
-                                        'aesthetic': v.get('aesthetic')}
-    kw = settings.load().get('keeper_weights')
-    left_out = {r[0] for r in conn.execute('SELECT sha256 FROM marks WHERE rejected = 1')}
+    choices, face_map, qual, verdicts, kw, left_out = _keeper_context(conn, rows, groups)
     with conn:
-        conn.execute('DELETE FROM duplicate_groups')
+        if day_ids is None:
+            conn.execute('DELETE FROM duplicate_groups')
+        else:
+            ids = sorted(day_ids)
+            for i in range(0, len(ids), 500):
+                part = ids[i:i + 500]
+                conn.execute('DELETE FROM duplicate_groups WHERE id IN (SELECT group_id FROM duplicate_members '
+                             f'WHERE asset_id IN ({",".join("?" * len(part))}))', part)
         counts = defaultdict(int)
         for cat, members in groups:
             key = f'{cat}:' + ','.join(sorted(rows[m]['sha256'] for m in members))
@@ -217,6 +222,72 @@ def build_groups(conn, progress: Optional[Callable] = None,
                              (gid, rows[m]['id'], feats[rows[m]['sha256']][1]))
             counts[cat] += 1
     return dict(counts)
+
+
+def _keeper_context(conn, rows, groups):
+    """What the keeper choice reads: owner choices, face summaries per moment, quality, focus verdicts,
+    keeper weights and left-out photos. `groups`: [(category, [row index])]."""
+    choices = {r['group_key']: r['sha256'] for r in conn.execute('SELECT group_key, sha256 FROM keeper_choices')}
+    from app import settings
+    from app.quality.faces import summaries, vision_info
+    from app.quality.scoring import focus_tiers
+    # Eye states compare a face with the same face in the other frames of the moment being built now.
+    face_map = summaries(conn, [[rows[m]['sha256'] for m in members] for cat, members in groups
+                                if cat != 'similar_scene'])
+    qual = {}
+    for r in conn.execute('SELECT sha256, region_sharpness, scores_json FROM quality'):
+        qual[r['sha256']] = (r['region_sharpness'], json.loads(r['scores_json']).get('aesthetic'))
+    vision = vision_info(conn)
+    verdicts = {}
+    sha_by_id = {r['id']: r['sha256'] for r in rows}
+    for aid, t in focus_tiers(conn).items():
+        if aid in sha_by_id:
+            v = vision.get(sha_by_id[aid]) or {}
+            verdicts[sha_by_id[aid]] = {'blur': t['tier'], 'sharpness': t.get('subject_sharpness'),
+                                        'aesthetic': v.get('aesthetic')}
+    kw = settings.load().get('keeper_weights')
+    left_out = {r[0] for r in conn.execute('SELECT sha256 FROM marks WHERE rejected = 1')}
+    return choices, face_map, qual, verdicts, kw, left_out
+
+
+def refresh_keepers(conn) -> list:
+    """Choose the keeper of every stored exact/near moment again from the current data, without comparing
+    any photos (M13). Focus verdicts are relative to the whole album, so after later days are read an earlier
+    day's best frame can change; an owner's keeper choice or a left-out frame too. Returns the ids of the
+    groups whose keeper changed."""
+    rows = _assets(conn)
+    idx = {r['id']: i for i, r in enumerate(rows)}
+    feats = {r['sha256']: (r['sig'], r['sharpness'])
+             for r in conn.execute('SELECT sha256, sig, sharpness FROM visual_features')}
+    stored = conn.execute("SELECT id, group_key, category, keeper_id, reasons_json FROM duplicate_groups "
+                          "WHERE category IN ('exact', 'near') ORDER BY id").fetchall()
+    members = defaultdict(list)
+    for r in conn.execute('SELECT group_id, asset_id FROM duplicate_members'):
+        if r['asset_id'] in idx:
+            members[r['group_id']].append(idx[r['asset_id']])
+    groups = []
+    for g in stored:
+        ms = sorted(members.get(g['id'], []), key=lambda m: ((rows[m]['t'] or 0), rows[m]['id']))
+        if len(ms) > 1 and all(rows[m]['sha256'] in feats for m in ms):
+            groups.append((g, ms))
+    choices, face_map, qual, verdicts, kw, left_out = _keeper_context(
+        conn, rows, [(g['category'], ms) for g, ms in groups])
+    changed = []
+    with conn:
+        for g, ms in groups:
+            info = {}
+            kept = [m for m in ms if rows[m]['sha256'] not in left_out] or ms
+            keeper, reasons = _recommend(rows, feats, kept, g['category'], choices.get(g['group_key']), face_map,
+                                         qual, kw, info, verdicts)
+            old = json.loads(g['reasons_json'])
+            new = {'keeper': reasons, 'evidence': old.get('evidence', []), 'margin': info.get('margin'),
+                   'all_bad': bool(info.get('all_bad'))}
+            if keeper != g['keeper_id'] or new != old:
+                conn.execute('UPDATE duplicate_groups SET keeper_id = ?, reasons_json = ? WHERE id = ?',
+                             (keeper, json.dumps(new, ensure_ascii=False), g['id']))
+                if keeper != g['keeper_id']:
+                    changed.append(g['id'])
+    return changed
 
 
 def similarity_matrix_block(sigs: np.ndarray, start: int, stop: int) -> np.ndarray:

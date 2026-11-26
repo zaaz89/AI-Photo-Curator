@@ -330,6 +330,10 @@ Potential techniques:
 - Temporal proximity
 - GPS proximity
 
+Decision (M13, 2026-11-26): moments are found within one local day (the per-day pipeline settles a day as soon
+as its moments exist). Two photos on different days are never one moment, so a burst that crosses midnight is
+split, and the same view shot on two days stays two photos. See `notes/m13-scale.md`.
+
 ## 5.3 Same event, different photographs
 
 Do not classify all images of the same subject as duplicates.

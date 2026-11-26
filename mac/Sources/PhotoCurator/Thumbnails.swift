@@ -5,10 +5,14 @@ import CuratorCore
 
 /// Thumbnails made by macOS from the original files (read-only), cached in memory.
 /// Works for HEIC, RAW and videos without going through the engine.
+/// M13: Quick Look decodes them off the main thread at the display size (`thumbnailBucket`), and the cache is a
+/// least-recently-used list bounded by bitmap bytes (`thumbnailCacheBudgetBytes`), not by count.
 @MainActor final class ThumbnailCache {
     static let shared = ThumbnailCache()
-    private let cache = NSCache<NSString, NSImage>()
-    init() { cache.countLimit = 3000 }
+    private var cache = ByteLRU<String, NSImage>(limit: thumbnailCacheBudgetBytes)
+    init() {}
+    /// Bitmap bytes held now (diagnostics).
+    var bytesHeld: Int { cache.totalCost }
     /// At most this many thumbnails are made at once (M12c: thousands of grid cells must not start thousands
     /// of Quick Look requests); the others wait their turn, and a cell that scrolled away gives up its turn.
     static let maxConcurrent = 12
@@ -27,13 +31,14 @@ import CuratorCore
     /// Why a thumbnail could not be made (M12g, audit #33): shown as a short label instead of a bare icon.
     enum Failure: Error, Equatable { case unreadable, noPreview }
 
-    private static func bucket(_ side: CGFloat) -> Int { side <= 260 ? 260 : (side <= 520 ? 520 : (side <= 1024 ? 1024 : 2048)) }   // few sizes, many hits
+    private static func bucket(_ side: CGFloat) -> Int { thumbnailBucket(Double(side)) }   // few sizes, many hits
 
-    /// A thumbnail already in memory, at the requested size or the 260 px one (a low-resolution stand-in while
+    /// A thumbnail already in memory, at the requested size or a smaller one (a low-resolution stand-in while
     /// the large one is made). No work, no waiting.
     func cached(for url: URL, side: CGFloat) -> NSImage? {
-        for b in [Self.bucket(side), 1024, 520, 260] where b <= Self.bucket(side) {
-            if let hit = cache.object(forKey: "\(url.path)#\(b)" as NSString) { return hit }
+        let top = Self.bucket(side)
+        for b in thumbnailBuckets.reversed() where b <= top {
+            if let hit = cache.value(for: "\(url.path)#\(b)") { return hit }
         }
         return nil
     }
@@ -47,19 +52,21 @@ import CuratorCore
     /// checks `Task.isCancelled` first (as before, a cell that scrolled away is not "missing").
     func result(for url: URL, side: CGFloat) async -> Result<NSImage, Failure> {
         let bucket = Self.bucket(side)
-        let key = "\(url.path)#\(bucket)" as NSString
-        if let hit = cache.object(forKey: key) { return .success(hit) }
+        let key = "\(url.path)#\(bucket)"
+        if let hit = cache.value(for: key) { return .success(hit) }
         guard FileManager.default.isReadableFile(atPath: url.path) else { return .failure(.unreadable) }
         await acquire()
         defer { release() }
         if Task.isCancelled { return .failure(.noPreview) }
-        if let hit = cache.object(forKey: key) { return .success(hit) }      // made by another request while waiting
+        if let hit = cache.value(for: key) { return .success(hit) }      // made by another request while waiting
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         let req = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: bucket, height: bucket), scale: scale,
                                                representationTypes: .thumbnail)
         guard let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: req) else { return .failure(.noPreview) }
-        let img = rep.nsImage
-        cache.setObject(img, forKey: key)
+        // The bitmap Quick Look decoded (off the main thread, at this size): drawing it needs no further decoding.
+        let cg = rep.cgImage
+        let img = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / scale, height: CGFloat(cg.height) / scale))
+        cache.insert(img, for: key, cost: thumbnailCost(pixelWidth: cg.width, pixelHeight: cg.height))
         return .success(img)
     }
 }

@@ -324,3 +324,28 @@ Imported `claude/m12d-ux-p1` and `claude/m12f-motion-delight` from the Cowork bu
 - M12f: one compile error, fixed: `ThumbnailCache.Failure` did not conform to `Error`, which `Result<NSImage, Failure>` needs (`Thumbnails.swift`). The other M12g risk spots compiled as written. 105 Swift tests (96 + 9), build OK, pytest 157 passed, token check OK (156/32/13/0), no new warnings. No rebase needed (m12d unchanged, m12f already on its tip).
 PRs: #18 "M12d: UX P1" (base `claude/m12c-ux-p0`), #19 "M12f: motion, album story, first run, P2 a11y" (base `claude/m12d-ux-p1`). Merge order: #15, #16, #17, #18, #19.
 Open: nothing was looked at in the running app; the visual checklists are in #18 and #19.
+
+### 2026-11-26 — M13: scale, per-day pipeline, live event stream (Claude (Cowork))
+Branch `claude/m13-scale` (base: M12f, PR #19). Design, budgets, bench how-to: `notes/m13-scale.md`.
+- 13.1 `scripts/make-bench-set.py` (deterministic 3,000-file trip from test-10: 3 sources, 7 days, 8 % bursts, 5 % blurry,
+  2 % screenshots, 60 ffmpeg clips; new files in `local-data/bench/`, originals only read; times spread by a sidecar map the
+  indexer reads only with `PHOTOCURATOR_BENCH_TIMES` and only inside the bench folder). `scripts/bench.sh` (bash 3.2) +
+  `app.cli bench` (`app/bench.py`): fresh data folder per run, JSON with stage times, first day settled, peak RSS engine/helper,
+  photos/s, throttle share used. Sets over 200 files need `--yes`.
+- 13.2 budgets in `notes/m13-scale.md` §1.
+- 13.3 `analyze_collection` is per day: index → screenshots → clocks → places/events once, then per day features → quality →
+  faces → videos → moments; keepers chosen again after the last day (focus verdicts are album-relative). Migration 13:
+  `analysis_events`, `analysis_days`. `GET /api/collections/<id>/events?since=N`. Resume at the first unsettled day; clock
+  change rebuilds only changed days; keeper choice no longer re-runs ORB. Decision in the brief §5.2: moments never span days.
+  Old order kept as `analyze_collection_all_at_once`.
+- 13.4 CuratorCore `AnalysisEvents.swift` (stream model, pacing, "2 of 7 days sorted") + `ByteLRU.swift` (byte-bounded LRU,
+  thumbnail buckets incl. 160); `APIClient.analysisEvents`; `LibraryModel.pollEvents` (only while analysing); Sorting stage
+  reveals/stacks settled days live, snaps per day above 400; `ThumbnailCache` on ByteLRU (384 MB) with Quick Look bitmaps.
+  1 new string EN + SL (`// M13 scale`). Token check OK (156/32/13/0, unchanged).
+Tests: `uv run pytest` 163 passed (157 + 6 new in `tests/test_m13_scale.py`), ExifTool installed in the Linux container.
+NOT compiled, Swift tests NOT run: run `scripts/test-mac.sh` and `scripts/build-mac-app.sh`. Compile-risk spots:
+`SortStream.merge` (switch expression), `ByteLRU` optional-chained dictionary writes, `rep.cgImage` → `NSImage(cgImage:size:)`
+in `Thumbnails.swift`, `readyFilter()` closures in `SortingStage.swift`, `pollEvents` in `LibraryModel.swift`.
+Bench: smoke-tested only on a 30-file set made from 4 generated JPEGs (Linux, no helper). NOT run on test-10 or the 3,000 set:
+ask the owner before running it (long AI job); then record the numbers against the budgets here.
+Open: first-photo latency, app memory and grid frame rate need a by-hand check on the Mac; grid marks do not write events.
