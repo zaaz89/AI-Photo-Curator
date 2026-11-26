@@ -298,6 +298,7 @@ struct QuickReviewView: View {
 
     func close() {
         if session.finished { library.setReviewBookmark(filter, nil) }
+        library.reviewClosed(finished: session.finished)
         library.reviewFilter = nil
     }
 
@@ -463,7 +464,7 @@ struct EndCard: View {
                     Button(library.tr("reviewSkipped")) { again(filter, session.skippedIds) }.buttonStyle(.glass).controlSize(.extraLarge)
                 }
                 Button(library.tr("reviewLeftOut")) { again(.leftOut, nil) }.buttonStyle(.glass).controlSize(.extraLarge)
-                Button(library.tr("goToStory")) { close(); library.destination = .step(.story) }
+                Button(library.tr("backToAlbum")) { close(); library.open(station: nil) }
                     .buttonStyle(.glassProminent).controlSize(.extraLarge)
             }
         }

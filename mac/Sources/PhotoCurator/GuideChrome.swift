@@ -4,17 +4,6 @@ import SwiftUI
 
 // MARK: look
 
-/// One accent per guide step, used for its icon, progress and highlights.
-extension GuideStep {
-    var tint: Color {
-        switch self {
-        case .selection: .blue
-        case .story: .purple
-        case .export: .green
-        }
-    }
-}
-
 /// People get a colour by their place in the album, so the same person has the same colour everywhere.
 let personColors: [Color] = [.blue, .pink, .orange, .teal, .purple, .green, .indigo, .red]
 func personColor(_ index: Int) -> Color { personColors[abs(index) % personColors.count] }
@@ -114,60 +103,15 @@ struct SectionTitle: View {
     }
 }
 
-// MARK: step frame
+// MARK: page frame
 
-/// The four steps as a connected bar; every step can be opened at any time.
-struct StepBar: View {
-    @EnvironmentObject var library: LibraryModel
-    let current: GuideStep?
-
-    var body: some View {
-        let states = library.stepStates
-        HStack(spacing: 0) {
-            ForEach(GuideStep.allCases) { s in
-                let st = states[s] ?? StepState(done: false, waiting: 0)
-                Button { withMotion(.settle) { library.destination = .step(s) } } label: {
-                    HStack(spacing: 8) {
-                        ZStack {
-                            Circle().fill(s == current ? AnyShapeStyle(s.tint.gradient) : AnyShapeStyle(.fill.tertiary))
-                            if st.done && s != current {
-                                Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(s.tint)
-                            } else {
-                                Text("\(s.number)").font(.callout.weight(.semibold)).monospacedDigit()
-                                    .foregroundStyle(s == current ? .white : .secondary)
-                            }
-                        }
-                        .frame(width: 26, height: 26)
-                        Text(library.tr("step_" + s.rawValue))
-                            .font(.callout.weight(s == current ? .semibold : .regular))
-                            .foregroundStyle(s == current ? .primary : .secondary)
-                        if st.waiting > 0 && s != current {
-                            Text("\(st.waiting)").font(.caption2.weight(.bold)).monospacedDigit()
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.orange.opacity(0.2), in: .capsule).foregroundStyle(.orange)
-                        }
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(s.number). " + library.tr("step_" + s.rawValue))
-                .accessibilityAddTraits(s == current ? .isSelected : [])
-                if s != .export {
-                    Capsule().fill(st.done ? AnyShapeStyle(s.tint.opacity(0.6)) : AnyShapeStyle(.separator))
-                        .frame(height: 2).frame(minWidth: 16, maxWidth: 48)
-                }
-            }
-        }
-    }
-}
-
-/// The frame of a step page: step bar, title and what the AI did, the content, and a floating
-/// bar at the bottom with back, what is still open and Next.
+/// The frame of a secondary page of the album (Moments, Chapters, People & Clocks; opened from the View menu):
+/// a title with what the app did, a status line, and the content. No steps and no Next: the album's path and its
+/// one primary button live on the path itself (M14a); "Back to Album" returns there.
 struct StepPage<Content: View>: View {
     @EnvironmentObject var library: LibraryModel
-    /// nil: the People & clocks page, which is not one of the steps (no step bar; Done goes back to the album).
-    let step: GuideStep?
+    let title: String
+    let symbol: String
     var lead: String
     var status: String? = nil
     var scrolls = true
@@ -178,71 +122,38 @@ struct StepPage<Content: View>: View {
             header
             if scrolls {
                 ScrollView {
-                    content().padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 110)
+                    content().padding(.horizontal, Space.huge).padding(.top, Space.m).padding(.bottom, Space.giant)
                         .frame(maxWidth: 1180).frame(maxWidth: .infinity)
                 }
             } else {
-                content().padding(.horizontal, 24).padding(.bottom, 84)
+                content().padding(.horizontal, Space.xxxl).padding(.bottom, Space.xxxl)
                     .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                     .clipped()
             }
         }
-        .overlay(alignment: .bottom) { bottomBar.padding(.bottom, 18) }
     }
 
     var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if step != nil { StepBar(current: step) }
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Image(systemName: step?.symbol ?? "person.2.crop.square.stack").font(.title.weight(.semibold))
-                    .foregroundStyle((step?.tint ?? .teal).gradient)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(step.map { library.tr("stepTitle_" + $0.rawValue) } ?? library.tr("stepTitle_photos")).scaledFont(30, weight: .bold, relativeTo: .title)
-                    Text(lead).font(.title3).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
-        }
-        .padding(.horizontal, 32).padding(.top, 18).padding(.bottom, 14)
-        .frame(maxWidth: 1180 + 64, alignment: .leading).frame(maxWidth: .infinity)
-    }
-
-    /// Next step (or Back to album on the last step and on People & Clocks); ⌘Return.
-    var nextButton: some View {
-        Button {
-            withMotion(.settle) { if let step { library.finishStep(step) } else { library.finishPeople() } }
-        } label: {
-            Label(step?.next.map { String(format: library.tr("nextStep"), library.tr("step_" + $0.rawValue)) } ?? library.tr("backToAlbum"),
-                  systemImage: step?.next == nil ? "house" : "chevron.right")
-                .labelStyle(TrailingIconLabel())
-                .padding(.horizontal, 6)
-        }
-        .keyboardShortcut(.return, modifiers: .command)
-    }
-
-    var bottomBar: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 12) {
-                Button {
-                    withMotion(.settle) { library.destination = step?.previous.map { .step($0) } ?? .home }
-                } label: {
-                    Label(step?.previous.map { library.tr("step_" + $0.rawValue) } ?? library.tr("albumHome"), systemImage: "chevron.left")
-                        .padding(.horizontal, 4)
-                }
-                .buttonStyle(.glass).controlSize(.large)
+        HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+            Image(systemName: symbol).font(.title.weight(.semibold)).foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(title).scaledFont(30, weight: .bold, relativeTo: .title)
+                Text(lead).font(.title3).foregroundStyle(.secondary).lineLimit(2)
                 if let status {
-                    Text(status).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                        .padding(.horizontal, 6)
+                    Text(status).font(TypeRole.supporting).foregroundStyle(.secondary).lineLimit(1)
                         .contentTransition(.numericText())
                 }
-                // One primary action per screen (M12e, #16): on Export the page's own Export button is the primary,
-                // so "Back to album" is secondary there.
-                if step == .export {
-                    nextButton.buttonStyle(.glass).controlSize(.large)
-                } else {
-                    nextButton.buttonStyle(.glassProminent).controlSize(.large)
-                }
             }
+            Spacer(minLength: Space.l)
+            Button { withMotion(.settle) { library.open(station: nil) } } label: {
+                Label(library.tr("backToAlbum"), systemImage: "chevron.left")
+            }
+            .buttonStyle(.glass)
+            .keyboardShortcut(.cancelAction)
+            .help(library.tr("backToAlbum") + "  (Esc)")
         }
+        .padding(.horizontal, Space.huge).padding(.top, Space.xl).padding(.bottom, Space.l)
+        .frame(maxWidth: 1180 + 64, alignment: .leading).frame(maxWidth: .infinity)
     }
 }
 

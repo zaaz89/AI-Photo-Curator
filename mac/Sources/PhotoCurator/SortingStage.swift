@@ -978,22 +978,16 @@ private struct StageHeader: View {
                         .scaledFont(20, weight: .semibold, relativeTo: .title3).foregroundStyle(.white)
                         .contentTransition(.numericText())
                     Spacer()
-                    restartButton
+                    // Next / Resume / Try Again are the path's one primary button below the stage (M14a).
                     Button { library.showSorting(replay: true) } label: { Label(library.tr("replay"), systemImage: "arrow.counterclockwise") }
                         .buttonStyle(.glass)
-                    nextButton
                 } else {
                     if library.analysing {
                         ProgressView(value: library.job.progress, total: 100).tint(stageColors[1]).frame(maxWidth: 520)
                     }
                     Spacer()
-                    restartButton
                     if showSkip { skipButton }
                     if library.analysing { Button(library.tr("stop")) { library.stopJob() }.buttonStyle(.glass) }
-                    // Next is always there; until the album is sorted it says why it waits (M12c, no dead end).
-                    Text(library.tr("stageNextWhy")).font(TypeRole.caption).foregroundStyle(StageInk.secondary(contrast))
-                        .lineLimit(1).accessibilityHidden(true)
-                    nextButton.disabled(true).accessibilityHint(library.tr("stageNextWhy"))
                 }
             }
             .frame(height: 34)
@@ -1027,29 +1021,6 @@ private struct StageHeader: View {
                     .opacity(0).frame(width: 0, height: 0)
                     .accessibilityHidden(true)
             }
-    }
-
-    /// The primary action after a stop or a failure: analyse the rest, or try again.
-    @ViewBuilder var restartButton: some View {
-        if case .stopped = state, !stage.busy {
-            Button { library.analyse() } label: { Label(library.tr("resume"), systemImage: "play.fill") }
-                .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
-        } else if case .failed = state, !stage.busy {
-            Button { library.analyse() } label: { Label(library.tr("analyseAgain"), systemImage: "arrow.clockwise") }
-                .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
-        }
-    }
-
-    /// Next step; secondary while a restart is the primary action.
-    @ViewBuilder var nextButton: some View {
-        let label = Label(library.tr("stageNext"), systemImage: "arrow.right")
-        if state.needsRestart {
-            Button { library.destination = .step(.selection) } label: { label }.buttonStyle(.glass)
-        } else {
-            // The one prominent button of the settled Stage answers Return (M12g, #32).
-            Button { library.destination = .step(.selection) } label: { label }.buttonStyle(.glassProminent)
-                .keyboardShortcut(.defaultAction)
-        }
     }
 
     /// The same numbers as the album home's funnel (a RAW+JPEG or Live Photo pair counts once).
@@ -1240,22 +1211,5 @@ private struct TrayContents: View {
     func reason(_ p: Photo) -> String {
         guard let code = sortReason(p) else { return "" }
         return code == "leftOut" ? library.tr("reason_leftOut") : library.trCode("why2_", code, other: "reason_other")
-    }
-}
-
-/// On the album home: watch the sorting while it runs, or play it again afterwards.
-struct StageLink: View {
-    @EnvironmentObject var library: LibraryModel
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles.rectangle.stack").foregroundStyle(.secondary)
-            Text(library.tr("stageLinkText")).foregroundStyle(.secondary)
-            Spacer()
-            Button(library.analysing ? library.tr("stageWatch") : library.tr("stageReplay")) {
-                library.showSorting(replay: !library.analysing)
-            }
-            .buttonStyle(.link)
-        }
-        .font(.callout)
     }
 }

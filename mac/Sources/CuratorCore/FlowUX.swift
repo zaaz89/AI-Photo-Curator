@@ -134,41 +134,6 @@ public enum EngineStartFailure: Error, Equatable, Sendable {
     }
 }
 
-// MARK: menu order (#15)
-
-/// The pages of the flow in the order the owner goes through them, with their menu shortcut digit (⌘0 …).
-/// Decoupled from `GuideStep.number`: the three steps keep "Step 1 of 3", the menu follows the whole flow.
-public enum FlowPage: String, CaseIterable, Sendable {
-    case home, people, sorting, selection, story, export, settings
-
-    /// ⌘ + this digit opens the page (nil: no shortcut; Settings has ⌘, already).
-    public var menuDigit: Int? {
-        switch self {
-        case .home: 0
-        case .people: 1
-        case .sorting: 2
-        case .selection: 3
-        case .story: 4
-        case .export: 5
-        case .settings: nil
-        }
-    }
-
-    /// The guide step behind this page, if it is one.
-    public var guideStep: GuideStep? {
-        switch self {
-        case .selection: .selection
-        case .story: .story
-        case .export: .export
-        default: nil
-        }
-    }
-}
-
-/// Menu digits of the library pages after the flow (All Photos, Left Out).
-public let allPhotosMenuDigit = 6
-public let leftOutMenuDigit = 7
-
 // MARK: grid keys (#18)
 
 /// What a plain key does in the photo grid. One family with the quick review (`ReviewKeymap`): the review's
@@ -217,17 +182,4 @@ public func autoBadge(_ p: Photo, _ lang: Lang) -> AutoBadge? {
         return AutoBadge(kind: .document, label: Strings.text("badge_document", lang), reason: Strings.text("badgeWhy_document", lang))
     }
     return nil
-}
-
-// MARK: Finish Album (#22)
-
-/// The confirmation's title: what is removed, the unexported warning first when it applies.
-public func finishAlbumTitle(_ name: String, exported: Bool, _ lang: Lang) -> String {
-    let title = String(format: Strings.text("finishTitle", lang), name)
-    return exported ? title : Strings.text("finishNotExportedShort", lang) + " " + title
-}
-
-/// The confirmation's text: the unexported consequence first, then what stays untouched.
-public func finishAlbumText(exported: Bool, _ lang: Lang) -> String {
-    exported ? Strings.text("finishText", lang) : Strings.text("finishNotExported", lang) + "\n\n" + Strings.text("finishText", lang)
 }

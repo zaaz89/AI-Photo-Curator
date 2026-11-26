@@ -98,7 +98,16 @@ def list_sources(cid):
     rows = conn.execute(
         "SELECT s.*, (SELECT COUNT(*) FROM assets a WHERE a.source_id = s.id AND a.status = 'present') AS assets "
         'FROM sources s ORDER BY s.id').fetchall()
-    return jsonify({'sources': [dict(r) for r in rows]})
+    out = []
+    for r in rows:
+        d = dict(r)
+        # M14: the cameras and phones in the folder, most photos first (the album's folder chips show them).
+        d['devices'] = [x[0] for x in conn.execute(
+            "SELECT COALESCE(NULLIF(model, ''), make) AS device, COUNT(*) AS n FROM assets "
+            "WHERE source_id = ? AND status = 'present' AND COALESCE(NULLIF(model, ''), make, '') != '' "
+            'GROUP BY device ORDER BY n DESC LIMIT 3', (r['id'],))]
+        out.append(d)
+    return jsonify({'sources': out})
 
 
 @bp.route('/api/collections/<cid>/sources', methods=['POST'])
@@ -130,6 +139,29 @@ def update_source(cid, sid):
     with conn:
         n = conn.execute('UPDATE sources SET owner = ? WHERE id = ?', (owner, sid)).rowcount
     return jsonify({'ok': bool(n)})
+
+
+@bp.route('/api/collections/<cid>/sources/<int:sid>', methods=['DELETE'])
+def remove_source(cid, sid):
+    """M14: take a folder out of the album. Only the album's working data for it goes; the folder and its files are
+    never touched. The days that lost photos are rebuilt (moments, settled-day events), the others stay."""
+    if _job['running'] and _job['collection'] == cid:
+        return _err('the album is still being worked on; stop or wait first', 409)
+    try:
+        conn = col.open_db(cid)
+    except (FileNotFoundError, ValueError) as e:
+        return _err(str(e), 404)
+    try:
+        res = col.remove_source(conn, sid)
+    except FileNotFoundError as e:
+        conn.close()
+        return _err(str(e), 404)
+    from app.analysis_events import rebuild_changed_days
+    rebuilt = rebuild_changed_days(conn)
+    left = conn.execute("SELECT COUNT(*) FROM assets WHERE status = 'present'").fetchone()[0]
+    conn.close()
+    return jsonify({'ok': True, **res, 'photos_left': left,
+                    'rebuilt_days': rebuilt.get('rebuilt_days', []), 'gone_days': rebuilt.get('gone_days', [])})
 
 
 def _run_index(cid):

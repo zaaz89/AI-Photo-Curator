@@ -4,7 +4,10 @@ import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var onQuit: (() -> Void)?
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// True while an album is being sorted (M14a): closing the window then keeps the app and the engine working
+    /// ("You can close the window; I keep working"); the app quits by itself when the sorting ends.
+    var keepWorking: (() -> Bool)?
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !(keepWorking?() ?? false) }
     func applicationWillTerminate(_ notification: Notification) { onQuit?() }
 }
 
@@ -29,6 +32,7 @@ struct PhotoCuratorApp: App {
                 .frame(minWidth: 960, minHeight: 620)
                 .onAppear {
                     delegate.onQuit = { [engine] in MainActor.assumeIsolated { engine.stopIfOwned() } }
+                    delegate.keepWorking = { [library] in MainActor.assumeIsolated { library.analysing } }
                     if engine.state != .ready { engine.start() }
                 }
         }
@@ -54,6 +58,39 @@ struct AppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button(library.tr("newAlbumButton")) { library.newAlbum() }.keyboardShortcut("n")
+        }
+        CommandMenu(library.tr("albumMenu")) {
+            // The path's stations (M14a): ⌘1 … ⌘4. A station ahead of the album opens the current one.
+            ForEach(JourneyStation.allCases) { s in
+                Button(s.title(library.lang)) { library.open(station: s) }
+                    .keyboardShortcut(KeyEquivalent(Character(String(s.menuDigit))))
+                    .disabled(library.trips.isEmpty)
+            }
+            Divider()
+            Button(library.tr("journeyPrimaryMenu") + ": " + library.journey.actionTitle(library.lang)) { library.performPrimary() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(library.trips.isEmpty || !library.journey.action.isEnabled || library.reviewFilter != nil)
+            Button(library.tr("addFolderMenu")) { library.chooseFolders() }
+                .disabled(library.shownTrip == nil)
+            Divider()
+            Button(library.tr("allPhotos")) { go(.all) }.disabled(library.trips.isEmpty)
+            Button(library.tr("leftOut")) { go(.leftOut) }.keyboardShortcut("l").disabled(library.trips.isEmpty)
+            Button(library.tr("viewMoments")) { go(.moments) }.disabled(library.trips.isEmpty)
+            Button(library.tr("viewChapters")) { go(.chapters) }.disabled(library.trips.isEmpty)
+            Button(library.tr("step_photos")) { go(.people) }.disabled(library.trips.isEmpty)
+            Divider()
+            Button(library.tr("quickReview")) { library.startReview() }.keyboardShortcut("r")
+            Button(library.tr("quickReviewEverything")) { library.startReview(.all) }.keyboardShortcut("r", modifiers: [.command, .shift])
+            Divider()
+            Button(library.tr("analyseAgain")) { library.analyse() }.disabled(library.job.running || library.shownTrip == nil)
+            Button(library.tr("stop")) { library.stopJob() }.disabled(!library.job.running)
+            Divider()
+            Button(library.tr("removeAlbumMenu")) { library.removeAlbumRequest = library.tripId }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(library.tripId == nil || (library.job.running && library.job.collection == library.tripId))
+        }
         CommandMenu(library.tr("photoMenu")) {
             // K, X, F, B and Space work in the photo grid (see PhotoGrid); here they are listed for the menu.
             // K / X are the grid's keep / leave out, the same family as → / ← in the quick review (M12e, #18).
@@ -64,23 +101,6 @@ struct AppCommands: Commands {
             Divider()
             Button(library.tr("quickLook") + "  (Space)") { library.toggleQuickLook() }
                 .keyboardShortcut("y", modifiers: .command)
-            Divider()
-            Button(library.tr("analyseAgain")) { library.analyse() }.disabled(library.job.running)
-            Button(library.tr("newTrip")) { library.sheet = .newAlbum }.keyboardShortcut("n")
-            Button(library.tr("stop")) { library.stopJob() }.disabled(!library.job.running)
-        }
-        CommandMenu(library.tr("guide")) {
-            Button(library.tr("quickReview")) { library.startReview() }.keyboardShortcut("r")
-            Button(library.tr("quickReviewEverything")) { library.startReview(.all) }.keyboardShortcut("r", modifiers: [.command, .shift])
-            Divider()
-            // The pages in the order of the flow (M12e, #15): Home, People & Clocks, Sorting, the three steps,
-            // Settings. Digits come from `FlowPage.menuDigit`, not from the step numbers.
-            ForEach(FlowPage.allCases, id: \.self) { page in
-                flowButton(page)
-            }
-            Divider()
-            Button(library.tr("allPhotos")) { go(.all) }.keyboardShortcut(digit(allPhotosMenuDigit))
-            Button(library.tr("leftOut")) { go(.leftOut) }.keyboardShortcut(digit(leftOutMenuDigit))
         }
         CommandGroup(replacing: .undoRedo) {
             // In the quick review ⌘Z is Back: it shows the photo again and undoes its decision.
@@ -105,37 +125,10 @@ struct AppCommands: Commands {
 }
 
 @MainActor extension AppCommands {
-    @ViewBuilder func flowButton(_ page: FlowPage) -> some View {
-        let b = Button(title(page)) { go(destination(page)) }
-        if let d = page.menuDigit { b.keyboardShortcut(digit(d)) } else { b }
-    }
-
-    func title(_ page: FlowPage) -> String {
-        switch page {
-        case .home: library.tr("albumHome")
-        case .people: library.tr("step_photos")
-        case .sorting: library.tr("stage")
-        case .settings: library.tr("settings")
-        case .selection, .story, .export: library.tr("step_" + page.rawValue)
-        }
-    }
-
-    func destination(_ page: FlowPage) -> Destination {
-        if let s = page.guideStep { return .step(s) }
-        switch page {
-        case .people: return .people
-        case .sorting: return .sorting
-        case .settings: return .settings
-        default: return .home
-        }
-    }
-
     func go(_ d: Destination) {
         library.reviewFilter = nil
-        if d == .sorting { library.showSorting() } else { library.destination = d }
+        library.destination = d
     }
-
-    func digit(_ n: Int) -> KeyEquivalent { KeyEquivalent(Character(String(n))) }
 }
 
 /// Engine starting / failed / ready.

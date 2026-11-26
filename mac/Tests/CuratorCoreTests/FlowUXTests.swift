@@ -71,20 +71,6 @@ private let blurry = #""focus": {"tier": "blurry", "auto_tier": "blurry"}"#
     #expect(EngineStartFailure.timeout.human(.sl).message != EngineStartFailure.timeout.human(.en).message)
 }
 
-// MARK: menu order (#15)
-
-@Test func menuFollowsTheFlow() {
-    #expect(FlowPage.allCases == [.home, .people, .sorting, .selection, .story, .export, .settings])
-    let digits = FlowPage.allCases.compactMap(\.menuDigit)
-    #expect(digits == [0, 1, 2, 3, 4, 5])
-    #expect(FlowPage.sorting.menuDigit != nil)                            // Sorting has a shortcut now
-    #expect(!digits.contains(allPhotosMenuDigit) && !digits.contains(leftOutMenuDigit))
-    #expect(allPhotosMenuDigit != leftOutMenuDigit)
-    // The steps keep their own number (Step 1 of 3); only the menu digit changed.
-    #expect(FlowPage.selection.guideStep == .selection && GuideStep.selection.number == 1)
-    #expect(FlowPage.allCases.compactMap(\.guideStep) == GuideStep.allCases)
-}
-
 // MARK: grid keys (#18)
 
 @Test func gridKeysMatchTheReviewFamily() {
@@ -108,16 +94,4 @@ private let blurry = #""focus": {"tier": "blurry", "auto_tier": "blurry"}"#
     #expect(autoBadge(doc, .sl)?.kind == .document && autoBadge(doc, .sl)?.label == "Dokument")
     #expect(autoBadge(try photo(6, sharp), .en) == nil)
     #expect(autoBadge(try photo(7, sharp + #", "screenshot": true, "favorite": true"#), .en) == nil)
-}
-
-// MARK: Finish Album (#22)
-
-@Test func finishAlbumSaysItClearsDataAndWarnsFirst() {
-    let t = finishAlbumTitle("Rome", exported: false, .en)
-    #expect(t.hasPrefix(Strings.text("finishNotExportedShort", .en)))
-    #expect(t.contains("Clear working data") && t.contains("Rome"))
-    #expect(finishAlbumTitle("Rome", exported: true, .en) == "Clear working data for “Rome”?")
-    #expect(finishAlbumText(exported: false, .sl).hasPrefix(Strings.text("finishNotExported", .sl)))
-    #expect(finishAlbumText(exported: true, .en) == Strings.text("finishText", .en))
-    #expect(Strings.text("finishConfirm", .en) == "Clear Data")
 }

@@ -200,6 +200,11 @@ public struct SourceInfo: Decodable, Identifiable, Hashable, Sendable {
     public let owner: String
     public let path: String
     public let assets: Int?
+    /// M14a: cameras and phones in the folder, most photos first (nil from an older engine).
+    public let devices: [String]?
+    public init(id: Int, owner: String, path: String, assets: Int? = nil, devices: [String]? = nil) {
+        self.id = id; self.owner = owner; self.path = path; self.assets = assets; self.devices = devices
+    }
 }
 
 public struct EngineSettings: Codable, Hashable, Sendable {

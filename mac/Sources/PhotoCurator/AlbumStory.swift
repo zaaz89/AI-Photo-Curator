@@ -2,7 +2,7 @@ import CuratorCore
 import SwiftUI
 
 // M12f: the album home as a story (roadmap M18.2, without maps and without new engine data). The header lives in
-// AlbumHome.swift (`AlbumHero`); this file has its pieces: the counters on the cover, the day cards and the
+// AlbumHero.swift (`AlbumHero`); this file has its pieces: the counters on the cover, the day cards and the
 // always-visible way back to the sorting stage (audit #30).
 
 // MARK: header pieces

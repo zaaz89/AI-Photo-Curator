@@ -31,6 +31,9 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
         } else if path == "/api/collections" && request.httpMethod == "POST" {
             Self.writes.append("CREATE")
             answer = Data(#"{"ok": true, "id": "new-album"}"#.utf8)
+        } else if request.httpMethod == "DELETE" && path.contains("/sources/") {
+            Self.writes.append("DELETE " + path)
+            answer = Data(#"{"ok": true, "removed_photos": 3, "photos_left": 2, "rebuilt_days": []}"#.utf8)
         } else if request.httpMethod == "DELETE" {
             Self.writes.append("DELETE " + path)
             answer = Data(#"{"ok": true, "removed_cache_files": 3, "freed_bytes": 52428800}"#.utf8)
@@ -133,15 +136,25 @@ final class FakeEngine: URLProtocol, @unchecked Sendable {
 }
 
 extension LibraryModelTests {
-    @Test func aFailedFolderRemovesTheHalfMadeAlbum() async {
+    /// M14a: "+ New Album" makes an empty album and opens its path on Photos; nothing is analysed before Start.
+    @Test func newAlbumOpensOnItsFirstStationWithoutSorting() async {
         let m = await model()
-        let ok = await m.createAlbum(name: "X", folders: [(path: "/good", owner: "Me", devices: []),
-                                                          (path: "/bad", owner: "Ana", devices: [])])
-        #expect(!ok)
-        #expect(FakeEngine.writes.contains("DELETE /api/collections/new-album"))
-        #expect(m.tripId == "a")
-        #expect(m.errorBanner?.error.kind == .folderOverlap)          // a human sentence (M12e)
-        #expect(m.errorBanner?.error.details.contains("overlaps") == true)   // the engine text in Details
+        m.newAlbum()
+        await waitUntil { m.tripId == "new-album" }
+        #expect(FakeEngine.writes.contains("CREATE"))
+        #expect(m.tripId == "new-album" && m.destination == .journey && m.station == nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!FakeEngine.writes.contains { $0.contains("/index") })
+    }
+
+    /// M14a: × on a folder chip asks the engine to take that folder out of the open album.
+    @Test func removingAFolderAsksTheEngine() async {
+        let m = await model()
+        m.removeFolder(SourceInfo(id: 7, owner: "Ana", path: "/x"))
+        await waitUntil { FakeEngine.writes.contains { $0.hasPrefix("DELETE") } }
+        #expect(FakeEngine.writes.contains("DELETE /api/collections/a/sources/7"))
+        await waitUntil { m.message != nil }
+        #expect(m.message?.contains("Ana") == true && m.errorBanner == nil)
     }
 
     @Test func keeperChoicesAreWrittenInOrder() async {
@@ -154,10 +167,10 @@ extension LibraryModelTests {
         #expect(FakeEngine.writes.map { $0.contains("12") } == [true, false])
     }
 
-    @Test func finishingAnAlbumRemovesItAndOpensTheNext() async {
+    @Test func removingAnAlbumRemovesItAndOpensTheNext() async {
         let m = await model()
         #expect(m.steps["import"] == true && m.exported == false)
-        await m.finishAlbum()
+        await m.removeAlbum("a")
         #expect(FakeEngine.writes == ["DELETE /api/collections/a"])
         #expect(m.trips.map(\.id) == ["b"])
         #expect(m.tripId == "b")
