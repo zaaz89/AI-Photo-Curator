@@ -349,3 +349,12 @@ in `Thumbnails.swift`, `readyFilter()` closures in `SortingStage.swift`, `pollEv
 Bench: smoke-tested only on a 30-file set made from 4 generated JPEGs (Linux, no helper). NOT run on test-10 or the 3,000 set:
 ask the owner before running it (long AI job); then record the numbers against the budgets here.
 Open: first-photo latency, app memory and grid frame rate need a by-hand check on the Mac; grid marks do not write events.
+
+### 2026-11-26 (evening) — M13 compiled and benched; #15 to #20 merged into main (Claude)
+Owner authorised the agent to merge this time. Imported `claude/m13-scale` from the Cowork bundle and ran the four checks on the Mac: 115 Swift tests (106 + 9), `scripts/build-mac-app.sh` OK, `uv run pytest` 163 passed, token check OK (156/32/13/0), no new warnings. No fix needed: every compile-risk spot of the M13 entry compiled as written. PR #20 "M13: per-day pipeline, live events, bench".
+Bench (test-10 only, share 30 %, helper present, no ffmpeg): `bench.sh` needs a set with `bench-times.json`, so a 10-file set was made from the 10 test-10 photos (`make-bench-set.py --source local-data/bench/test-10-src --count 10 --videos 0 --out local-data/bench/test-10`; the source folder holds symlinks, originals only read). The 3,000 set was not made or run.
+- per-day: wall 12.8 s, 0.78 photos/s, first day settled 2.3 s, faces 7.55 s, quality 2.43 s, places/events 2.14 s, engine peak 1,032 MB, helper 39 MB, share used 0.298.
+- all-at-once: wall 7.6 s, 1.32 photos/s, faces 3.06 s, quality 2.15 s, places/events 1.70 s, engine peak 2,382 MB, helper 52 MB, share used 0.299.
+- Reading: per-day is slower on 10 files over 7 days because faces start once per day (~0.65 s each, expected in `notes/m13-scale.md`); engine peak memory is less than half. The §1 budgets (3,000 set) are still not measured.
+Merges into main, merge commits, each next PR retargeted to main, then `git pull` and both test suites: #15 (Swift 63, pytest 156), #16 (67, 156), #17 (74, 156), #18 (95, 157), #19 (105, 157), #20 (115, 163). All passed. Branches were not deleted.
+Open: nothing was looked at in the running app (visual checklists in #16 to #20); the 3,000-file bench and the §1 budgets only when the owner asks.
