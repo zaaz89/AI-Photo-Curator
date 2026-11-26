@@ -79,7 +79,7 @@ struct QuickReviewView: View {
             }
             if showKeys { KeysCard(context: compare == nil ? .single : .compare) { showKeys = false } }
         }
-        .environment(\.colorScheme, .dark)
+        .stageDarkSurface()
         .focusable().focusEffectDisabled().focused($focused)
         // One decision per press: only the down phase, so a held key does not repeat (it would decide photos the
         // owner never saw). Keys the keymap does not know are .ignored and reach VoiceOver and the menus.
@@ -429,7 +429,7 @@ struct QuickReviewView: View {
         return library.photos.filter { $0.duplicate?.group == g }
     }
 
-    func reasonText(_ code: String, _ p: Photo) -> String { library.trOr("why2_" + code, code) }
+    func reasonText(_ code: String, _ p: Photo) -> String { library.trCode("why2_", code, other: "reason_other") }
 
     func reasonIcon(_ code: String) -> String {
         switch code {
@@ -456,7 +456,7 @@ struct EndCard: View {
         let c = session.counts
         VStack(spacing: 18) {
             Image(systemName: "checkmark.seal.fill").font(.system(size: 64)).foregroundStyle(.green.gradient)
-            Text(library.tr("reviewDone")).font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
+            Text(library.tr("reviewDone")).scaledFont(30, weight: .bold, relativeTo: .title).foregroundStyle(.white)
             Text(String(format: library.tr("reviewCounts"), c.kept, c.leftOut, c.skipped)).font(.title3).foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 if !session.skippedIds.isEmpty {

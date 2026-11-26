@@ -302,3 +302,18 @@ Visual checklist (test-10, window capture, no synthetic input):
 6. Export test-10: percent rolls; at the end the cover drops into the folder once (go to Home and back: no replay); Show in
    Finder clickable during the moment.
 7. Undo toast and error banner: symbol bounces once.
+
+### 2026-11-26, Claude (Cowork): M12g: UX audit P2, accessibility and copy (#23 to #29, #31 to #33)
+Branch `claude/m12g-ux-p2`. Not touched (motion pass owns them): AlbumHome, PhotoGrid, MainWindow, Inspector; row 30 skipped.
+- #23 `FaceCrop` label from Strings (`eyes_closed/unsure/open`, `eyes_away`). #24 Stage counters and source chips are one VoiceOver element each ("12 in the album", "Name, 3 of 10 photos read"). #25 small stage tiles keep a 10 pt glyph for "to look at" / "left out"; all glyphs with Differentiate Without Colour.
+- #26 `.scaledFont` (ScaledMetric) for stage/page titles, counters, percent; ratchet `fontSystemSize` 20 to 13. Not done: AlbumHome hero/step titles (file not mine).
+- #27 stage secondary text 0.6/0.65 to 0.78 (`StageInk`), dark scrim under tray glass. #31 decision: keep the dark stage, `stageDarkSurface()` shared by Stage and Quick Review, Increase Contrast handled by `StageInk` (see notes/m12b-design-system.md).
+- #28 `trCode` / `Strings.codeText`: unknown engine code shows "Other reason" / "Other note" / "This folder could not be used" and is logged. #29 `stepsProgress` was already gone; `exportHelp` lost "classic view for now"; `phase_describing` now "Working" (key kept, the phase enum still exists).
+- #32 Return: Next on the settled Stage (Resume / Analyse Again when those are primary), Align on the first pending clock lane. #33 thumbnail failure label ("Cannot read file" / "No preview available"), 260 px stand-in and spinner for the large Quick Review photo.
+- Strings: 12 new (block `// M12g a11y and copy`), 2 changed. Tests: `StringsTests` (codeText, keys). Token check OK after `--update` (fontSystemSize 13); the other agent may also touch the baseline file.
+NOT compiled, Swift tests NOT run. Compile risks: `ScaledSystemFont` init with `_size = ScaledMetric(...)`; `DefaultActionKey` ViewModifier with if/else body; `ViewThatFits` in Thumbnail; `@EnvironmentObject` now in `Thumbnail` and `FaceCrop`; `Logger` in LibraryModel; `Result<NSImage, Failure>` across the actor.
+Check visually (test-10): Stage in dark with Increase Contrast and Reduce Transparency on (tray text, glows); tiny tiles show orange/left-out glyphs; Return on the Stage after settling goes to Selection; Return on People & Clocks aligns the first clock; rename a file in test-photos then open it: "Cannot read file" label; Quick Review shows the small photo with a spinner, then sharp; VoiceOver on counters and chips; text size larger in System Settings for the stage titles.
+
+### 2026-11-26, Claude (Cowork): M12f + M12g merged
+- `claude/m12f-motion-delight` holds M12f (motion, Album Home story, first run, export celebration) and M12g (P2 a11y and copy). Conflicts were only appended blocks (Strings, notes, log); 543 string keys, no duplicates; token check OK (156/32/13/0).
+- Stack: m12c (#17) → m12d (P1) → m12f (this). None of m12d/m12f compiled yet. Build m12d first, then m12f.

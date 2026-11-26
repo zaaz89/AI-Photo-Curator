@@ -50,7 +50,7 @@ struct NewAlbumWizard: View {
                 .motionTransition(.opacity.combined(with: .move(edge: .top)))
             }
             ForEach(rejected, id: \.self) { r in
-                Label("\(URL(fileURLWithPath: r.path).lastPathComponent): \(library.trOr("problem_" + r.problem, r.problem))",
+                Label("\(URL(fileURLWithPath: r.path).lastPathComponent): \(library.trCode("problem_", r.problem, other: "problem_other"))",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.callout).foregroundStyle(.orange)
             }

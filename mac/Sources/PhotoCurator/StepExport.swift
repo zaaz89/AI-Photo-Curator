@@ -122,7 +122,7 @@ struct StepExport: View {
                 if !notes.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(notes, id: \.key) { k, n in
-                            Label("\(n) " + library.trOr("warn_" + k, k), systemImage: "info.circle")
+                            Label("\(n) " + library.trCode("warn_", k, other: "warn_other"), systemImage: "info.circle")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }

@@ -239,7 +239,7 @@ struct MomentsPanel: View {
     func reasons(_ g: MomentGroup) -> String {
         if g.chosenByOwner { return library.tr("yourChoiceLong") }
         let r = (g.reasons.keeper ?? []).filter { !$0.hasPrefix("a recommendation") }
-        let text = r.map { library.trOr("why_" + $0, $0) }.joined(separator: ", ")
+        let text = r.map { library.trCode("why_", $0, other: "reason_other") }.joined(separator: ", ")
         return (g.clear ? library.tr("decidedBecause") : library.tr("suggestedBecause")) + " " + text
     }
 }

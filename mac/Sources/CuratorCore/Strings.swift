@@ -10,6 +10,13 @@ public enum Strings {
         return lang == .sl ? pair.1 : pair.0
     }
 
+    /// The text for a code from the engine (`why2_movement_blur`, `warn_...`, `problem_...`). Without a translation
+    /// it is the generic text under `otherKey`, never the raw engine code (M12g, audit #28); `known` is false then,
+    /// so the caller can log the code.
+    public static func codeText(prefix: String, code: String, otherKey: String, _ lang: Lang) -> (text: String, known: Bool) {
+        table[prefix + code] != nil ? (text(prefix + code, lang), true) : (text(otherKey, lang), false)
+    }
+
     public enum Word: Sendable { case photo, moment, person, day, event, video, chapter }
 
     /// "3 moments" / "3 trenutki": English singular and plural, Slovenian singular, dual, 3–4 and plural.
@@ -195,7 +202,7 @@ public enum Strings {
         "sort_quality": ("By Quality", "Po kakovosti"),
         "thumbSize": ("Thumbnail size", "Velikost sličic"),
         "export": ("Export…", "Izvozi …"),
-        "exportHelp": ("Export for Google Photos (classic view for now)", "Izvoz za Google Photos (zaenkrat v klasičnem pogledu)"),
+        "exportHelp": ("Export for Google Photos", "Izvoz za Google Photos"),
         "inspector": ("Inspector", "Inšpektor"),
         // photo actions
         "photoMenu": ("Photo", "Fotografija"),
@@ -260,7 +267,7 @@ public enum Strings {
         "phase_faces": ("Looking at faces", "Pregledujem obraze"),
         "phase_videos": ("Reading videos", "Berem videe"),
         "phase_searchIndex": ("Learning what is in the photos", "Spoznavam vsebino fotografij"),
-        "phase_describing": ("Writing descriptions", "Pišem opise"),
+        "phase_describing": ("Working", "Delam"),
         "phase_exporting": ("Exporting", "Izvažam"),
         "phase_paused": ("Paused to keep the Mac cool", "Premor, da se Mac ohladi"),
         "phase_working": ("Working", "Delam"),
@@ -657,5 +664,18 @@ public enum Strings {
         "celebrateTitle": ("Album exported and verified", "Album je izvožen in preverjen"),
         "celebrateText": ("Copied and checked byte for byte. Your originals are untouched.",
                           "Kopirano in preverjeno bajt za bajtom. Izvirniki so nedotaknjeni."),
+        // M12g a11y and copy
+        "eyes_closed": ("Eyes closed", "Zaprte oči"),
+        "eyes_unsure": ("Eyes unclear", "Oči niso jasne"),
+        "eyes_open": ("Eyes open", "Odprte oči"),
+        "eyes_away": ("looking away", "gleda stran"),
+        "reason_other": ("Other reason", "Drug razlog"),
+        "warn_other": ("Other note", "Druga opomba"),
+        "problem_other": ("This folder could not be used", "Te mape ni mogoče uporabiti"),
+        "chipProgress": ("%d of %d photos read", "Prebranih %d od %d fotografij"),
+        "chipWaiting": ("Waiting to start", "Čaka na začetek"),
+        "thumbUnreadable": ("Cannot read file", "Datoteke ni mogoče prebrati"),
+        "thumbNoPreview": ("No preview available", "Predogled ni na voljo"),
+        "thumbLoading": ("Loading photo", "Nalagam fotografijo"),
     ]
 }

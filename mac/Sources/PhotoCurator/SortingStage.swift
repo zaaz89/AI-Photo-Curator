@@ -645,12 +645,13 @@ let stageColors: [Color] = [Color(red: 0.42, green: 0.36, blue: 1.0), Color(red:
 
 struct StageBackground: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var move = false
     var body: some View {
         ZStack {
             Color(red: 0.05, green: 0.05, blue: 0.08)
             ForEach(0..<4, id: \.self) { i in
-                Circle().fill(stageColors[i].opacity(0.3))
+                Circle().fill(stageColors[i].opacity(StageInk.glowOpacity(contrast)))
                     .frame(width: 560, height: 560)
                     .offset(x: (move ? 1 : -1) * CGFloat([260, -320, 180, -120][i]),
                             y: (move ? -1 : 1) * CGFloat([140, 90, -200, 220][i]))
@@ -694,6 +695,8 @@ private struct StageTile: View {
     let lang: Lang
     /// Keyboard focus (M12e, #14): a visible ring, since the system focus effect is off on rotated tiles.
     var focused = false
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var corner: CGFloat { min(12, size.height * 0.12) }
 
@@ -708,7 +711,7 @@ private struct StageTile: View {
         .clipShape(.rect(cornerRadius: corner))
         .overlay {
             RoundedRectangle(cornerRadius: corner)
-                .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(Color.white.opacity(0.14)),
+                .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(StageInk.outline(contrast)),
                               lineWidth: verdict == .check ? 2 : 1)
         }
         .overlay {
@@ -717,7 +720,9 @@ private struct StageTile: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if let verdict, verdict != .stacked, size.height > 34 {
+            // Small tiles keep a glyph for "to look at" and "left out" (shape, not only colour), and every state
+            // glyph when the system asks for it (M12g, #25); under 34 pt it is the minimum size of 10 pt.
+            if let verdict, verdict != .stacked, size.height > 34 || verdict == .check || verdict == .removed || differentiate {
                 Image(systemName: symbol(verdict))
                     .font(.system(size: max(10, min(18, size.height * 0.16)), weight: .bold))
                     .symbolRenderingMode(.palette)
@@ -728,7 +733,7 @@ private struct StageTile: View {
         }
         .overlay(alignment: .topTrailing) {
             if stacked > 0 {
-                Text("×\(stacked + 1)").font(.system(size: 11, weight: .bold, design: .rounded))
+                Text("×\(stacked + 1)").scaledFont(11, weight: .bold, design: .rounded, relativeTo: .caption)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.ultraThinMaterial, in: .capsule).padding(5)
                     .motionTransition(.scale.combined(with: .opacity))
@@ -774,6 +779,7 @@ private struct StageTile: View {
 /// load at once); no per-photo animation. The trays below stay as they are.
 private struct StageGrid: View {
     @EnvironmentObject var library: LibraryModel
+    @Environment(\.colorSchemeContrast) private var contrast
     @ObservedObject var stage: StageModel
     let ids: [Int]
     let stackedBehind: [Int: Int]
@@ -832,7 +838,7 @@ private struct StageGrid: View {
             .clipShape(.rect(cornerRadius: Radius.small))
             .overlay {
                 RoundedRectangle(cornerRadius: Radius.small)
-                    .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(Color.white.opacity(0.14)),
+                    .strokeBorder(verdict == .check ? AnyShapeStyle(StatusColor.look) : AnyShapeStyle(StageInk.outline(contrast)),
                                   lineWidth: verdict == .check ? 2 : 1)
             }
             .overlay(alignment: .topTrailing) {
@@ -877,6 +883,7 @@ extension StageGrid {
 
 private struct SourceChip: View {
     @EnvironmentObject var library: LibraryModel
+    @Environment(\.colorSchemeContrast) private var contrast
     let owner: String
     let count: Int
     let total: Int
@@ -885,18 +892,23 @@ private struct SourceChip: View {
             PersonBadge(name: owner, index: 0, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(owner).font(.callout.weight(.semibold)).lineLimit(1)
-                Text(total == 0 ? "…" : "\(count)/\(total)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Text(total == 0 ? "…" : "\(count)/\(total)").font(.caption).foregroundStyle(StageInk.secondary(contrast)).monospacedDigit()
                     .contentTransition(.numericText(value: Double(count)))
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .frame(width: 196, alignment: .leading)
         .background(.ultraThinMaterial, in: .rect(cornerRadius: 16))
+        // One element: "Name, 3 of 10 photos read" (M12g, #24).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(owner)
+        .accessibilityValue(total == 0 ? library.tr("chipWaiting") : String(format: library.tr("chipProgress"), count, total))
     }
 }
 
 private struct StageHeader: View {
     @EnvironmentObject var library: LibraryModel
+    @Environment(\.colorSchemeContrast) private var contrast
     @ObservedObject var stage: StageModel
     let counts: StageCounts
 
@@ -930,11 +942,11 @@ private struct StageHeader: View {
                 AIRing(symbol: state.needsRestart ? "exclamationmark" : (stage.settled ? "checkmark" : "sparkles"), size: 46,
                        spinning: library.analysing || stage.busy, progress: library.analysing ? library.job.progress / 100 : 1)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 26, weight: .bold)).foregroundStyle(.white)
+                    Text(title).scaledFont(26, weight: .bold, relativeTo: .title).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.7)
                         .id(title).motionTransition(.push(from: .bottom).combined(with: .opacity))
                     Text(subtitle)
-                        .foregroundStyle(.white.opacity(0.65)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(StageInk.secondary(contrast)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 .motionAnimation(.quick, value: title)
                 Spacer()
@@ -947,7 +959,7 @@ private struct StageHeader: View {
             HStack(spacing: 10) {
                 if stage.settled {
                     Text(String(format: library.tr("stageSummary"), summary.taken, summary.inAlbum))
-                        .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+                        .scaledFont(20, weight: .semibold, relativeTo: .title3).foregroundStyle(.white)
                         .contentTransition(.numericText())
                     Spacer()
                     restartButton
@@ -963,7 +975,7 @@ private struct StageHeader: View {
                     if showSkip { skipButton }
                     if library.analysing { Button(library.tr("stop")) { library.stopJob() }.buttonStyle(.glass) }
                     // Next is always there; until the album is sorted it says why it waits (M12c, no dead end).
-                    Text(library.tr("stageNextWhy")).font(TypeRole.caption).foregroundStyle(.white.opacity(0.65))
+                    Text(library.tr("stageNextWhy")).font(TypeRole.caption).foregroundStyle(StageInk.secondary(contrast))
                         .lineLimit(1).accessibilityHidden(true)
                     nextButton.disabled(true).accessibilityHint(library.tr("stageNextWhy"))
                 }
@@ -971,7 +983,7 @@ private struct StageHeader: View {
             .frame(height: 34)
         }
         .padding(.horizontal, 36).padding(.top, 26)
-        .environment(\.colorScheme, .dark)
+        .stageDarkSurface()
     }
 
     var subtitle: String {
@@ -1002,10 +1014,10 @@ private struct StageHeader: View {
     @ViewBuilder var restartButton: some View {
         if case .stopped = state, !stage.busy {
             Button { library.analyse() } label: { Label(library.tr("resume"), systemImage: "play.fill") }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
         } else if case .failed = state, !stage.busy {
             Button { library.analyse() } label: { Label(library.tr("analyseAgain"), systemImage: "arrow.clockwise") }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
         }
     }
 
@@ -1015,7 +1027,9 @@ private struct StageHeader: View {
         if state.needsRestart {
             Button { library.destination = .step(.selection) } label: { label }.buttonStyle(.glass)
         } else {
+            // The one prominent button of the settled Stage answers Return (M12g, #32).
             Button { library.destination = .step(.selection) } label: { label }.buttonStyle(.glassProminent)
+                .keyboardShortcut(.defaultAction)
         }
     }
 
@@ -1027,18 +1041,22 @@ private struct StageHeader: View {
 }
 
 private struct StageCounter: View {
+    @Environment(\.colorSchemeContrast) private var contrast
     let value: Int
     let label: String
     let color: Color
     var body: some View {
         VStack(spacing: 2) {
-            Text("\(value)").font(.system(size: 26, weight: .semibold, design: .rounded)).monospacedDigit()
+            Text("\(value)").scaledFont(26, weight: .semibold, design: .rounded, relativeTo: .title).monospacedDigit()
                 .foregroundStyle(color)
                 .contentTransition(.numericText(value: Double(value)))
                 .motionAnimation(.quick, value: value)
-            Text(label).font(.caption).foregroundStyle(.white.opacity(0.6))
+            Text(label).font(.caption).foregroundStyle(StageInk.secondary(contrast))
         }
         .frame(minWidth: 64)
+        // One element: "12 in the album" instead of "12" and "in the album" (M12g, #24).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(label)")
     }
 }
 
@@ -1049,6 +1067,8 @@ private struct TrayCard: View {
     let rect: CGRect
     let settled: Bool
     let open: () -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var color: Color { verdict == .removed ? StatusColor.removed : (verdict == .stacked ? StatusColor.stacked : StatusColor.look) }
     var symbol: String {
@@ -1068,16 +1088,16 @@ private struct TrayCard: View {
                     }
                     .font(.headline).foregroundStyle(color)
                     Spacer()
-                    Text("\(count)").font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                    Text("\(count)").scaledFont(22, weight: .bold, design: .rounded, relativeTo: .title2).monospacedDigit()
                         .foregroundStyle(.white)
                         .contentTransition(.numericText(value: Double(count)))
                 }
                 if settled && count > 0 {
-                    Text(library.tr("trayShort_" + verdict.rawValue)).font(.caption).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                    Text(library.tr("trayShort_" + verdict.rawValue)).font(.caption).foregroundStyle(StageInk.secondary(contrast)).lineLimit(1)
                 }
                 Spacer()
                 if count == 0 && settled {
-                    Text(library.tr("trayEmpty_" + verdict.rawValue)).font(.callout).foregroundStyle(.white.opacity(0.6))
+                    Text(library.tr("trayEmpty_" + verdict.rawValue)).font(.callout).foregroundStyle(StageInk.secondary(contrast))
                     Spacer()
                 }
 
@@ -1087,6 +1107,8 @@ private struct TrayCard: View {
             .contentShape(.rect(cornerRadius: 24))
         }
         .buttonStyle(.plain)
+        // A dark scrim between the glass and its text keeps the text readable over the animated glows (M12g, #27).
+        .background { RoundedRectangle(cornerRadius: Radius.hero).fill(.black.opacity(reduceTransparency ? 0.7 : (contrast == .increased ? 0.45 : 0.25))) }
         .glassEffect(.regular.tint(color.opacity(count > 0 ? 0.12 : 0.03)).interactive(), in: .rect(cornerRadius: 24))
         .disabled(count == 0)
         .hoverLift(count > 0, radius: 24)
@@ -1198,7 +1220,7 @@ private struct TrayContents: View {
 
     func reason(_ p: Photo) -> String {
         guard let code = sortReason(p) else { return "" }
-        return code == "leftOut" ? library.tr("reason_leftOut") : library.trOr("why2_" + code, code)
+        return code == "leftOut" ? library.tr("reason_leftOut") : library.trCode("why2_", code, other: "reason_other")
     }
 }
 
