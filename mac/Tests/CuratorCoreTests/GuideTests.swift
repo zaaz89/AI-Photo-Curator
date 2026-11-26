@@ -58,6 +58,14 @@ private func overview(analysing: Bool = false, pendingClocks: Int = 0, needYou: 
     #expect(o.coverId == 3 && o.highlights == [3, 5] && o.people?.first?.inAlbum == 6)
     // An engine without the M9 fields still decodes.
     #expect(try overview().funnel == nil)
+    #expect(f.screenshots == 0)                                          // older engine: no screenshots part
+}
+
+@Test func funnelShowsScreenshots() throws {
+    let o = try overview(funnel: #", "funnel": {"taken": 10, "left_out": 1, "screenshots": 2, "blurry": 1, "extra_frames": 2, "in_album": 4}"#)
+    let f = try #require(o.funnel)
+    #expect(f.taken == f.leftOut + f.screenshots + f.blurry + f.extraFrames + f.inAlbum)
+    #expect(funnelParts(f).map(\.kind) == [.inAlbum, .extraFrames, .blurry, .screenshots, .leftOut])
 }
 
 @Test func chaptersGroupByDayUndatedLast() throws {

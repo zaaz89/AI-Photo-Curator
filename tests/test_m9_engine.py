@@ -148,7 +148,7 @@ def test_overview_survives_a_failing_album_summary(album, monkeypatch):
 def test_funnel_without_analysis_is_zero_filled(tmp_path):
     conn = col.open_db(col.create('Empty'))
     o = overview(conn)
-    assert o['funnel'] == {'taken': 0, 'left_out': 0, 'blurry': 0, 'extra_frames': 0, 'in_album': 0}
+    assert o['funnel'] == {'taken': 0, 'left_out': 0, 'screenshots': 0, 'blurry': 0, 'extra_frames': 0, 'in_album': 0}
     assert o['people'] == [] and o['cover_id'] is None and o['highlights'] == []
 
 

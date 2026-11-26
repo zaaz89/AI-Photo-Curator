@@ -101,10 +101,16 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
     public let ai: AI?
     public let quality: Quality?
     public let notes: [String]?
+    /// The second file of a RAW+JPEG or Live Photo pair: the id of its primary, which it follows (M12).
+    public let pairedWith: Int?
+    /// A screen capture (EXIF mark "Screenshot", or a screenshot file name without a camera): left out of the
+    /// album unless kept (owner, 2026-11-19).
+    public let screenshot: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, filename, path, kind, owner, device, confidence, favorite, keep, rejected, wallpaper, width, height, duration,
-             poster, place, focus, faces, duplicate, ai, quality, notes
+             poster, place, focus, faces, duplicate, ai, quality, notes, screenshot
+        case pairedWith = "paired_with"
         case sourceId = "source_id", localTime = "local_time", correctedLocalTime = "corrected_local_time",
              utcTime = "utc_time", offsetMinutes = "offset_minutes", eventId = "event_id"
     }
@@ -138,7 +144,9 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         duplicate = try c.decodeIfPresent(Duplicate.self, forKey: .duplicate)
         ai = try c.decodeIfPresent(AI.self, forKey: .ai)
         quality = try c.decodeIfPresent(Quality.self, forKey: .quality)
+        pairedWith = try c.decodeIfPresent(Int.self, forKey: .pairedWith)
         notes = try c.decodeIfPresent([String].self, forKey: .notes)
+        screenshot = try c.decodeIfPresent(Bool.self, forKey: .screenshot) ?? false
     }
 
     /// Local capture time as the app shows it (clock correction applied when there is one).
@@ -163,9 +171,10 @@ public struct Photo: Decodable, Identifiable, Hashable, Sendable {
         return d.keeper == false
     }
     /// The Google Photos export takes it (same rule as the engine's export plan): not left out, and, unless it
-    /// is a favourite, neither blurry (by the owner's focus mark when there is one) nor an extra frame.
+    /// is a favourite, neither a screenshot (unless kept), nor blurry (by the owner's focus mark when there is
+    /// one), nor an extra frame (unless kept).
     public var goesToAlbumDespiteFocus: Bool {
-        !rejected && (favorite || ((focus?.tier != "blurry") && (!isExtraFrame || keep)))
+        !rejected && (favorite || ((!screenshot || keep) && (focus?.tier != "blurry") && (!isExtraFrame || keep)))
     }
     public var fileURL: URL { URL(fileURLWithPath: path) }
 }

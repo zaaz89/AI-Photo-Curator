@@ -21,7 +21,7 @@ TAGS = [
     'CreateDate', 'SubSecTimeDigitized', 'OffsetTimeDigitized',
     'CreationDate', 'GPSDateTime', 'GPSLatitude', 'GPSLongitude',
     'Make', 'Model', 'LensModel', 'ImageWidth', 'ImageHeight',
-    'ContentIdentifier', 'MIMEType', 'Duration',
+    'ContentIdentifier', 'MIMEType', 'Duration', 'UserComment',
 ]
 BATCH = 200
 
@@ -87,6 +87,11 @@ def _read_pillow(path: str) -> dict:
             if name in merged and merged[name] not in (None, ''):
                 key = 'CreateDate' if name == 'DateTimeDigitized' else name
                 tags[f'EXIF:{key}'] = str(merged[name]).strip('\x00 ')
+        comment = merged.get('UserComment')
+        if isinstance(comment, bytes):          # 8-byte charset prefix, e.g. b'ASCII\x00\x00\x00Screenshot'
+            comment = comment[8:].decode('utf-8', 'ignore') if len(comment) > 8 else ''
+        if comment and str(comment).strip('\x00 '):
+            tags['EXIF:UserComment'] = str(comment).strip('\x00 ')
     return tags
 
 

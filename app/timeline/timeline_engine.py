@@ -43,6 +43,9 @@ def timeline(conn: sqlite3.Connection) -> dict:
     for r in conn.execute('SELECT kind, asset_a, asset_b FROM relationships'):
         rel.setdefault(r['asset_a'], []).append({'kind': r['kind'], 'with': r['asset_b']})
         rel.setdefault(r['asset_b'], []).append({'kind': r['kind'], 'with': r['asset_a']})
+    # The second file of a Live Photo or RAW+JPEG pair follows its primary (the export's own rule, M12).
+    from app.organization.export_plan import _pairs
+    paired = _pairs(conn)
     dup = {}
     for r in conn.execute('SELECT m.asset_id, g.id, g.category, g.keeper_id FROM duplicate_members m '
                           'JOIN duplicate_groups g ON g.id = m.group_id'):
@@ -86,6 +89,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
             'confidence': r['confidence'] or 'unknown',
             'notes': json.loads(r['notes_json'] or '[]'),
             'related': rel.get(r['id'], []),
+            'paired_with': paired.get(r['id']),
             'exact_copies': sha_count[r['sha256']] - 1 if r['sha256'] else 0,
             'duplicate': dup.get(r['id']),
             'ai': ai.get(r['sha256']),
@@ -111,6 +115,8 @@ def timeline(conn: sqlite3.Connection) -> dict:
     face_map = summaries(conn)
     vision = vision_info(conn)
     videos = {r['sha256']: dict(r) for r in conn.execute('SELECT sha256, duration, thumb FROM video_meta')}
+    from app.quality.screenshots import screenshot_ids
+    shots = screenshot_ids(conn)
     sha_of = {r['id']: r['sha256'] for r in rows}
     for i in items:
         i['focus'] = tiers.get(i['id'])
@@ -120,6 +126,7 @@ def timeline(conn: sqlite3.Connection) -> dict:
         i['favorite'] = bool(m['favorite']) if m else False
         i['rejected'] = bool(m['rejected']) if m else False
         i['keep'] = bool(m['keep']) if m else False
+        i['screenshot'] = i['id'] in shots
         i['faces'] = face_map.get(sha_of.get(i['id']))
         i['quality'] = _quality(i, i['focus'], i['faces'], vision.get(sha_of.get(i['id'])))
         v = videos.get(sha_of.get(i['id']))

@@ -64,6 +64,7 @@ struct MainWindow: View {
         case .step(let s): s.rawValue
         case .people: "people"
         case .settings: "settings"
+        case .sorting: "sorting"
         default: "grid"
         }
     }
@@ -126,6 +127,7 @@ struct MainWindow: View {
         case .step(let s): return library.tr("step_" + s.rawValue)
         case .people: return library.tr("step_photos")
         case .settings: return library.tr("settings")
+        case .sorting: return library.tr("stage")
         case .blurry: return library.tr("blurryNav")
         case .all: return library.tr("allPhotos")
         case .favourites: return library.tr("favourites")
@@ -139,6 +141,7 @@ struct MainWindow: View {
         if case .step(let s) = library.destination { return String(format: library.tr("stepOfThree"), s.number) + " · " + library.albumName }
         if library.destination == .people { return library.albumName }
         if library.destination == .settings { return library.tr("settingsSubtitle") }
+        if library.destination == .sorting { return library.albumName }
         if library.destination == .home { return library.tr("albumHome") }
         let n = library.flat.count
         var s = Strings.photos(n, library.lang)
@@ -157,6 +160,7 @@ struct Sidebar: View {
         List(selection: Binding(get: { library.destination }, set: { if let d = $0 { library.destination = d } })) {
             Section(library.tr("guide")) {
                 Label(library.tr("albumHome"), systemImage: "house").tag(Destination.home)
+                Label(library.tr("stage"), systemImage: "sparkles.rectangle.stack").tag(Destination.sorting)
                 ForEach(GuideStep.allCases) { s in
                     let st = library.stepStates[s] ?? StepState(done: false, waiting: 0)
                     HStack(spacing: 8) {
@@ -315,6 +319,7 @@ struct DetailPage: View {
         case .step(.export): StepExport()
         case .people: StepPhotos()
         case .settings: SettingsPage()
+        case .sorting: SortingStage()
         default: PhotoGrid()
         }
     }

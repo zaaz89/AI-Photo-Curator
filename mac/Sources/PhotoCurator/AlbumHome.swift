@@ -14,6 +14,7 @@ struct AlbumHome: View {
                     GuideEmpty(symbol: "sparkles", title: library.tr("nothingAnalysed"), text: library.tr("nothingAnalysedText"))
                 } else {
                     if library.analysing { AnalysisCard() } else { NextCard() }
+                    StageLink()
                     SettingsStrip()
                     if let f = library.overview?.funnel, f.taken > 0, !library.analysing { FunnelView(funnel: f) }
                     StepCards()
@@ -274,6 +275,7 @@ struct FunnelView: View {
         case .inAlbum: .green
         case .extraFrames: .blue
         case .blurry: .orange
+        case .screenshots: .purple
         case .leftOut: .gray
         }
     }
@@ -284,6 +286,7 @@ struct FunnelView: View {
             case .inAlbum: library.destination = .step(.export)
             case .extraFrames: library.selectionView = .moments; library.destination = .step(.selection)
             case .blurry: library.selectionView = .blurry; library.destination = .step(.selection)
+            case .screenshots: library.destination = .sorting      // the Removed tray shows them with Put back
             case .leftOut: library.selectionView = .leftOut; library.destination = .step(.selection)
             }
         }

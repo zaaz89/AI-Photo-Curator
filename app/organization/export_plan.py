@@ -23,8 +23,9 @@ owner marked favourite is never skipped and goes to Selected/ (M9: keep more tha
 one frame of a moment).
 
 plan['counts'] accounts for every present file exactly once:
-  taken == left_out + blurry + not_selected + extra_frames + in_album
-left_out = marked "left out" by the owner; blurry = removed by selection no_blurry;
+  taken == left_out + screenshots + blurry + not_selected + extra_frames + in_album
+left_out = marked "left out" by the owner; screenshots = screen captures left out of the album selections
+(no_blurry, best) unless the owner keeps them (keep or favourite; 'all' keeps them); blurry = removed by selection no_blurry;
 not_selected = removed by selection best; extra_frames = other frames of a moment
 (skipped duplicates); in_album = len(entries). A paired secondary file (Live Photo
 video, RAW or JPEG partner) is counted as one file and follows its primary: when the
@@ -178,6 +179,16 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
                 why[r['id']] = 'left_out'
         rows = [r for r in rows if r['id'] not in why]
         warnings['rejected by you'] = before - len(rows)
+    if selection in ('no_blurry', 'best'):
+        from app.quality.screenshots import screenshot_ids
+        shots = screenshot_ids(conn) - kept_too
+        if shots:
+            before = len(rows)
+            for r in rows:
+                if r['id'] in shots or pairs.get(r['id']) in shots:
+                    why[r['id']] = 'screenshot'
+            rows = [r for r in rows if r['id'] not in why]
+            warnings['screenshots left out'] = before - len(rows)
     excluded_by_selection = 0
     if keep_only is not None or blurry:
         before = len(rows)
@@ -259,14 +270,16 @@ def plan_export(conn, template: str = 'default', folders: str = 'day', duplicate
         warnings[f'left out by selection ({selection})'] = excluded_by_selection
     entries.sort(key=lambda e: (e['dest'].lower()))
     reasons = Counter(why.values())
-    counts = {'taken': taken, 'left_out': reasons['left_out'], 'blurry': reasons['blurry'],
+    counts = {'taken': taken, 'left_out': reasons['left_out'], 'screenshots': reasons['screenshot'],
+              'blurry': reasons['blurry'],
               'not_selected': reasons['not_selected'], 'extra_frames': reasons['extra_frames'],
               'in_album': len(entries)}
     counts['extra_frames'] += taken - (sum(counts.values()) - taken)    # safety net: the identity always holds
     # The same by photo, as the owner sees it: a paired secondary (Live Photo video, RAW partner) is not
     # counted on its own; it goes wherever its primary goes.
     photo_reasons = Counter(v for k, v in why.items() if k not in pairs)
-    photo_counts = {'taken': taken_photos, 'left_out': photo_reasons['left_out'], 'blurry': photo_reasons['blurry'],
+    photo_counts = {'taken': taken_photos, 'left_out': photo_reasons['left_out'],
+                    'screenshots': photo_reasons['screenshot'], 'blurry': photo_reasons['blurry'],
                     'not_selected': photo_reasons['not_selected'], 'extra_frames': photo_reasons['extra_frames'],
                     'in_album': sum(1 for e in entries if e['paired_with'] is None)}
     photo_counts['extra_frames'] += taken_photos - (sum(photo_counts.values()) - taken_photos)

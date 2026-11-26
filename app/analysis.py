@@ -1,4 +1,4 @@
-"""Full pipeline for a collection: index -> capture times -> clocks -> duplicates."""
+"""Full pipeline for a collection: index -> screenshots -> capture times -> clocks -> duplicates."""
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -13,6 +13,8 @@ def analyze_collection(conn, progress: Optional[Callable] = None,
     res = index_collection(conn, progress, cancelled)
     if cancelled():
         return res
+    from app.quality.screenshots import detect as detect_screenshots
+    res['screenshots'] = detect_screenshots(conn)
     res['clocks'] = sync_clocks(conn, progress, cancelled)
     from app.places.places import assign_places
     from app.timeline.event_detector import detect_events
