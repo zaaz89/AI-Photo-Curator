@@ -23,8 +23,10 @@ private func moment(_ id: Int, _ frames: [Int], best: Int? = nil, margin: Double
 // MARK: moments and ordering
 
 @Test func momentFromTheEngineAndConfidence() throws {
-    let json = #"{"id": 7, "category": "near", "keeper_id": 12, "reasons": {"keeper": ["sharpest frame", "a recommendation, not a rule"], "margin": 0.03},
-                 "members": [{"id": 11, "path": "/a"}, {"id": 12, "path": "/b"}, {"id": 12, "path": "/b"}]}"#
+    let json = #"""
+        {"id": 7, "category": "near", "keeper_id": 12, "reasons": {"keeper": ["sharpest frame", "a recommendation, not a rule"], "margin": 0.03},
+         "members": [{"id": 11, "path": "/a"}, {"id": 12, "path": "/b"}, {"id": 12, "path": "/b"}]}
+        """#
     let m = SurveyMoment(try JSONDecoder().decode(MomentGroup.self, from: Data(json.utf8)))
     #expect(m.frames == [11, 12] && m.recommended == 12 && m.reasons == ["sharpest frame"])
     #expect(m.confidence == .low && m.isCloseCall)
