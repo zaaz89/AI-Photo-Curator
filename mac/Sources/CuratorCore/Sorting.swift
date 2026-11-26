@@ -50,39 +50,64 @@ public struct StageFlow: Sendable {
     public var days: [(day: String, origin: CGPoint)] = []
     public var tileHeight: CGFloat = 0
     public var height: CGFloat = 0
+    /// Everything fits the rect at `minHeight` or more (M14c). When false the stage shows its scrolling grid
+    /// instead, so photos never run over the trays below.
+    public var fits = true
     public init() {}
 }
 
 /// Days flow one after another like words in a paragraph: a day begins with its label above its first photo,
-/// a wider gap separates days, rows wrap. The tile height is the largest (up to `maxHeight`) that fits `rect`;
-/// below `minHeight` the flow grows past the bottom instead of shrinking further.
+/// a wider gap separates days, rows wrap. The tile height is the largest (up to `maxHeight`) that fits `rect`.
+/// M14c: only a row where a day begins reserves the label's height, and the gaps shrink with small tiles, so
+/// more photos fit before the stage gives up; below `minHeight` the result says `fits == false` (laid out at
+/// `minHeight`, taller than the rect) and the caller must scroll or clip instead of drawing over what is below.
 public func stageFlow(_ items: [StageItem], in rect: CGRect, maxHeight: CGFloat, minHeight: CGFloat = 28,
                       gap: CGFloat = 8, dayGap: CGFloat = 30, labelHeight: CGFloat = 24, rowGap: CGFloat = 12) -> StageFlow {
     func place(_ h: CGFloat) -> StageFlow {
         var out = StageFlow()
         out.tileHeight = h
-        var x: CGFloat = 0, y: CGFloat = 0, lastDay: String?
+        let g = min(gap, max(3, h * 0.12)), rg = min(rowGap, max(4, h * 0.2))
+        // Pass 1: rows (x positions only).
+        struct Cell { let id: Int; let x: CGFloat; let w: CGFloat; let day: String? }
+        var rows: [[Cell]] = [[]]
+        var x: CGFloat = 0, lastDay: String?
         for it in items {
             let w = min(rect.width, h * CGFloat(max(0.4, min(2.5, it.aspect))))
             let newDay = it.day != lastDay
-            let lead: CGFloat = x == 0 ? 0 : (newDay ? dayGap : gap)
+            let lead: CGFloat = x == 0 ? 0 : (newDay ? dayGap : g)
             if x > 0 && x + lead + w > rect.width {
-                x = 0; y += labelHeight + h + rowGap
+                rows.append([]); x = 0
             } else {
                 x += lead
             }
-            if newDay { out.days.append((it.day, CGPoint(x: rect.minX + x, y: rect.minY + y))); lastDay = it.day }
-            out.slots[it.id] = CGRect(x: rect.minX + x, y: rect.minY + y + labelHeight, width: w, height: h)
+            rows[rows.count - 1].append(Cell(id: it.id, x: x, w: w, day: newDay ? it.day : nil))
+            if newDay { lastDay = it.day }
             x += w
         }
-        out.height = items.isEmpty ? 0 : y + labelHeight + h
+        // Pass 2: a row with a day label is taller by the label.
+        var y: CGFloat = 0
+        for (i, row) in rows.enumerated() where !row.isEmpty {
+            let label = row.contains { $0.day != nil } ? labelHeight : 0
+            for c in row {
+                if let d = c.day { out.days.append((d, CGPoint(x: rect.minX + c.x, y: rect.minY + y))) }
+                out.slots[c.id] = CGRect(x: rect.minX + c.x, y: rect.minY + y + label, width: c.w, height: h)
+            }
+            y += label + h
+            if i < rows.count - 1 { y += rg }
+        }
+        out.height = items.isEmpty ? 0 : y
         return out
     }
     guard !items.isEmpty, rect.width > 0 else { return StageFlow() }
     let top = place(maxHeight)
     if top.height <= rect.height { return top }
     var lo = minHeight, hi = maxHeight
-    if place(lo).height > rect.height { return place(lo) }
+    let floor = place(lo)
+    if floor.height > rect.height {
+        var f = floor
+        f.fits = false
+        return f
+    }
     for _ in 0..<18 {
         let mid = (lo + hi) / 2
         if place(mid).height <= rect.height { lo = mid } else { hi = mid }

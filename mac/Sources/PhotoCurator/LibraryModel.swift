@@ -878,7 +878,12 @@ enum SelectionView: String, CaseIterable, Identifiable {
                 if self.job.running, let id = self.tripId, self.job.collection == id, self.pollCount % 4 == 0 {
                     self.overview = (try? await self.api.overview(trip: id)) ?? self.overview
                     // New photos were read: show them while the rest of the analysis runs.
-                    if let n = self.overview?.facts.photos, n != self.photos.count { await self.reload() }
+                    if let n = self.overview?.facts.photos, n != self.photos.count {
+                        await self.reload()
+                    } else if analysisStatus(self.job)?.phase == .reading {
+                        // M14c: the folder chips say which folder is read, which waits (`read_state`).
+                        self.sources = (try? await self.api.sources(trip: id)) ?? self.sources
+                    }
                 }
                 self.pollCount += 1
                 let wait = eventPollInterval(running: self.job.running, morePending: false) ?? 4.0
@@ -893,7 +898,15 @@ enum SelectionView: String, CaseIterable, Identifiable {
     private func pollOnce() async {
         guard let tripId, let s = try? await api.jobStatus(trip: tripId) else { return }
         let wasRunning = job.running
+        let before = job.collection == tripId ? analysisStatus(job)?.phase : nil
         if s.collection == nil || s.collection == tripId || s.running { if job != s { job = s } }
+        // M14c: capture times exist from the clocks phase on, corrected ones from places on. Fetch the photos at
+        // these phase changes, so the stage groups them by their real day before the first event arrives (they
+        // were last fetched while the folders were read, without times: every photo was "No date").
+        if job.collection == tripId, reloadsPhotos(from: before, to: analysisStatus(job)?.phase) {
+            overview = (try? await api.overview(trip: tripId)) ?? overview
+            await reload()
+        }
         // A job that ended between two polls is still noticed here (export result, reload).
         if wasRunning && !job.running {
             await pollEvents()                                   // the last events (final keepers) before the reload

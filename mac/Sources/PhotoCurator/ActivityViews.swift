@@ -50,36 +50,48 @@ struct AIRing: View {
 }
 
 /// Toolbar capsule: what the engine is doing right now, with a live percentage. Click for details.
+/// M14c: the words and the percentage come from the same status as the stage header (`analysisStatus`), and the
+/// pill steps aside while that header is on screen, so the window never shows two readings of one job.
 struct ActivityPill: View {
     @EnvironmentObject var library: LibraryModel
     @State private var showDetails = false
 
+    var stageOnScreen: Bool { library.destination == .journey && library.shownStation == .analysis }
+
     var body: some View {
         let job = library.job, phase = job.phase
-        Button { showDetails.toggle() } label: {
-            HStack(spacing: 8) {
-                AIRing(symbol: phase.symbol, size: 22, spinning: job.running, progress: job.running ? job.progress / 100 : nil)
-                if job.running || phase == .failed {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(library.tr("phase_" + phase.rawValue)).font(.callout.weight(.semibold)).lineLimit(1)
-                        if let c = job.counter {
-                            Text("\(c.done) / \(c.total)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                                .contentTransition(.numericText(value: Double(c.done)))
+        let fraction = activityFraction(job)
+        let title = activityTitle(job, library.lang)
+        Group {
+            if showsActivityPill(analysingShownAlbum: library.analysing, stageOnScreen: stageOnScreen) {
+                Button { showDetails.toggle() } label: {
+                    HStack(spacing: Space.m) {
+                        AIRing(symbol: phase.symbol, size: 22, spinning: job.running, progress: job.running ? fraction : nil)
+                        if job.running || phase == .failed {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(title).font(.callout.weight(.semibold)).lineLimit(1)
+                                if let c = job.counter {
+                                    Text("\(c.done) / \(c.total)").font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                                        .contentTransition(.numericText(value: Double(c.done)))
+                                }
+                            }
+                            if job.running {
+                                Text("\(Int((fraction * 100).rounded()))%").font(.callout.weight(.semibold)).monospacedDigit()
+                                    .contentTransition(.numericText(value: fraction))
+                                    .motionAnimation(.settle, value: fraction)
+                            }
                         }
                     }
-                    if job.running {
-                        Text("\(Int(job.progress))%").font(.callout.weight(.semibold)).monospacedDigit()
-                            .contentTransition(.numericText(value: job.progress))
-                            .motionAnimation(.settle, value: job.progress)
-                    }
+                    .padding(.horizontal, job.running ? Space.s : 0)
                 }
+                .help(job.running ? job.status : library.tr("phase_idle"))
+                .accessibilityLabel(job.running ? "\(title), \(Int((fraction * 100).rounded()))%" : library.tr("phase_idle"))
+                .popover(isPresented: $showDetails, arrowEdge: .bottom) { ActivityDetails() }
+                .motionTransition(.opacity)
             }
-            .padding(.horizontal, job.running ? 6 : 0)
         }
-        .help(job.running ? job.status : library.tr("phase_idle"))
-        .accessibilityLabel(job.running ? "\(library.tr("phase_" + phase.rawValue)), \(Int(job.progress))%" : library.tr("phase_idle"))
-        .popover(isPresented: $showDetails, arrowEdge: .bottom) { ActivityDetails() }
         .motionAnimation(.arrive, value: job.running)
+        .motionAnimation(.fade, value: stageOnScreen)
     }
 }
 

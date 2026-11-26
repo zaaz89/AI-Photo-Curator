@@ -205,6 +205,13 @@ def _analysis_days(conn) -> dict:
     sorted when every photo has its quality result."""
     from app import analysis_events as ev
     try:
+        # M14c: while folders are still being read their photos have no capture time yet; every photo would count
+        # as "no date" and the album would show "day 1 of 1". Days are not known until every photo has its time.
+        untimed = conn.execute(
+            "SELECT COUNT(*) FROM assets a WHERE a.status = 'present' "
+            "AND NOT EXISTS (SELECT 1 FROM capture_time c WHERE c.asset_id = a.id)").fetchone()[0]
+        if untimed:
+            return {'days': 0, 'settled': 0}
         plan = ev.day_plan(conn)
         done = ev.settled_days(conn)
         settled = sum(1 for d, a in plan if done.get(d) == ev.signature(a))

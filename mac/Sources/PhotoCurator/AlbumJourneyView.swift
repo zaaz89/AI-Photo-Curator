@@ -269,7 +269,7 @@ struct PhotosStation: View {
     }
 
     func confirm(_ s: SourceInfo) -> (title: String, message: String, button: String) {
-        removeFolderConfirm(folderChipLabel(owner: s.owner, devices: s.devices ?? []), photos: s.assets ?? 0, library.lang)
+        removeFolderConfirm(sourceChipName(s, among: library.sources), photos: s.assets ?? 0, library.lang)
     }
 
     func dropZone(big: Bool) -> some View {
@@ -330,8 +330,9 @@ struct FolderChip: View {
         HStack(spacing: Space.l) {
             PersonBadge(name: source.owner, index: index, size: 40)
             VStack(alignment: .leading, spacing: Space.xxs) {
-                Text(folderChipLabel(owner: source.owner, devices: source.devices ?? []))
-                    .font(TypeRole.cardTitle).lineLimit(1)
+                // M14c: unique in the album ("Jarek Pawlak · Ceremony"), from the engine.
+                Text(sourceChipName(source, among: library.sources))
+                    .font(TypeRole.cardTitle).lineLimit(1).truncationMode(.middle)
                 Text(details).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: Space.s)
@@ -341,7 +342,7 @@ struct FolderChip: View {
             .buttonStyle(.plain)
             .disabled(!removable)
             .help(removable ? library.tr("removeFolderHelp") : library.tr("removeFolderBusy"))
-            .accessibilityLabel(String(format: library.tr("removeFolderA11y"), source.owner))
+            .accessibilityLabel(String(format: library.tr("removeFolderA11y"), sourceChipName(source, among: library.sources)))
         }
         .padding(Space.l)
         .card(radius: Radius.large, hover: true)
