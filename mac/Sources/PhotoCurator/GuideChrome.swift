@@ -209,6 +209,19 @@ struct StepPage<Content: View>: View {
         .frame(maxWidth: 1180 + 64, alignment: .leading).frame(maxWidth: .infinity)
     }
 
+    /// Next step (or Back to album on the last step and on People & Clocks); ⌘Return.
+    var nextButton: some View {
+        Button {
+            withMotion(.settle) { if let step { library.finishStep(step) } else { library.finishPeople() } }
+        } label: {
+            Label(step?.next.map { String(format: library.tr("nextStep"), library.tr("step_" + $0.rawValue)) } ?? library.tr("backToAlbum"),
+                  systemImage: step?.next == nil ? "house" : "chevron.right")
+                .labelStyle(TrailingIconLabel())
+                .padding(.horizontal, 6)
+        }
+        .keyboardShortcut(.return, modifiers: .command)
+    }
+
     var bottomBar: some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 12) {
@@ -224,16 +237,13 @@ struct StepPage<Content: View>: View {
                         .padding(.horizontal, 6)
                         .contentTransition(.numericText())
                 }
-                Button {
-                    withMotion(.settle) { if let step { library.finishStep(step) } else { library.finishPeople() } }
-                } label: {
-                    Label(step?.next.map { String(format: library.tr("nextStep"), library.tr("step_" + $0.rawValue)) } ?? library.tr("backToAlbum"),
-                          systemImage: step?.next == nil ? "house" : "chevron.right")
-                        .labelStyle(TrailingIconLabel())
-                        .padding(.horizontal, 6)
+                // One primary action per screen (M12e, #16): on Export the page's own Export button is the primary,
+                // so "Back to album" is secondary there.
+                if step == .export {
+                    nextButton.buttonStyle(.glass).controlSize(.large)
+                } else {
+                    nextButton.buttonStyle(.glassProminent).controlSize(.large)
                 }
-                .buttonStyle(.glassProminent).controlSize(.large)
-                .keyboardShortcut(.return, modifiers: .command)
             }
         }
     }

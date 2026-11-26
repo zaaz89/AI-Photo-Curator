@@ -205,3 +205,59 @@ Fixes (minimal, no design changes): M12b `scripts/check-design-tokens.sh` used `
 Results: M12b 67 Swift tests, M12c 74 Swift tests, all pass, no warnings in changed files; `scripts/build-mac-app.sh` OK on both; `uv run pytest` 156 passed; token check OK.
 PRs: #16 "M12b: design system + UX audit" (base `claude/m12-sorting-stage`), #17 "M12c: UX P0 fixes" (base `claude/m12b-design-system`). Merge in order #15, #16, #17.
 Open: nothing was looked at in the app. Visual checks are listed in each PR (stage timing with named springs, new status colours in light/dark, Reduce Motion, "Left out" wording, stopped/failed states, Skip, grid above 400, undo toast, VoiceOver).
+
+### 2026-11-24 — M12d: UX audit P1 for Quick Review and compare (#9, #11, #12, #18, #19) (Claude (Cowork))
+Branch `claude/m12d-ux-p1` (on top of M12c). Another agent edits the grid, stage, export, album home and menus in
+parallel; this one only touched Quick Review, a new compare view, and minimal hooks in Selection and LibraryModel.
+- #12 + #19 Real 100%: Z now toggles (no key-up to lose) between the whole photo and 100% of the original, decoded with
+  ImageIO (`CGImageSourceCreateThumbnailAtIndex` at full size, orientation applied, read only) off the main thread, only
+  for the photo on screen. Centred on the largest main face (no saliency in the model yet), drag pans, the 2048 px
+  thumbnail is shown enlarged with a spinner until the original is ready, and stays with a note if it can't be decoded.
+  Resets on photo change, focus loss and scene-phase change. `PhotoCurator/ZoomablePhoto.swift`, maths in
+  `CuratorCore/ReviewZoom.swift` (`ZoomMath`).
+- #11 Compare: `PhotoCurator/CompareView.swift` + `CompareSession` (CuratorCore). Keeper left, challenger right, synced
+  zoom and pan (one shared centre), 1/2 pick through `LibraryModel.keep(group:photo:)` (the call Selection uses),
+  ←/→ cycle the challenger, Esc or C exits. Opened with C or the "Compare" button in Quick Review's moment panel, and
+  from Selection's moment card ("Compare", `LibraryModel.startCompare(group:)`: the quick review opens on the compare
+  view and closes with it; Selection reloads its moments after pending writes).
+- #9 VoiceOver: main photo label = `gridTileAccessibilityLabel`; value = zoom state + decision while it flashes;
+  named actions keep / leave out / skip / back / zoom / compare; announcement after each decision ("Kept, 12 of 80"),
+  after Back and after a pick. Keys not in the keymap (up/down, anything with ⌘⌥⌃) are no longer swallowed.
+- #18 (review side): `ReviewKeymap` in CuratorCore, used by Quick Review, compare, the automation channel and the
+  keys card; documented in `notes/m12b-design-system.md` ("Review keymap"). Grid side left to the other agent.
+- Reduce Motion: the decision flash scales only without Reduce Motion (cross-fade with it); the photo leaves in the
+  direction of its key (→ / ←) only without Reduce Motion.
+- Automation keys added: `compare`, `pick1`, `pick2`. 26 new strings EN + SL, `keyZoom` reworded (toggle, not hold).
+Tests: `ReviewKeymapTests.swift` (12 tests: keymap, pass-through, keys card, announcements, zoom target/fit/100%/clamp/
+pan, compare cycling and picks). Token check OK (cornerRadius 34 → 33, baseline not lowered to avoid a conflict with the
+parallel branch).
+NOT compiled, NOT run (Linux container, no Swift toolchain): run `scripts/test-mac.sh` and `scripts/build-mac-app.sh`.
+Check visually (test-10, near-duplicate pair): Z on a Sony A7 IV file shows real 100% (pixel-sharp, not the blurry
+thumbnail), spinner then sharp; centred on the face; drag pans and stops at the edges; Z again fits; zoom resets after
+→, after Cmd+Tab and after clicking the filter picker. C on the pair: two panes, Z zooms both on the same spot, drag in
+one pans both, ← → change the right frame, 2 makes it the keeper (badge moves left, Selection shows "chosen by you"
+after closing), Esc returns. Selection → "Compare" → Esc returns to Selection. Reduce Motion on: flash and photo change
+cross-fade. VoiceOver: the photo reads file, time, owner, status; Kept/Left out is announced; VO-arrows still move.
+Memory: a 61 MP original is about 240 MB while zoomed (two in compare); check Activity Monitor on the 236 folder only if
+the owner asks.
+
+### 2026-11-24 — M12e: UX audit P1, flow (#8, #10, #13 to #17, #20 to #22) (Claude (Cowork))
+Branch `claude/m12e-ux-p1-flow` (on top of compiled M12c). Source: rows 8, 10, 13 to 17, 20 to 22 of `notes/m12b-ux-audit.md`. QuickReview.swift and Thumbnails.swift not touched (another agent works there in parallel).
+- #8 Errors: `CuratorCore/FlowUX.swift` maps engine texts and HTTP codes to `ErrorKind` + a human sentence (`humanError`, EN + SL), raw text kept for Details. New `DesignSystem/ErrorBanner.swift`: sticky (no timer), Details disclosure, Try Again when an action exists, Dismiss, VoiceOver announcement. `LibraryModel.report(_:retry:)` replaces every `message = describe(error)`; `message` stays for info (now also announced). `stopJob` failures are shown, not swallowed. Engine start failure is `EngineStartFailure` (localised, path only in Details); the UI language is remembered in UserDefaults so the start screen is in Slovenian before the engine answers. "Engine" copy → "background service" / "storitev v ozadju".
+- #10 Reduce Motion: `.motionTransition(_:)` (DesignSystem/Motion.swift) turns slides, pushes and scales into a cross-fade; used for the stage header push, source chips, verdict and stack badges, message/error banners, selection bar, undo toast, grid heart, wizard rows. `ScanBand` is a still highlight under Reduce Motion. Selection frame scale is off under Reduce Motion.
+- #13 Tray: cells 150 pt high, 3 columns, popover 680 wide; arrows move focus (↑/↓ by a row), Space opens Quick Look on the focused photo, double-click too; focus ring drawn in accent.
+- #14 Stage: settled album tiles are focusable (Tab), arrows move, Space = Quick Look, Return = same as a click; a click on an album tile now opens Quick Look (was a dead end). Large-album grid tiles too.
+- #15 Guide menu follows the flow: Home ⌘0, People & Clocks ⌘1, Sorting ⌘2 (new), Selection ⌘3, Story ⌘4, Export ⌘5, Settings; All Photos ⌘6, Left Out ⌘7 (`FlowPage.menuDigit`, decoupled from `GuideStep.number`). Sidebar Guide section in the same order (People & Clocks moved up from Library). Copy: "Three steps to the album" → "Steps to the album"; unused "of 7 steps" and "Album Steps" keys removed; "noTripsText" no longer points to "Album Steps".
+- #16 One primary per screen: toolbar Export not prominent; Selection's Quick Review is `.glass`; on Export the bottom bar's "Back to album" is `.glass` (Export button is the primary); on Home the stage link moved into the funnel card.
+- #17 Funnel "screenshots" opens the Left out tray (`library.openTray(.removed)` → stage opens the popover). "Have a look" tray button is "Review These Photos" and calls `library.startReview(.decisions, ids:)`. INTEGRATION NEEDED: QuickReview.swift must take the subset: in `.onAppear` use `begin(filter, ids: library.takeReviewSubset())` instead of `begin(filter, ids: nil)`; until then it starts the normal Decisions review (which contains those photos).
+- #18 (keys only): grid K = keep in album, X = leave out (no longer a toggle), Space = Quick Look, Esc closes Quick Look first then clears the selection, ⌘Z undo; listed in the Photo menu. `gridKeyAction` in CuratorCore. Should match `ReviewKeymap` from the parallel branch (→/K keep, ←/X leave out).
+- #20 Export: Cancel Export next to the progress (engine now honours cancel for exports: `_run_smart_export` stops between files, status "Cancelled"; test added), "Export cancelled" state, preview failure shows the error with Try Again (no endless spinner), job errors are human text with Details and Try Again.
+- #21 Grid badge "Screenshot" / "Document" (icon + text) with the reason as tooltip and in the VoiceOver label; blurry tier badge gets the reason as tooltip (`autoBadge` in CuratorCore).
+- #22 "Finish Album…" → "Clear Working Data…", title "Clear working data for “X”?" with "Not exported yet." first when not exported, button "Clear Data", body leads with the consequence.
+- Strings: 30 new, 13 changed, 2 removed (EN + SL). Tests: `FlowUXTests.swift` (9 tests); `LibraryModelTests` failed-folder test now checks the banner. Token check OK, cornerRadius baseline lowered 34 → 33. Python: `uv run pytest -q` 151 passed, 4 failed (same ExifTool/GPS tests as before, no ExifTool here), 2 skipped.
+NOT compiled, Swift tests NOT run (Linux container): run `scripts/test-mac.sh` and `scripts/build-mac-app.sh` first.
+Check visually (test-10): error banner (stop the engine, then mark a photo) in light/dark, Details and Try Again, VoiceOver reads it; start screen when the engine fails, in Slovenian; Reduce Motion on: stage header title change, scan, badges, banners fade without sliding; stage settled: Tab into tiles, arrows, Space opens Quick Look, focus ring visible on rotated tiles; tray popover: arrows, Space, Quick Look panel opens above the popover; funnel "screenshots" opens the Left out popover; Guide menu order and ⌘2; Home with the stage link inside the funnel card; Export: Cancel mid-copy, "Export cancelled", preview error (stop engine) with Try Again; grid Screenshot/Document badges at small tile sizes; Clear Working Data dialog title.
+
+### 2026-11-24, Claude (Cowork): M12d + M12e merged into one branch
+- `claude/m12d-ux-p1` now holds both P1 halves (Quick Review/compare and flow/errors/keyboard); only conflict was this log. Wired #17: Quick Review starts with `library.takeReviewSubset()`, so "Review These Photos" in the Have a look tray reviews only the tray's photos.
+- Not compiled. Build order on the Mac: `scripts/test-mac.sh`, `scripts/build-mac-app.sh`, `uv run pytest`, `bash scripts/check-design-tokens.sh`.

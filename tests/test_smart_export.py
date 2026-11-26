@@ -135,3 +135,24 @@ def test_export_api(pc, client, H, trip, tmp_path):
             break
         time.sleep(0.05)
     assert st['error'] is None and st['result']['export']['ok']
+
+
+def test_export_cancel_stops_between_files(trip, tmp_path):
+    """M12e: Cancel in the Mac app stops an export between two files; the job ends as Cancelled, not an error."""
+    from app.web import timeline_bp as tb
+    src, conn, slug = trip
+    dest = tmp_path / 'cancel-out'
+    dest.mkdir()
+    saved = dict(tb._job)
+    try:
+        tb._job.update(running=True, collection=slug, kind='export', status='Preparing export…', progress=0,
+                       result=None, error=None, cancel=True)
+        tb._run_smart_export(slug, tb._export_options({}), str(dest), None)
+        assert tb._job['running'] is False
+        assert tb._job['error'] is None and tb._job['status'] == 'Cancelled'
+        copied = [p for p in dest.rglob('*') if p.is_file() and p.name != 'manifest.json']
+        assert copied == []                                  # stopped before the first copy
+        assert sorted(p.name for p in src.iterdir())         # the source folder is untouched
+    finally:
+        tb._job.clear()
+        tb._job.update(saved)

@@ -35,11 +35,17 @@ struct MainWindow: View {
                         if library.selection.count > 1 {
                             SelectionBar(newEvent: $newEvent)
                                 .padding(.bottom, 18)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .motionTransition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
                 }
-                .overlay(alignment: .top) { MessageBanner() }
+                .overlay(alignment: .top) {
+                    VStack(spacing: Space.m) {
+                        ErrorBannerHost()
+                        MessageBanner()
+                    }
+                }
+                .motionAnimation(.arrive, value: library.errorBanner)
                 .motionAnimation(.arrive, value: library.selection.count > 1)
                 .sheet(isPresented: $newEvent) { NewEventSheet() }
                 .sheet(item: $library.sheet) { s in
@@ -80,8 +86,8 @@ struct MainWindow: View {
                 .help(library.tr("quickReviewHelp"))
         }
         ToolbarItem {
+            // Not prominent (M12e, #16): each page has its own primary action; this is a shortcut to Export.
             Button { library.destination = .step(.export) } label: { Label(library.tr("export"), systemImage: "square.and.arrow.up") }
-                .buttonStyle(.glassProminent)
                 .help(library.tr("exportHelp"))
         }
         if !library.destination.isGuide {
@@ -162,7 +168,11 @@ struct Sidebar: View {
     var body: some View {
         List(selection: Binding(get: { library.destination }, set: { if let d = $0 { library.destination = d } })) {
             Section(library.tr("guide")) {
+                // In the order of the flow (M12e, #15), the same as the Guide menu.
                 Label(library.tr("albumHome"), systemImage: "house").tag(Destination.home)
+                Label(library.tr("step_photos"), systemImage: "person.2")
+                    .badge(library.clocksWaiting)
+                    .tag(Destination.people)
                 Label(library.tr("stage"), systemImage: "sparkles.rectangle.stack").tag(Destination.sorting)
                 ForEach(GuideStep.allCases) { s in
                     let st = library.stepStates[s] ?? StepState(done: false, waiting: 0)
@@ -184,9 +194,6 @@ struct Sidebar: View {
                 }
             }
             Section(library.tr("library")) {
-                Label(library.tr("step_photos"), systemImage: "person.2")
-                    .badge(library.clocksWaiting)
-                    .tag(Destination.people)
                 row(.all, "photo.on.rectangle", library.tr("allPhotos"))
                 if library.count(.blurry) > 0 { row(.blurry, "camera.aperture", library.tr("blurryNav")) }
                 row(.leftOut, "eye.slash", library.tr("leftOut"))
@@ -221,7 +228,8 @@ struct Sidebar: View {
     }
 }
 
-/// Bottom of the sidebar: finishing the album removes the app's working data, never the photos.
+/// Bottom of the sidebar: clearing the album's working data (analysis, marks, thumbnails), never the photos.
+/// Title and button say what is removed; the unexported warning comes first (M12e, #22).
 struct FinishAlbumButton: View {
     @EnvironmentObject var library: LibraryModel
     @State private var confirmFinish = false
@@ -235,12 +243,12 @@ struct FinishAlbumButton: View {
         .font(.callout)
         .disabled(library.tripId == nil || (library.job.running && library.job.collection == library.tripId))
         .help(library.tr("finishHelp"))
-        .confirmationDialog(String(format: library.tr("finishTitle"), library.albumName),
+        .confirmationDialog(finishAlbumTitle(library.albumName, exported: library.exported, library.lang),
                             isPresented: $confirmFinish, titleVisibility: .visible) {
             Button(library.tr("finishConfirm"), role: .destructive) { Task { await library.finishAlbum() } }
             Button(library.tr("cancel"), role: .cancel) {}
         } message: {
-            Text(library.exported ? library.tr("finishText") : library.tr("finishNotExported") + "\n\n" + library.tr("finishText"))
+            Text(finishAlbumText(exported: library.exported, library.lang))
         }
     }
 }
@@ -278,7 +286,8 @@ struct TripPicker: View {
     }
 }
 
-/// A short message at the top of the grid (errors, "moved to …"); fades out.
+/// A short information at the top of the page ("moved to …", "freed 50 MB"); fades out and is announced.
+/// Errors go to `ErrorBannerHost` instead, which stays until dismissed (M12e, #8).
 struct MessageBanner: View {
     @EnvironmentObject var library: LibraryModel
     var body: some View {
@@ -288,12 +297,26 @@ struct MessageBanner: View {
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .glassEffect(.regular, in: .capsule)
                 .padding(.top, 10)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .motionTransition(.move(edge: .top).combined(with: .opacity))
                 .task(id: m) {
+                    AccessibilityNotification.Announcement(m).post()
                     try? await Task.sleep(for: .seconds(4))
                     withMotion(.fade) { library.message = nil }
                 }
-                .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+}
+
+/// The sticky error banner at the top of the window (M12e, #8): human text, Details, Try Again, Dismiss.
+struct ErrorBannerHost: View {
+    @EnvironmentObject var library: LibraryModel
+    var body: some View {
+        if let e = library.errorBanner {
+            ErrorBanner(error: e.error, retry: e.retry, dismiss: { withMotion(.fade) { library.errorBanner = nil } })
+                .id(e.id)
+                .padding(.top, Space.l)
+                .padding(.horizontal, Space.xl)
+                .motionTransition(.move(edge: .top).combined(with: .opacity))
         }
     }
 }

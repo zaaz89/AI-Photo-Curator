@@ -39,6 +39,11 @@ Files:
 `library.offerUndo(.putBack, count:)` (or `offerUndo(text)`) right after an action that registered its undo; the
 toast's Undo calls the window's undo manager, so it matches Cmd+Z.
 
+`ErrorBanner` (DesignSystem/ErrorBanner.swift, M12e): the one way to show an error. Call `library.report(error, retry:)`
+(or build a `HumanError` with `humanError(...)` from CuratorCore); it shows a human sentence, the raw text behind
+"Details", Try Again when `retry` is given, and Dismiss. It never times out and is announced to VoiceOver.
+`floating: false` gives the tinted inline variant for cards (Export preview, export failure).
+
 Status colours are system colours, so light and dark appearance both work. Decorative colours (stage
 background blobs, AI glow gradient, step and person tints) are not status colours and stay where they are.
 
@@ -62,6 +67,8 @@ animation. Use:
   `@Environment(\.accessibilityReduceMotion)` when you have it; otherwise the system setting is read).
 - `Motion.animation(.quick, reduceMotion: reduceMotion)` when the view already reads the environment.
 - `Motion.ambient` only after checking Reduce Motion is off.
+- `.motionTransition(.move(edge: .top).combined(with: .opacity))` instead of `.transition(_:)` for anything that
+  slides, pushes or scales (M12e): under Reduce Motion it becomes a cross-fade. Plain `.transition(.opacity)` is fine.
 
 ## Rules for new screens (M13 onwards)
 
@@ -84,3 +91,32 @@ could not be compiled when this was written. Plan, one small PR each, compiled a
    odd values (3, 5, 7, 9, 10, 14, 18, 22) go to the nearest token.
 3. Fixed font sizes to `TypeRole`; symbol sizes that must stay fixed get named roles.
 4. After each PR: `scripts/check-design-tokens.sh --update` to lower the baseline.
+
+## Review keymap (M12d)
+
+One keymap for Quick Review and its compare view: `ReviewKeymap` in `mac/Sources/CuratorCore/ReviewKeymap.swift`
+(pure, tested in `ReviewKeymapTests.swift`). The view maps a key press to `ReviewKey`, asks
+`ReviewKeymap.command(for:modifiers:in:)` and returns `.ignored` for anything that is not the review's, so VoiceOver,
+menus and ⌘Z still get their keys (any key with ⌘, ⌥ or ⌃ is never the review's). The keys card is built from
+`ReviewKeymap.entries(_:)`, so card and keys cannot drift.
+
+Two key families (audit #18): the **review family** below acts on the one photo on screen; the **grid family**
+(PhotoGrid, Selection: X, digits, Space = Quick Look, Esc clears the selection) acts on a selection and is documented
+with the grid.
+
+| Key | Quick Review (`.single`) | Compare (`.compare`) |
+|---|---|---|
+| → / ← | keep / leave out, next photo | next / previous frame on the right |
+| ⌫ (and ⌘Z through the menu) | back, decision undone | (nothing) |
+| Space | skip | (nothing) |
+| 1 / 2 | (nothing) | left / right frame goes to the album (`LibraryModel.keep(group:photo:)`) |
+| Z | toggle 100% of the original on the main face (drag to pan) | same, both panes in sync |
+| F / E | favourite / faces large | (nothing) |
+| C | open compare for this moment | close compare |
+| ? | keys card | keys card |
+| Esc | keys card, else close the review | keys card, else close compare |
+
+Zoom (`ZoomMath`, `ReviewZoom.swift`): 100% = one image pixel on one screen pixel (`actualPixelsFactor`), centred on
+the largest main face (`target`), clamped so no empty band shows (`clamp`/`offset`), drag moves the centre (`pan`).
+The original is decoded with ImageIO off the main thread only for the photo on screen
+(`PhotoCurator/ZoomablePhoto.swift`); zoom resets on a new photo, focus loss and scene-phase change.

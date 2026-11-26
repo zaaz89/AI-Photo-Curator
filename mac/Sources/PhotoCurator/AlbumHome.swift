@@ -14,9 +14,15 @@ struct AlbumHome: View {
                     GuideEmpty(symbol: "sparkles", title: library.tr("nothingAnalysed"), text: library.tr("nothingAnalysedText"))
                 } else {
                     if library.analysing { AnalysisCard() } else { NextCard() }
-                    StageLink()
-                    SettingsStrip()
-                    if let f = library.overview?.funnel, f.taken > 0, !library.analysing { FunnelView(funnel: f) }
+                    // The link to the sorting stage lives in the funnel card once there is one (M12e, #16: fewer
+                    // competing sections on Home); while analysing it stays on its own.
+                    if let f = library.overview?.funnel, f.taken > 0, !library.analysing {
+                        SettingsStrip()
+                        FunnelView(funnel: f)
+                    } else {
+                        StageLink()
+                        SettingsStrip()
+                    }
                     StepCards()
                     Highlights()
                     PeopleRow()
@@ -265,6 +271,8 @@ struct FunnelView: View {
                     .help(library.tr("funnelHelp_" + p.kind.rawValue))
                 }
             }
+            Divider()
+            StageLink()
         }
         .padding(22)
         .card()
@@ -286,7 +294,7 @@ struct FunnelView: View {
             case .inAlbum: library.destination = .step(.export)
             case .extraFrames: library.selectionView = .moments; library.destination = .step(.selection)
             case .blurry: library.selectionView = .blurry; library.destination = .step(.selection)
-            case .screenshots: library.destination = .sorting      // the Removed tray shows them with Put back
+            case .screenshots: library.openTray(.removed)          // the Left out tray lists them with Put back (M12e, #17)
             case .leftOut: library.selectionView = .leftOut; library.destination = .step(.selection)
             }
         }

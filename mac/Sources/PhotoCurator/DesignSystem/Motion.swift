@@ -67,3 +67,20 @@ private struct MotionAnimation<V: Equatable>: ViewModifier {
         content.animation(Motion.animation(token, reduceMotion: reduceMotion), value: value)
     }
 }
+
+extension View {
+    /// `.transition(_:)` that follows Reduce Motion (M12e): with it on, a movement (slide, push, scale) becomes a
+    /// plain cross-fade, so nothing travels across the screen.
+    func motionTransition(_ transition: AnyTransition) -> some View {
+        modifier(MotionTransition(transition: transition))
+    }
+}
+
+private struct MotionTransition: ViewModifier {
+    let transition: AnyTransition
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.transition(reduceMotion ? AnyTransition.opacity : transition)
+    }
+}

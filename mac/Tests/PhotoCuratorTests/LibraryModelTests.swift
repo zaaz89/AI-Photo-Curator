@@ -140,7 +140,8 @@ extension LibraryModelTests {
         #expect(!ok)
         #expect(FakeEngine.writes.contains("DELETE /api/collections/new-album"))
         #expect(m.tripId == "a")
-        #expect(m.message?.contains("overlaps") == true)
+        #expect(m.errorBanner?.error.kind == .folderOverlap)          // a human sentence (M12e)
+        #expect(m.errorBanner?.error.details.contains("overlaps") == true)   // the engine text in Details
     }
 
     @Test func keeperChoicesAreWrittenInOrder() async {

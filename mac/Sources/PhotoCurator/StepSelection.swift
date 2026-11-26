@@ -17,7 +17,8 @@ struct StepSelection: View {
                     Button { library.startReview() } label: {
                         Label(library.tr("quickReview") + "  ⌘R", systemImage: "rectangle.stack.badge.play")
                     }
-                    .buttonStyle(.glassProminent).help(library.tr("quickReviewHelp"))
+                    // Secondary (M12e, #16): the page's primary is Next in the bottom bar.
+                    .buttonStyle(.glass).help(library.tr("quickReviewHelp"))
                 }
                 .padding(.horizontal, 8)
                 Group {
@@ -81,7 +82,11 @@ struct MomentsPanel: View {
         .onKeyPress(.downArrow) { moveMoment(1); return .handled }
         .onKeyPress(.return) { keepAndNext(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "fF")) { _ in keepToo(); return .handled }
-        .task(id: "\(library.tripId ?? "")\(library.analysing)") { await load() }
+        // Also after the quick review or compare view closes: keepers picked there show here (M12d).
+        .task(id: "\(library.tripId ?? "")\(library.analysing)\(library.reviewFilter == nil)") {
+            if library.reviewFilter == nil { await library.writesSettled() }
+            await load()
+        }
     }
 
     var list: some View {
@@ -108,6 +113,9 @@ struct MomentsPanel: View {
                         .foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
+                // M12d: the moment's frames two at a time, at 100%, 1 or 2 picks (the quick review's compare view).
+                Button { library.startCompare(group: g.id) } label: { Label(library.tr("compare"), systemImage: "rectangle.split.2x1") }
+                    .buttonStyle(.glass).controlSize(.large).help(library.tr("compareHelp")).disabled(g.members.count < 2)
                 Button(library.tr("acceptRest")) { acceptRest() }.buttonStyle(.glass).controlSize(.large)
                     .help(library.tr("acceptRestHelp"))
             }
@@ -265,6 +273,7 @@ struct MomentRow: View {
 /// One frame of a moment: the photo large, faces with eyes open or closed, focus, and the two choices.
 struct FrameColumn: View {
     @EnvironmentObject var library: LibraryModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let member: MomentGroup.Member
     let photo: Photo?
     let group: MomentGroup
@@ -288,7 +297,7 @@ struct FrameColumn: View {
                     RoundedRectangle(cornerRadius: 14).strokeBorder(Color.accentColor, lineWidth: highlighted ? 4 : 0)
                 }
                 .opacity(isKeeper || alsoKept || highlighted ? 1 : 0.82)
-                .scaleEffect(highlighted ? 1 : 0.985)
+                .scaleEffect(highlighted || reduceMotion ? 1 : 0.985)       // no size change under Reduce Motion (M12e)
                 .motionAnimation(.quick, value: highlighted)
                 .onTapGesture(count: 2) { keep() }
             HStack(spacing: 6) {
