@@ -317,3 +317,10 @@ Check visually (test-10): Stage in dark with Increase Contrast and Reduce Transp
 ### 2026-11-26, Claude (Cowork): M12f + M12g merged
 - `claude/m12f-motion-delight` holds M12f (motion, Album Home story, first run, export celebration) and M12g (P2 a11y and copy). Conflicts were only appended blocks (Strings, notes, log); 543 string keys, no duplicates; token check OK (156/32/13/0).
 - Stack: m12c (#17) → m12d (P1) → m12f (this). None of m12d/m12f compiled yet. Build m12d first, then m12f.
+
+### 2026-11-26 (later) — M12d and M12f compiled on the Mac, PRs #18 and #19 (Claude)
+Imported `claude/m12d-ux-p1` and `claude/m12f-motion-delight` from the Cowork bundle (it was in `~/Downloads`, not on the Desktop) and ran the four checks on the Mac (Xcode 27 toolchain).
+- M12d: compiled and passed as delivered, no fix commit. 95 Swift tests (86 + 9), `scripts/build-mac-app.sh` OK, `uv run pytest` 157 passed, token check OK (156/32/20/0). Three new compiler warnings in `LibraryModel.swift` (`[weak self]` inside a `Task` that captures self strongly: `runSearch`, `analyse`, `stopJob` retry closures); harmless, left as written.
+- M12f: one compile error, fixed: `ThumbnailCache.Failure` did not conform to `Error`, which `Result<NSImage, Failure>` needs (`Thumbnails.swift`). The other M12g risk spots compiled as written. 105 Swift tests (96 + 9), build OK, pytest 157 passed, token check OK (156/32/13/0), no new warnings. No rebase needed (m12d unchanged, m12f already on its tip).
+PRs: #18 "M12d: UX P1" (base `claude/m12c-ux-p0`), #19 "M12f: motion, album story, first run, P2 a11y" (base `claude/m12d-ux-p1`). Merge order: #15, #16, #17, #18, #19.
+Open: nothing was looked at in the running app; the visual checklists are in #18 and #19.
