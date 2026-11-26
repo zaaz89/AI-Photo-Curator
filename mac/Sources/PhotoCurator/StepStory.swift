@@ -11,7 +11,7 @@ struct StepStory: View {
     @State private var resetDay: DayChapters?
 
     var body: some View {
-        StepPage(step: .story, lead: library.tr("lead_story"), status: status) {
+        StepPage(title: library.tr("stepTitle_story"), symbol: "book.pages", lead: library.tr("lead_story"), status: status) {
             VStack(alignment: .leading, spacing: 30) {
                 if library.analysing && library.events.isEmpty {
                     AnalysisCard(compact: true)

@@ -194,8 +194,30 @@ def overview(conn, job: dict | None = None) -> dict:
         'events': {'events': events, 'days': days},
         'descriptions': {'done': described, 'photos': images, 'minutes_left': minutes},
         'export': {'done': bool(exported and exported[0]), 'photos': plan['photo_counts']['in_album'] if plan else 0},
+        'analysis': _analysis_days(conn),
         **_safe_album_summary(conn, plan),
     }
+
+
+def _analysis_days(conn) -> dict:
+    """M14: how many days of the album are sorted with their current photos and times (the app's journey moves
+    on from "Analysis" only when every day is). Albums analysed before M13 have no settled days: they count as
+    sorted when every photo has its quality result."""
+    from app import analysis_events as ev
+    try:
+        plan = ev.day_plan(conn)
+        done = ev.settled_days(conn)
+        settled = sum(1 for d, a in plan if done.get(d) == ev.signature(a))
+        if not done and plan:
+            missing = conn.execute(
+                "SELECT COUNT(*) FROM assets a WHERE a.status = 'present' AND a.kind = 'image' "
+                "AND NOT EXISTS (SELECT 1 FROM quality q WHERE q.sha256 = a.sha256)").fetchone()[0]
+            analysed = conn.execute("SELECT COUNT(*) FROM quality").fetchone()[0]
+            if missing == 0 and analysed > 0:
+                settled = len(plan)
+        return {'days': len(plan), 'settled': settled}
+    except Exception:
+        return {'days': 0, 'settled': 0}
 
 
 def _plan(conn):

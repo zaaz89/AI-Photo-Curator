@@ -358,3 +358,67 @@ Bench (test-10 only, share 30 %, helper present, no ffmpeg): `bench.sh` needs a 
 - Reading: per-day is slower on 10 files over 7 days because faces start once per day (~0.65 s each, expected in `notes/m13-scale.md`); engine peak memory is less than half. The §1 budgets (3,000 set) are still not measured.
 Merges into main, merge commits, each next PR retargeted to main, then `git pull` and both test suites: #15 (Swift 63, pytest 156), #16 (67, 156), #17 (74, 156), #18 (95, 157), #19 (105, 157), #20 (115, 163). All passed. Branches were not deleted.
 Open: nothing was looked at in the running app (visual checklists in #16 to #20); the 3,000-file bench and the §1 budgets only when the owner asks.
+
+### 2026-11-26 — M14a: one album, one path (Claude (Cowork))
+Branch `claude/m14-album-journey` (base: M13). Owner feedback: the steps were not understandable, after adding folders
+the next step was unclear, no quick way to remove albums, folders or a whole album. Design, state table, flows, what
+moved where: `notes/m14a-journey.md`. Brief §12 has the IA decision.
+- IA: the sidebar lists only albums (cover, name, one status line, progress ring while analysing; "+ New Album" on
+  top; context menu Rename / Add Folder… / Show in Album › All Photos, Left Out / Remove Album…; ⌫ and ⌘⌫). An album
+  is one path with four stations (Photos → Analysis → Questions → Album): a slim rail on top (completed stations
+  reopen) and ONE primary button at the bottom ("Start", "Answer 6 questions", "Export 187 photos", "Open Folder").
+  All Photos, Left Out, Favourites, Videos, Blurry, days, Moments, Chapters, People & Clocks moved to the toolbar's
+  View menu. Empty state: one big New Album and a folder drop zone.
+- CuratorCore `AlbumJourney.swift` (pure): `JourneyStation`, `JourneyInput` (Codable, cached per album for the
+  sidebar), `JourneyAction`, `AlbumJourney` (current station, action, questions, status, labels, ring progress,
+  canOpen / shown), `completedStations`, `questionsEstimate`, `removeAlbumConfirm`, `removeFolderConfirm`,
+  `folderChipLabel`; plural words `.question`, `.photoObject` (SL accusative). `AlbumJourneyTests.swift`: 21 tests.
+- Stations: 1 folder chips (person · camera, × with confirmation, drop / Add Folder, clocks line only asks when
+  unsure); 2 the Sorting stage as is (its own Next / Resume buttons removed, the primary bar does it); 3 card stack
+  "6 questions · about 2 min", primary = quick review of exactly those photos (unclear moments' frames + Have a look),
+  Accept the Rest (undoable), auto-advance with "No questions: every photo was clear."; 4 cover + export inline (no
+  own button; `requestExport`) + days, Done card with Export Again… and Clear Working Data….
+- New Album no longer opens a wizard: it makes an empty album on station 1; the owner per folder and the album name
+  come from the folders (same engine suggestion as the wizard; camera memory kept). Start begins the analysis.
+  Adding folders after Start re-opens questions and the export mark. Closing the window while analysing keeps the
+  app working (`AppDelegate.keepWorking`); it quits when the analysis ends with no window.
+- Engine: `DELETE /api/collections/<id>/sources/<sid>` (`collections.remove_source` + `rebuild_changed_days`; rows
+  only, shared content keeps its analysis and marks, no file is opened or touched, 409 while running);
+  `GET …/sources` lists `devices`; `GET …/overview` has `analysis: {days, settled}`. `DELETE /api/collections/<id>`
+  unchanged, now tested for thumbnails and events too.
+- Motion: station change = horizontal settle + cross-fade (direction from the rail), rail pill slides
+  (`matchedGeometryEffect`), station-complete check bounce + ring ≤ 0.6 s (never blocks), primary label
+  `contentTransition`, sidebar ring and status roll, new album row arrives. Reduce Motion: cross-fades, check only.
+- Removed (dead after the change): AlbumHome (kept `AlbumHero`, now `AlbumHero.swift`), NewAlbumWizard, StepBar and
+  the step bottom bar, old Sidebar / TripPicker / FinishAlbumButton, StageLink, GuideStep, stepStates, nextStep,
+  clocksWaiting, FlowPage, finishAlbumTitle/Text, finishStep / finishPeople / createAlbum / finishAlbum, AssistantSheet;
+  49 strings only they used. Tests updated (GuideTests, FlowUXTests, StringsTests, LibraryModelTests: new album,
+  remove folder, remove album). 96 new strings EN + SL in `// M14a journey`, no duplicates; every used key exists
+  (checked with the test's own regex). Token check OK and ratcheted down: padding 156→110, cornerRadius 32→27,
+  fontSystemSize 13→5, animationCurve 0.
+Tests: `uv run pytest -q` 168 passed (163 + 5 new in `tests/test_m14_journey.py`, incl. a byte-snapshot check that
+removing a folder and removing an album touch no source file). ExifTool installed in the container.
+NOT compiled, Swift tests NOT run (Linux): run `scripts/test-mac.sh`, `scripts/build-mac-app.sh`. Compile-risk spots:
+`AnyTransition.offset` inside `.asymmetric` in `motionTransition` (AlbumJourneyView); `.onChange(of: Key(...))`;
+`List(selection:)` with a custom `Binding<String?>` plus `.simultaneousGesture` on rows; `.alert` with a TextField
+(rename); `Section` titles inside the toolbar `Menu`; `CommandGroup(replacing: .newItem)` and
+`.keyboardShortcut(.delete, modifiers: .command)`; `AppDelegate.keepWorking` + `NSApp.terminate` in `pollOnce`;
+`CuratorCore.albumName(...)` qualified because `LibraryModel.albumName` shadows it; `journey` property next to
+`journeyOf(_:)`; `ForEach(Array(photos.prefix(3).enumerated().reversed()), id: \.element.id)` in `CardStack`.
+Visual checklist (test-10, window capture, no synthetic input; `photocurator://go?page=photos|analysis|questions|album|moments|chapters`):
+1. No album: empty state with New Album and drop zone; drop `test-photos` → album arrives in the sidebar, chips show
+   "Žaž · ILCE-7M4" style labels, name becomes place + dates; Start → rail moves to Analysis with the check bounce.
+2. Analysis: stage full width between rail and bar; bar "Analysing · day 1 of 1", button disabled with the reason;
+   sidebar ring fills; close the window → app keeps running; it quits when done (reopen from Dock first to check).
+3. Questions (test-10 has one near-duplicate pair): "1 question" or more, card stack of real photos, Answer → quick
+   review of only those, finishing it moves the rail to Album; Accept the Rest shows the undo toast.
+4. Album: cover, export choices, primary "Export N photos" follows the Best count; export → celebration, Done card,
+   primary Open Folder; sidebar "Exported" with a check.
+5. Rail: click Photos / Analysis while on Album: content slides left / right, pill slides; Album not clickable before
+   reached; ⌘1 … ⌘4. Reduce Motion: cross-fades only.
+6. × on a chip → confirmation text, folder gone, days re-sorted, photos count drops; files in `test-photos` unchanged.
+7. Sidebar ⌫ / context menu Remove Album… → confirmation text (not exported warning first), album gone, next opens.
+8. View menu: All Photos, Left Out (⌘L), Moments, Chapters, People & Clocks; Esc / Back to Album returns to the path.
+9. Dark and light, Increase Contrast; VoiceOver on rail stations ("2. Analysis, current") and sidebar rows.
+Open: Dock reopen after closing during an analysis; ⌘⌫ inside text fields; a removed folder's cached thumbnails stay
+until the album is removed (the route never touches files); `funnelParts` stays in CuratorCore without a view.

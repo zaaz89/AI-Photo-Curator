@@ -26,7 +26,6 @@ import Testing
     keys.formUnion(["reading", "quality", "faces", "other", "reveal", "moments"].map { "stagePhase_" + $0 })
     keys.formUnion(["putBack", "leaveOut", "keptInAlbum"].map { "toast_" + $0 })
     keys.formUnion(EngineSettings.strictnessLevels.flatMap { ["strict_" + $0, "strictText_" + $0] })
-    for s in GuideStep.allCases { keys.formUnion(["step_", "stepTitle_", "action_", "nextText_"].map { $0 + s.rawValue }) }
     keys.formUnion(["inAlbum", "extraFrames", "blurry", "leftOut"].flatMap { ["funnel_" + $0, "funnelHelp_" + $0] })
     keys.formUnion(ExportKind.allCases.flatMap { ["exportKind_" + $0.rawValue, "exportKindText_" + $0.rawValue] })
     keys.formUnion(["day", "event", "date", "place", "flat"].map { "folders_" + $0 })

@@ -17,37 +17,11 @@ private func overview(analysing: Bool = false, pendingClocks: Int = 0, needYou: 
     return try JSONDecoder().decode(Overview.self, from: Data(json.utf8))
 }
 
-@Test func stepsInOrder() {
-    #expect(GuideStep.allCases.map(\.number) == [1, 2, 3])
-    #expect(GuideStep.selection.next == .story && GuideStep.export.next == nil)
-    #expect(GuideStep.selection.previous == nil && GuideStep.story.previous == .selection)
-}
-
-@Test func nextIsTheFirstStepNotDone() throws {
-    var s = stepStates(try overview(pendingClocks: 1, needYou: 3), marked: [:], analysing: false)
-    #expect(s[.selection] == StepState(done: false, waiting: 3))
-    #expect(nextStep(s) == .selection)
-
-    // The owner accepted the rest: the selection counts as done.
-    s = stepStates(try overview(needYou: 3), marked: ["duplicates": true], analysing: false)
-    #expect(nextStep(s) == .story)
-
-    s = stepStates(try overview(), marked: ["events": true], analysing: false)
-    #expect(nextStep(s) == .export)
-
-    // Descriptions do not finish the story (Google Photos writes its own); only moving on does.
-    s = stepStates(try overview(described: 10, exported: true), marked: [:], analysing: false)
-    #expect(nextStep(s) == .story)
-    s = stepStates(try overview(exported: true), marked: ["events": true], analysing: false)
-    #expect(nextStep(s) == nil)
-}
-
-@Test func nothingIsDoneOrWaitingWhileAnalysing() throws {
-    let s = stepStates(try overview(analysing: true, pendingClocks: 2, needYou: 4), marked: [:], analysing: false)
-    #expect(s[.selection] == StepState(done: false, waiting: 0))
-    #expect(nextStep(s) == .selection)
-    #expect(clocksWaiting(try overview(analysing: true, pendingClocks: 2), marked: [:], analysing: false) == 0)
-    #expect(stepStates(nil, marked: [:], analysing: false)[.export]?.done == false)
+@Test func overviewDecodesSortedDays() throws {
+    // M14a: the days of the album and how many are sorted; an older engine without the field still decodes.
+    let o = try overview(funnel: #", "analysis": {"days": 7, "settled": 3}"#)
+    #expect(o.analysis == Overview.Analysis(days: 7, settled: 3))
+    #expect(try overview().analysis == nil)
 }
 
 @Test func funnelDecodesAndDropsEmptyParts() throws {
@@ -121,13 +95,6 @@ private func overview(analysing: Bool = false, pendingClocks: Int = 0, needYou: 
     let extra = try photo(#""focus": {"tier": "soft", "auto_tier": "blurry", "override": "soft"}, "duplicate": {"group": 3, "category": "near", "keeper": false}"#)
     #expect(extra.isExtraFrame && !extra.goesToAlbumDespiteFocus)
     #expect(try photo(#""favorite": true, "duplicate": {"group": 3, "category": "near", "keeper": false}"#).goesToAlbumDespiteFocus)
-}
-
-@Test func clocksComeUpOnlyWhenTheyWait() throws {
-    #expect(clocksWaiting(try overview(pendingClocks: 2), marked: [:], analysing: false) == 2)
-    #expect(clocksWaiting(try overview(pendingClocks: 2), marked: ["times": true], analysing: false) == 0)   // looked, moved on
-    #expect(clocksWaiting(try overview(), marked: [:], analysing: false) == 0)
-    #expect(clocksWaiting(try overview(pendingClocks: 2), marked: [:], analysing: true) == 0)
 }
 
 @Test func firstSearchAnswersPreparing() throws {

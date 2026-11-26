@@ -7,7 +7,7 @@ struct StepSelection: View {
     @EnvironmentObject var library: LibraryModel
 
     var body: some View {
-        StepPage(step: .selection, lead: library.tr("lead_selection"), status: status, scrolls: false) {
+        StepPage(title: library.tr("stepTitle_selection"), symbol: "square.stack.3d.up", lead: library.tr("lead_selection"), status: status, scrolls: false) {
             VStack(spacing: 16) {
                 HStack(spacing: 14) {
                     Picker("", selection: $library.selectionView) {

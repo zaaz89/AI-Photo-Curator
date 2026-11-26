@@ -116,7 +116,7 @@ struct PhotoGrid: View {
             ContentUnavailableView {
                 Label(library.tr("noTripsTitle"), systemImage: "photo.stack")
             } description: { Text(library.tr("noTripsText")) } actions: {
-                Button(library.tr("newTrip")) { library.sheet = .newAlbum }.buttonStyle(.glassProminent).controlSize(.large)
+                Button(library.tr("newTrip")) { library.newAlbum() }.buttonStyle(.glassProminent).controlSize(.large)
             }
         } else if library.destination == .search {
             ContentUnavailableView.search(text: library.searchResult?.query ?? library.searchText)

@@ -2,8 +2,10 @@ import AppKit
 import CuratorCore
 import SwiftUI
 
-/// Step 4: what leaves the Mac, as copies. Three ways (the whole album for Google Photos, the best few
-/// to share, folders for an archive), a preview of exactly those photos, then the copy with progress.
+/// The export, inline on the path's Album station (M14a): what leaves the Mac, as copies. Three ways (the whole
+/// album for Google Photos, the best few to share, folders for an archive), a preview of exactly those photos,
+/// then the copy with progress. The path's primary button ("Export 187 photos") starts it through
+/// `LibraryModel.exportRequest`; this panel has no button of its own for it (one primary per screen).
 struct StepExport: View {
     @EnvironmentObject var library: LibraryModel
     @State private var choice = ExportChoice()
@@ -19,23 +21,23 @@ struct StepExport: View {
     @State private var celebrated: Set<String> = []
 
     var body: some View {
-        StepPage(step: .export, lead: library.tr("lead_export"), status: status) {
-            VStack(alignment: .leading, spacing: 28) {
-                choices
-                if choice.kind == .best { bestOptions }
-                if choice.kind == .archive { archiveOptions }
-                previewSection
-                runSection
-            }
+        VStack(alignment: .leading, spacing: Space.xxxl) {
+            SectionTitle(title: library.tr("stepTitle_export"), detail: library.tr("lead_export"))
+            choices
+            if choice.kind == .best { bestOptions }
+            if choice.kind == .archive { archiveOptions }
+            previewSection
+            runSection
         }
+        .onChange(of: library.exportRequest) { _, _ in chooseIfRequested() }
+        .onChange(of: preview?.photoIds.count) { _, n in
+            library.exportPreviewCount = n
+            chooseIfRequested()                                  // a press while the preview was loading
+        }
+        .onDisappear { library.exportPreviewCount = nil }
         .task(id: "\(library.tripId ?? "")\(choice.kind.rawValue)\(choice.bestCount)\(choice.folders)\(choice.template)\(library.loadedTripId ?? "")\(previewAttempt)") {
             await loadPreview()
         }
-    }
-
-    var status: String {
-        guard let p = preview else { return library.tr("preparing") }
-        return Strings.photos(p.photoIds.count, library.lang) + " · " + ByteCountFormatter.string(fromByteCount: Int64(p.bytes), countStyle: .file)
     }
 
     // MARK: the three ways
@@ -196,20 +198,13 @@ struct StepExport: View {
                           systemImage: last.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         .foregroundStyle(last.ok ? .green : .orange).font(.headline)
                     Spacer()
-                    Button(library.tr("showInFinder")) { NSWorkspace.shared.open(URL(fileURLWithPath: last.folder)) }.buttonStyle(.glass)
+                    // "Open Folder" is the path's primary button now; Google Photos stays a secondary link.
                     if choice.kind == .googlePhotos {
                         Button(library.tr("openGooglePhotos")) { NSWorkspace.shared.open(URL(string: "https://photos.google.com/")!) }
                             .buttonStyle(.glass)
                     }
                 }
                 if last.ok { Text(library.tr("afterExport")).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-            }
-            if !exporting {
-                Button { choose() } label: {
-                    Label(library.tr("chooseAndExport"), systemImage: "square.and.arrow.up").padding(.horizontal, 10)
-                }
-                .buttonStyle(.glassProminent).controlSize(.extraLarge).tint(.green)
-                .disabled(preview == nil || job.running || (preview?.files ?? 0) == 0)
             }
         }
         .padding(20)
@@ -234,7 +229,15 @@ struct StepExport: View {
         }
     }
 
+    /// The path's Export press: once the preview is there, the folder panel opens (the press is kept until then).
+    func chooseIfRequested() {
+        guard library.exportPending, preview != nil, !loading else { return }
+        library.exportPending = false
+        choose()
+    }
+
     func choose() {
+        guard preview != nil, !library.job.running, (preview?.files ?? 0) > 0 else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false

@@ -99,6 +99,38 @@ def add_source(conn: sqlite3.Connection, path: str, owner: str, label: str | Non
     return conn.execute('SELECT id FROM sources WHERE path = ?', (real,)).fetchone()[0]
 
 
+# Tables keyed by file content (sha256). A row goes with a removed folder only when no other photo of the album
+# has the same content (an exact copy in another folder keeps its analysis and the owner's marks).
+_BY_CONTENT = ('visual_features', 'quality', 'marks', 'faces', 'video_meta', 'owner_descriptions', 'subject_focus',
+               'image_embeddings', 'ai_annotations', 'keeper_choices')
+
+
+def remove_source(conn: sqlite3.Connection, source_id: int) -> dict:
+    """M14: take one folder out of an album. Deletes the folder's rows from the album database only (its photos,
+    their analysis, events and the owner's marks on them); the folder and its files are never opened, moved or
+    deleted, and no cache file is touched. Moments and chapters left with too few photos are removed; the caller
+    rebuilds the days that changed (`analysis_events.rebuild_changed_days`)."""
+    row = conn.execute('SELECT id FROM sources WHERE id = ?', (source_id,)).fetchone()
+    if row is None:
+        raise FileNotFoundError(f'source {source_id} not found')
+    ids = [r[0] for r in conn.execute('SELECT id FROM assets WHERE source_id = ?', (source_id,))]
+    shas = {r[0] for r in conn.execute('SELECT DISTINCT sha256 FROM assets WHERE source_id = ?', (source_id,)) if r[0]}
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    with conn:
+        if 'analysis_events' in tables:
+            conn.executemany('DELETE FROM analysis_events WHERE asset_id = ? OR keeper_id = ?', [(i, i) for i in ids])
+        conn.execute('DELETE FROM sources WHERE id = ?', (source_id,))       # assets, clocks, places … cascade
+        still = {r[0] for r in conn.execute('SELECT DISTINCT sha256 FROM assets')}
+        orphans = [(s,) for s in shas - still]
+        for t in _BY_CONTENT:
+            if t in tables:
+                conn.executemany(f'DELETE FROM {t} WHERE sha256 = ?', orphans)
+        conn.execute('DELETE FROM duplicate_groups WHERE id NOT IN '
+                     '(SELECT group_id FROM duplicate_members GROUP BY group_id HAVING COUNT(*) >= 2)')
+        conn.execute('DELETE FROM events WHERE id NOT IN (SELECT DISTINCT event_id FROM event_members)')
+    return {'removed_photos': len(ids), 'removed_content_rows': len(orphans)}
+
+
 def all_source_paths() -> list[str]:
     """Every source folder of every collection (used as the read whitelist)."""
     paths = []

@@ -5,23 +5,26 @@ import os
 import SwiftUI
 
 /// Sidebar destinations.
+/// What the detail area shows (M14a): the album's path, one of its secondary views (the toolbar's View menu) or a
+/// photo grid. The path's stations are not destinations: `LibraryModel.station` picks one on the path.
 enum Destination: Hashable {
-    case home, step(GuideStep), people, all, favourites, leftOut, videos, blurry, day(String), search, settings, sorting
-    /// The guide's pages (album home, the steps, people and clocks, settings), not a photo grid.
-    var isGuide: Bool {
-        switch self { case .home, .step, .people, .settings, .sorting: true; default: false }
+    case journey, moments, chapters, people, all, favourites, leftOut, videos, blurry, day(String), search, settings
+    /// A page (the path, a secondary view, settings), not a photo grid.
+    var isPage: Bool {
+        switch self { case .journey, .moments, .chapters, .people, .settings: true; default: false }
     }
+}
+
+/// The last known state of an album for the sidebar (M14a): its journey input and cover, cached per album so
+/// albums that are not open still show a status line and a cover.
+struct JourneySnapshot: Codable, Equatable {
+    var input: JourneyInput
+    var coverPath: String?
 }
 
 /// The Selection step's three views.
 enum SelectionView: String, CaseIterable, Identifiable {
     case moments, blurry, leftOut
-    var id: String { rawValue }
-}
-
-/// The sheets of the album assistant.
-enum AssistantSheet: String, Identifiable {
-    case newAlbum
     var id: String { rawValue }
 }
 
@@ -35,9 +38,12 @@ enum AssistantSheet: String, Identifiable {
     @Published private(set) var photos: [Photo] = [] {
         didSet {
             photoIndex = Dictionary(photos.indices.map { (photos[$0].id, $0) }, uniquingKeysWith: { a, _ in a })
+            lookCount = photos.reduce(0) { $0 + (sortVerdict($1) == .check ? 1 : 0) }
             recompute()
         }
     }
+    /// Photos flagged "Have a look" (counted once per change of the photos, not per view update).
+    private(set) var lookCount = 0
     @Published private(set) var events: [TripEvent] = [] { didSet { recompute() } }
     /// The trip `photos` belong to. Marks and moves are refused while it differs from `tripId`:
     /// photo ids are per trip, so an old id would hit another photo in the new trip.
@@ -50,35 +56,13 @@ enum AssistantSheet: String, Identifiable {
     @Published private(set) var steps: [String: Bool] = [:]
     /// What the album still needs (cards of the Overview).
     @Published private(set) var overview: Overview?
-    @Published var sheet: AssistantSheet?
     /// Moments the owner went through in this session; a reopened sheet continues after them.
     var reviewedMoments: Set<Int> = []
-    var exported: Bool { steps["export"] == true }
-    static let stepOrder = ["import", "times", "duplicates", "blurry", "events", "export"]
-    var stepsDone: Int { Self.stepOrder.filter(isDone).count }
-    /// A step is done when the owner marked it, or when there is nothing left to decide in it.
-    func isDone(_ step: String) -> Bool {
-        if steps[step] == true { return true }
-        guard let o = overview, !o.analysing, !(job.running && job.collection == tripId) else { return false }
-        switch step {
-        case "times": return o.clocks.pending == 0
-        case "duplicates": return o.moments.needYou == 0
-        case "blurry": return o.blurry.total == 0
-        case "export": return o.export.done
-        default: return false
-        }
-    }
-    /// The four steps' state (done, waiting decisions), recomputed with the overview.
-    var stepStates: [GuideStep: StepState] {
-        var s = CuratorCore.stepStates(overview, marked: steps, analysing: analysing)
-        if steps["export"] == true { s[.export]?.done = true }
-        return s
-    }
-    var next: GuideStep? { nextStep(stepStates) }
-    /// Clock suggestions nobody answered yet: they come before the steps on the album home.
-    var clocksWaiting: Int { CuratorCore.clocksWaiting(overview, marked: steps, analysing: analysing) }
+    var exported: Bool { steps["export"] == true || overview?.export.done == true }
     @Published var selectionView: SelectionView = .moments
-    @Published var destination: Destination = .home { didSet { if destination != oldValue { clearSelection(); recompute() } } }
+    @Published var destination: Destination = .journey { didSet { if destination != oldValue { clearSelection(); recompute() } } }
+    /// The station the owner opened on the rail (M14a); nil follows the album to its current station.
+    @Published var station: JourneyStation?
     @Published var sort: PhotoSort = .time { didSet { recompute() } }
     @Published var selection: Set<Int> = []
     @Published var cursor: Int = -1                     // flat index into `flat`
@@ -116,7 +100,10 @@ enum AssistantSheet: String, Identifiable {
     private var pendingWrites = 0
     private var writeGeneration = 0
 
-    init(api: APIClient) { self.api = api }
+    init(api: APIClient) {
+        self.api = api
+        snapshots = Self.loadSnapshots()
+    }
 
     var lang: Lang { Lang(rawValue: settings?.uiLanguage ?? UserDefaults.standard.string(forKey: "uiLanguage") ?? "en") ?? .en }
     func tr(_ key: String) -> String { Strings.text(key, lang) }
@@ -142,7 +129,6 @@ enum AssistantSheet: String, Identifiable {
     func loadTrips() async {
         do {
             trips = try await api.trips()
-            if trips.isEmpty { sheet = .newAlbum }              // first start: the wizard opens by itself
             let saved = UserDefaults.standard.string(forKey: "trip")
             if tripId == nil || !trips.contains(where: { $0.id == tripId }) {
                 tripId = trips.first(where: { $0.id == saved })?.id ?? trips.first?.id
@@ -164,7 +150,9 @@ enum AssistantSheet: String, Identifiable {
         clearSelection()
         searchResult = nil
         searchText = ""
-        destination = .home
+        destination = .journey
+        station = nil
+        exportPreviewCount = nil
         if let tripId { UserDefaults.standard.set(tripId, forKey: "trip") }
         Task { await reload() }
     }
@@ -193,6 +181,7 @@ enum AssistantSheet: String, Identifiable {
             sources = src
             loadedTripId = tripId
             trimSelection()
+            refreshSnapshot()
         } catch { report(error) { Task { await self.reload() } } }
     }
 
@@ -205,7 +194,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return .leftOut
         case .videos: return .videos
         case .blurry: return .blurry
-        case .home, .step, .people, .settings, .sorting: return .all
+        case .journey, .moments, .chapters, .people, .settings: return .all
         case .day(let d): return .day(d)
         case .search: return .ids(searchResult?.results.map(\.id) ?? [])
         }
@@ -225,7 +214,7 @@ enum AssistantSheet: String, Identifiable {
         case .leftOut: return photos.filter(\.rejected).count
         case .videos: return photos.filter { $0.isVideo && !$0.rejected }.count
         case .blurry: return photos.filter { $0.focus?.tier == "blurry" }.count
-        case .home, .step, .people, .settings, .sorting: return 0
+        case .journey, .moments, .chapters, .people, .settings: return 0
         case .day(let day): return photos.filter { $0.day == day && !$0.rejected }.count
         case .search: return searchResult?.results.count ?? 0
         }
@@ -480,14 +469,16 @@ enum AssistantSheet: String, Identifiable {
         case .go(let page):
             reviewFilter = nil
             switch page {
-            case "home": destination = .home
-            case "selection": destination = .step(.selection)
-            case "story": destination = .step(.story)
-            case "export": destination = .step(.export)
+            case "home", "journey": open(station: nil)
+            case "photos": open(station: .photos)
+            case "sorting", "analysis": open(station: .analysis)
+            case "selection", "decisions", "questions": open(station: .decisions)
+            case "export", "album": open(station: .album)
+            case "moments": destination = .moments
+            case "story", "chapters": destination = .chapters
             case "people": destination = .people
             case "all": destination = .all
             case "settings": destination = .settings
-            case "sorting": destination = .sorting
             default: destination = .leftOut
             }
         case .album(let id):
@@ -627,10 +618,15 @@ enum AssistantSheet: String, Identifiable {
         offerUndo(tr("acceptedRest"))
     }
 
-    /// Adds folders to the open album and analyses the new photos. Every folder is tried; refusals are shown
-    /// together, and the analysis starts when at least one folder was added.
-    func addFolders(_ urls: [URL]) {
-        guard let tripId, tripId == loadedTripId, !urls.isEmpty else { return }
+    /// Adds folders to an album (the open one unless `trip` names another). Every folder is tried; refusals are
+    /// shown together. The app proposes each folder's owner (and remembers which camera is whose); a new album
+    /// that still has its default name gets the name the folders suggest. Before the owner pressed Start nothing
+    /// is analysed; afterwards the new photos are sorted at once and the questions open again.
+    func addFolders(_ urls: [URL], trip: String? = nil) {
+        guard let tripId = trip ?? shownTrip, !urls.isEmpty else { return }
+        let isOpen = tripId == shownTrip
+        let started = isOpen ? journeyInput.started : true
+        let defaultName = isOpen && sources.isEmpty && albumName == tr("newAlbumName")
         Task {
             var problems: [String] = [], added = 0
             do {
@@ -641,38 +637,35 @@ enum AssistantSheet: String, Identifiable {
                     do { try await api.addFolder(trip: tripId, path: f.path, owner: f.owner.isEmpty ? name : f.owner); added += 1 }
                     catch { problems.append("\(name): \(describe(error))") }
                 }
+                let learned = devicesToRemember(s.folders.map { (owner: $0.owner, devices: $0.devices.map { ($0.name, $0.count) }) })
+                if !learned.isEmpty, let raw = try? await api.settingsRaw() {     // never overwrite the memory on a read error
+                    var memory = raw["device_owners"] as? [String: String] ?? [:]
+                    memory.merge(learned) { _, new in new }
+                    save(["device_owners": memory])
+                }
+                if added > 0 && defaultName {
+                    let suggested = CuratorCore.albumName(place: s.album.place, start: s.album.start, end: s.album.end, lang: lang)
+                    if !suggested.isEmpty { renameAlbum(suggested, trip: tripId) }
+                }
             } catch { problems.append(describe(error)) }
             if added > 0 {
-                do { try await api.startAnalysis(trip: tripId) } catch { problems.append(describe(error)) }
-                await reload()
-                await pollOnce()
+                if started {
+                    // New photos bring new questions and an export that no longer has them: both open again.
+                    for w in ["duplicates", "times", "export"] { try? await api.setStep(trip: tripId, step: w, done: false) }
+                    do { try await api.startAnalysis(trip: tripId) } catch { problems.append(describe(error)) }
+                }
+                if tripId == self.tripId {
+                    station = nil
+                    await reload()
+                    await pollOnce()
+                } else {
+                    trips = (try? await api.trips()) ?? trips
+                }
             }
             if !problems.isEmpty {
                 errorBanner = ErrorBannerInfo(error: HumanError(kind: .invalid, message: problems.joined(separator: "\n"), details: ""))
             }
         }
-    }
-
-    /// The guide's Next: marks this step's checklist entries done and opens the next step.
-    func finishStep(_ step: GuideStep) {
-        guard let tripId else { return }
-        for w in step.workflowSteps where w != "export" { steps[w] = true }
-        Task {
-            for w in step.workflowSteps where w != "export" { try? await api.setStep(trip: tripId, step: w, done: true) }
-            overview = (try? await api.overview(trip: tripId)) ?? overview
-        }
-        destination = step.next.map { .step($0) } ?? .home
-    }
-
-    /// Done on the People & clocks page: the owner has seen the clocks; back to the album.
-    func finishPeople() {
-        guard let tripId else { return }
-        for w in ["import", "times"] { steps[w] = true }
-        Task {
-            for w in ["import", "times"] { try? await api.setStep(trip: tripId, step: w, done: true) }
-            overview = (try? await api.overview(trip: tripId)) ?? overview
-        }
-        destination = .home
     }
 
     // MARK: events
@@ -692,31 +685,23 @@ enum AssistantSheet: String, Identifiable {
 
     // MARK: album assistant
 
-    /// Creates the album from the wizard, remembers which device belongs to whom, starts the analysis.
-    func createAlbum(name: String, folders: [(path: String, owner: String, devices: [(String, Int)])]) async -> Bool {
-        var created: String?
-        do {
-            let id = try await api.createAlbum(name: name)
-            created = id
-            for f in folders { try await api.addFolder(trip: id, path: f.path, owner: f.owner) }
-            try? await api.setStep(trip: id, step: "import", done: true)
-            let learned = devicesToRemember(folders.map { (owner: $0.owner, devices: $0.devices) })
-            if !learned.isEmpty, let raw = try? await api.settingsRaw() {     // never overwrite the memory on a read error
-                var memory = raw["device_owners"] as? [String: String] ?? [:]
-                memory.merge(learned) { _, new in new }
-                save(["device_owners": memory])
-            }
-            trips = (try? await api.trips()) ?? trips
-            tripId = id
-            try await api.startAnalysis(trip: id)
-            destination = .sorting                     // a new album is sorted in front of the owner
-            await pollNow()
-            return true
-        } catch {
-            // A half-made album (a folder was refused) is removed so it does not linger unseen.
-            if let id = created, tripId != id { _ = try? await api.finishAlbum(trip: id) }
-            report(error)
-            return false
+    /// "+ New Album" (⌘N, M14a): makes an empty album and opens it on its first station, where folders are dropped
+    /// or added and Start begins the sorting. It arrives in the sidebar at once.
+    func newAlbum(with folders: [URL] = []) {
+        reviewFilter = nil
+        Task {
+            do {
+                let id = try await api.createAlbum(name: tr("newAlbumName"))
+                let list = (try? await api.trips()) ?? trips
+                withMotion(.arrive) { trips = list }
+                tripId = id
+                destination = .journey
+                station = nil
+                if !folders.isEmpty {
+                    await reload()                       // the album is the open one before its folders arrive
+                    addFolders(folders)
+                }
+            } catch { report(error) { [weak self] in self?.newAlbum(with: folders) } }
         }
     }
 
@@ -751,24 +736,55 @@ enum AssistantSheet: String, Identifiable {
         }
         if let f = job.exportFolder, job.collection == tripId {
             lastExport = (f, job.exportOK ?? false)
-            if job.exportOK == true { markStep("export") }
+            if job.exportOK == true {
+                markStep("export")
+                if let tripId { UserDefaults.standard.set(f, forKey: "exportFolder.\(tripId)") }
+            }
         }
     }
 
-    // MARK: finish album
+    // MARK: remove album (M14a)
 
-    /// Deletes the app's working data for the current album (after the owner confirmed) and
-    /// opens the next album. The photo folders are not touched.
-    func finishAlbum() async {
-        guard let id = tripId, !(job.running && job.collection == id) else { return }
+    /// The album whose removal waits for the owner's confirmation (sidebar ⌫, context menu, ⌘⌫, Clear Working Data).
+    @Published var removeAlbumRequest: String?
+
+    /// Removes an album and the app's working data for it (after the owner confirmed). The photo folders and any
+    /// exported folder are never touched. Opens the next album, or the empty state.
+    func removeAlbum(_ id: String) async {
+        guard !(job.running && job.collection == id) else {
+            errorBanner = ErrorBannerInfo(error: HumanError(kind: .busy, message: tr("removeAlbumBusy"), details: ""))
+            return
+        }
         do {
             let r = try await api.finishAlbum(trip: id)
             let name = trips.first { $0.id == id }?.name ?? id
-            trips.removeAll { $0.id == id }
-            tripId = trips.first?.id
+            withMotion(.settle) { trips.removeAll { $0.id == id } }
+            snapshots[id] = nil
+            saveSnapshots()
+            for f in ReviewFilter.allCases { UserDefaults.standard.removeObject(forKey: "review.\(id).\(f.rawValue)") }
+            UserDefaults.standard.removeObject(forKey: "exportFolder.\(id)")
+            if tripId == id { tripId = trips.first?.id }
             let mb = max(1, Int((Double(r.freedBytes) / 1_048_576).rounded()))
-            message = String(format: tr("albumFinished"), name, mb)
-        } catch { report(error) { Task { await self.finishAlbum() } } }
+            message = String(format: tr("albumRemoved"), name, mb)
+        } catch { report(error) { [weak self] in Task { await self?.removeAlbum(id) } } }
+    }
+
+    /// Takes one folder out of the open album (after the owner confirmed). Only the app's data for it goes; the
+    /// days that lost photos are sorted again by the engine at once.
+    func removeFolder(_ source: SourceInfo) {
+        guard let trip = shownTrip else { return }
+        Task {
+            do {
+                _ = try await api.removeSource(trip: trip, source: source.id)
+                guard trip == tripId else { return }
+                sortStream = SortStream()
+                undoManager?.removeAllActions()           // photo ids of the removed folder are gone
+                undoToast = nil
+                station = nil
+                await reload()
+                message = String(format: tr("folderRemoved"), source.owner)
+            } catch { report(error) { [weak self] in self?.removeFolder(source) } }
+        }
     }
 
     // MARK: search
@@ -799,10 +815,10 @@ enum AssistantSheet: String, Identifiable {
 
     // MARK: jobs
 
-    /// The sorting stage; `replay` plays it again from the folders to the overview.
+    /// The sorting stage (the path's second station); `replay` plays it again from the folders to the overview.
     func showSorting(replay: Bool = false) {
         reviewFilter = nil
-        destination = .sorting
+        open(station: .analysis)
         if replay { pendingReplay = true }
     }
 
@@ -844,12 +860,17 @@ enum AssistantSheet: String, Identifiable {
     private func pollOnce() async {
         guard let tripId, let s = try? await api.jobStatus(trip: tripId) else { return }
         let wasRunning = job.running
-        if s.collection == nil || s.collection == tripId || s.running { job = s }
+        if s.collection == nil || s.collection == tripId || s.running { if job != s { job = s } }
         // A job that ended between two polls is still noticed here (export result, reload).
         if wasRunning && !job.running {
             await pollEvents()                                   // the last events (final keepers) before the reload
             await reload(); analysisFinishedTick += 1; jobFinished()
+            // The window was closed while sorting ("I keep working"): the work is done, so the app quits now.
+            if !NSApp.windows.contains(where: { $0.identifier?.rawValue.hasPrefix("main") == true && ($0.isVisible || $0.isMiniaturized) }) {
+                NSApp.terminate(nil)
+            }
         }
+        refreshSnapshot()
     }
 
     /// M13: reads the new events of the analysis (a few pages per poll at most) and fetches the photos again when
@@ -917,7 +938,7 @@ enum AssistantSheet: String, Identifiable {
     func openTray(_ tray: SortVerdict) {
         reviewFilter = nil
         pendingTray = tray
-        destination = .sorting
+        open(station: .analysis)
     }
 
     /// Photos the next quick review goes through instead of the filter's queue (a tray's photos). The review
@@ -946,4 +967,222 @@ enum AssistantSheet: String, Identifiable {
     func keepTargets() { offerUndo(.putBack, count: setInAlbum(targets.map(\.id), true)) }
     /// X in the grid: the targets leave the album (no toggle: K brings them back), confirmed with Undo.
     func leaveOutTargets() { offerUndo(.leaveOut, count: setInAlbum(targets.map(\.id), false)) }
+
+    // MARK: M14a the album's path
+
+    /// What the path needs to know about the open album, from the model's data.
+    var journeyInput: JourneyInput {
+        let o = overview
+        let mine = job.collection == tripId
+        let analysisJob = (job.kind ?? "analysis") == "analysis"
+        let streamDays = analysing ? Set(sortStream.dayOf.values).count : 0
+        let total = max(o?.analysis?.days ?? 0, streamDays)
+        let settled = max(o?.analysis?.settled ?? 0, analysing ? sortStream.settledCount : 0)
+        let started = steps["import"] == true || (o?.analysis?.settled ?? 0) > 0 || photos.contains { $0.focus != nil }
+        let albumCount: Int? = o?.funnel?.inAlbum ?? o?.export.photos
+        let inAlbum: Int = exportPreviewCount ?? albumCount ?? photos.filter(\.goesToAlbumDespiteFocus).count
+        return JourneyInput(
+            folders: sources.count,
+            photos: photos.count,
+            started: started,
+            analysing: analysing,
+            analysisFailed: mine && !job.running && analysisJob && job.phase == .failed,
+            progress: analysing ? job.progress / 100 : 0,
+            daysTotal: total,
+            daysSettled: min(settled, total),
+            openMoments: o?.moments.needYou ?? 0,
+            haveALook: lookCount,
+            unsureClocks: o?.clocks.pending ?? 0,
+            decisionsDone: steps["duplicates"] == true,
+            inAlbum: inAlbum,
+            exporting: mine && job.running && job.kind == "export",
+            exportProgress: mine && job.kind == "export" ? job.progress / 100 : 0,
+            exported: exported)
+    }
+
+    /// The open album's path: current station, the one primary action, the status line.
+    var journey: AlbumJourney { AlbumJourney(journeyInput) }
+
+    /// The station on screen: the one opened on the rail while it can be opened, else the current one.
+    var shownStation: JourneyStation { journey.shown(station) }
+
+    /// Opens the album's path on a station (nil: the current one). A station ahead of the album opens the current one.
+    func open(station s: JourneyStation?) {
+        reviewFilter = nil
+        destination = .journey
+        station = s.flatMap { journey.canOpen($0) ? $0 : nil }
+    }
+
+    /// The one primary button of the path.
+    func performPrimary() {
+        switch journey.action {
+        case .addFolders: chooseFolders()
+        case .start: startAlbum()
+        case .resume, .retry: station = nil; analyse()
+        case .wait, .exporting: break
+        case .answer: answerQuestions()
+        case .export: requestExport()
+        case .openFolder: openExportFolder()
+        }
+    }
+
+    /// Start: the owner is done adding folders; sorting begins (the path moves on to Sorting).
+    func startAlbum() {
+        guard let tripId = shownTrip else { return }
+        steps["import"] = true
+        station = nil
+        Task {
+            try? await api.setStep(trip: tripId, step: "import", done: true)
+            do { try await api.startAnalysis(trip: tripId); await pollOnce() }
+            catch { report(error) { [weak self] in self?.startAlbum() } }
+        }
+    }
+
+    /// The system folder panel; the chosen folders go to `trip` (the open album when nil).
+    func chooseFolders(trip: String? = nil) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = tr("addFolders")
+        panel.message = tr("chooseFoldersMessage")
+        guard panel.runModal() == .OK else { return }
+        addFolders(panel.urls, trip: trip)
+    }
+
+    /// Changes on every Export press of the path; the album station's export panel opens its folder panel.
+    @Published var exportRequest = 0
+    /// An Export press waits for the export panel (it may be appearing, or its preview still loading).
+    var exportPending = false
+    /// Export: goes to the Album station and asks its export panel to choose a folder as soon as it is ready.
+    func requestExport() {
+        station = nil
+        exportPending = true
+        exportRequest += 1
+    }
+    /// How many photos the export panel's current choice would copy (the primary button's number); nil when the
+    /// panel is not on screen (the album's own count is used then).
+    @Published var exportPreviewCount: Int?
+
+    /// The folder of this album's last verified export (remembered across launches).
+    var exportFolder: String? {
+        if let last = lastExport, last.ok { return last.folder }
+        guard let tripId else { return nil }
+        return UserDefaults.standard.string(forKey: "exportFolder.\(tripId)")
+    }
+
+    func openExportFolder() {
+        guard let f = exportFolder, FileManager.default.fileExists(atPath: f) else {
+            requestExport()                                 // the folder is gone or unknown: export again
+            return
+        }
+        NSWorkspace.shared.open(URL(fileURLWithPath: f))
+    }
+
+    // MARK: questions (station 3)
+
+    /// The question review runs for the path: when it ends, the questions count as answered.
+    private var questionReview = false
+
+    /// The photos behind the open questions, in time order: every frame of a moment without a clear best frame,
+    /// and the "Have a look" photos.
+    func questionIds() async -> [Int] {
+        guard let trip = shownTrip else { return [] }
+        let unclear = ((try? await api.moments(trip: trip)) ?? []).filter { !$0.clear }
+        var ids = Set(unclear.flatMap { $0.members.map(\.id) })
+        for p in photos where sortVerdict(p) == .check { ids.insert(p.id) }
+        return photos.map(\.id).filter { ids.contains($0) }
+    }
+
+    /// "Answer N questions": a quick review of exactly those photos (moments open in compare with C).
+    func answerQuestions() {
+        Task {
+            let ids = await questionIds()
+            if ids.isEmpty {
+                // Only clocks are left: they are answered on People & Clocks.
+                if journeyInput.unsureClocks > 0 { destination = .people } else { acceptQuestions() }
+                return
+            }
+            questionReview = true
+            startReview(.decisions, ids: ids)
+        }
+    }
+
+    /// Accept the rest: what the app chose stays; the questions count as answered (undoable).
+    func acceptQuestions() {
+        guard let tripId, tripId == loadedTripId else { return }
+        let was = (steps["duplicates"] == true, steps["times"] == true)
+        markStep("duplicates")
+        markStep("times")
+        registerUndo(name: tr("acceptRest"), trip: tripId) { model in
+            if !was.0 { model.markStep("duplicates", false) }
+            if !was.1 { model.markStep("times", false) }
+        } redo: { model in
+            model.markStep("duplicates")
+            model.markStep("times")
+        }
+        offerUndo(tr("acceptedRest"))
+    }
+
+    /// The quick review closed. A finished question review answers the questions; the path moves on.
+    func reviewClosed(finished: Bool) {
+        if questionReview && finished {
+            markStep("duplicates")
+            if journeyInput.unsureClocks == 0 { markStep("times") }
+            station = nil
+        }
+        questionReview = false
+    }
+
+    // MARK: sidebar status per album
+
+    @Published private(set) var snapshots: [String: JourneySnapshot] = [:]
+    private static let snapshotsKey = "journey.snapshots.v1"
+
+    private static func loadSnapshots() -> [String: JourneySnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: snapshotsKey),
+              let s = try? JSONDecoder().decode([String: JourneySnapshot].self, from: data) else { return [:] }
+        return s
+    }
+
+    private func saveSnapshots() {
+        if let data = try? JSONEncoder().encode(snapshots) { UserDefaults.standard.set(data, forKey: Self.snapshotsKey) }
+    }
+
+    /// Remembers the open album's state for the sidebar (only when it changed).
+    func refreshSnapshot() {
+        guard let id = shownTrip else { return }
+        let cover = albumCover(photos, coverId: overview?.coverId, highlights: overview?.highlights ?? [])
+        let snap = JourneySnapshot(input: journeyInput, coverPath: cover?.fileURL.path)
+        if snapshots[id] != snap {
+            snapshots[id] = snap
+            saveSnapshots()
+        }
+    }
+
+    /// The path of any album: live for the open one, else the last known state corrected by the running job.
+    func journeyOf(_ trip: Trip) -> AlbumJourney? {
+        if trip.id == shownTrip { return journey }
+        guard var input = snapshots[trip.id]?.input else { return nil }
+        let runs = job.running && job.collection == trip.id
+        input.analysing = runs && (job.kind ?? "analysis") == "analysis"
+        input.exporting = runs && job.kind == "export"
+        if input.analysing { input.progress = job.progress / 100 }
+        if input.exporting { input.exportProgress = job.progress / 100 }
+        return AlbumJourney(input)
+    }
+
+    /// The sidebar's line under an album's name.
+    func statusLine(for trip: Trip) -> String {
+        if let j = journeyOf(trip) { return j.status(lang) }
+        return trip.assets == 0 ? tr("journeyNoPhotos") : Strings.photos(trip.assets, lang)
+    }
+
+    /// The cover file of any album (open: live; others: remembered).
+    func coverURL(for trip: Trip) -> URL? {
+        if trip.id == shownTrip {
+            return albumCover(photos, coverId: overview?.coverId, highlights: overview?.highlights ?? [])?.fileURL
+        }
+        return snapshots[trip.id]?.coverPath.map { URL(fileURLWithPath: $0) }
+    }
 }

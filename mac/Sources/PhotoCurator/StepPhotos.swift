@@ -9,7 +9,7 @@ struct StepPhotos: View {
     @State private var clocks: [DeviceClock] = []
 
     var body: some View {
-        StepPage(step: nil, lead: library.tr("lead_photos"), status: status) {
+        StepPage(title: library.tr("stepTitle_photos"), symbol: "person.2.crop.square.stack", lead: library.tr("lead_photos"), status: status) {
             VStack(alignment: .leading, spacing: 34) {
                 VStack(alignment: .leading, spacing: 14) {
                     SectionTitle(title: library.tr("whoTitle"), detail: library.tr("whoLead"))

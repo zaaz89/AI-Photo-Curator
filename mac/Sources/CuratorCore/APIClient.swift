@@ -157,6 +157,17 @@ public final class APIClient: Sendable {
         return (res.removed_cache_files, res.freed_bytes)
     }
 
+    /// M14a: takes one folder out of the album. The engine removes only its working data (the folder's photos,
+    /// their analysis and marks) and rebuilds the days that changed; the folder and its files are never touched.
+    /// Returns how many photos are left in the album.
+    public func removeSource(trip: String, source: Int) async throws -> Int {
+        struct R: Decodable { let photos_left: Int }
+        var r = URLRequest(url: url("api/collections/\(trip)/sources/\(source)"))
+        r.httpMethod = "DELETE"
+        let res: R = try await send(r)
+        return res.photos_left
+    }
+
     // MARK: album assistant
 
     public func suggest(paths: [String]) async throws -> Suggestion {

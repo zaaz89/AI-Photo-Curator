@@ -6,6 +6,8 @@ import Foundation
 /// `defaults write si.beehive.photocurator automation -bool true`.
 ///
 ///   photocurator://go?page=home|selection|story|export|people|all|leftOut|settings|sorting
+///   (M14a: also journey|photos|analysis|questions|album for the path's stations, moments|chapters for the views;
+///   the old names open the station or view that replaced them)
 ///   photocurator://replay                                   (the sorting stage plays again)
 ///   photocurator://album?id=<album id>
 ///   photocurator://review?filter=decisions|all|leftOut      photocurator://review?close=1
@@ -27,7 +29,8 @@ public enum AutomationCommand: Equatable, Sendable {
     case firstRun(Int?)
 
     public static let scheme = "photocurator"
-    public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut", "settings", "sorting"]
+    public static let pages: Set<String> = ["home", "selection", "story", "export", "people", "all", "leftOut", "settings", "sorting",
+                                            "journey", "photos", "analysis", "decisions", "questions", "album", "moments", "chapters"]
     public static let keys: Set<String> = ["right", "left", "back", "skip", "favourite", "faces", "zoom", "unzoom", "keys", "esc",
                                              "compare", "pick1", "pick2"]
 

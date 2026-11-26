@@ -129,8 +129,11 @@ public struct Overview: Decodable, Sendable {
     public let people: [Person]?
     public let coverId: Int?
     public let highlights: [Int]?
+    /// M14a: days of the album and how many are sorted with their current photos (nil from an older engine).
+    public struct Analysis: Decodable, Sendable, Equatable { public let days: Int, settled: Int }
+    public let analysis: Analysis?
     enum CodingKeys: String, CodingKey {
-        case analysing, facts, clocks, moments, blurry, events, export, funnel, people, highlights
+        case analysing, facts, clocks, moments, blurry, events, export, funnel, people, highlights, analysis
         case coverId = "cover_id"
     }
 }
