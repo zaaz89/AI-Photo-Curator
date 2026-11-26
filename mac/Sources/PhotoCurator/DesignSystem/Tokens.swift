@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import CuratorCore
 
@@ -58,4 +59,25 @@ enum StatusColor {
     static var warning: Color { .orange }
     /// The app's accent.
     static var accent: Color { .accentColor }
+
+    // AA-checked foreground/background pairs for small text and glyphs on status colours (M12c, WCAG 1.4.3).
+    // Ratios computed for light and dark appearance; see notes/m12b-design-system.md.
+
+    /// Solid fill for small "removed" badges with white text (6.5:1). System red with white is only ~3.5:1.
+    static var removedFill: Color { Color(red: 0.72, green: 0.11, blue: 0.11) }
+    /// Text or glyph on `removedFill`.
+    static var onRemoved: Color { .white }
+    /// Text or glyph on a solid `look` / `warning` (orange) fill: dark, 8:1 (white on orange is ~2.2:1).
+    static var onLook: Color { Color(white: 0.1) }
+    /// Orange-family text on a light tint of `look` (e.g. `look.opacity(0.18)`): dark amber in light mode
+    /// (5.0:1 on the tinted window background), system orange in dark mode (5.7:1).
+    static var lookText: Color { adaptive(light: NSColor(srgbRed: 0.58, green: 0.28, blue: 0, alpha: 1), dark: .systemOrange) }
+    /// Green text on a light tint of `kept`: dark green in light mode (5.0:1), system green in dark mode (5.8:1).
+    static var keptText: Color { adaptive(light: NSColor(srgbRed: 0, green: 0.42, blue: 0.13, alpha: 1), dark: .systemGreen) }
+
+    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
+    }
 }

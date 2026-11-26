@@ -105,7 +105,7 @@ struct InspectorView: View {
     func pill(_ key: String, warn: Bool) -> some View {
         Label(library.tr(key), systemImage: warn ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
             .font(.caption.weight(.medium))
-            .foregroundStyle(warn ? StatusColor.warning : StatusColor.kept)
+            .foregroundStyle(warn ? StatusColor.lookText : StatusColor.keptText)
     }
 }
 

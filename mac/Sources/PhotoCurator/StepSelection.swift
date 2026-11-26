@@ -212,9 +212,7 @@ struct MomentsPanel: View {
 
     func acceptRest() {
         guard let i = currentIndex else { return }
-        groups[i...].forEach { library.reviewedMoments.insert($0.id) }
-        library.markStep("duplicates")
-        library.message = library.tr("acceptedRest")
+        library.acceptRest(groups[i...].map(\.id))     // undoable; the toast says so
     }
 
     /// The local copy shows the owner's choice at once; the engine's answer replaces it on reload.
@@ -370,7 +368,7 @@ struct FrameColumn: View {
         Text(library.tr(key)).font(.caption.weight(.medium))
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background((warn ? StatusColor.warning : StatusColor.kept).opacity(0.18), in: .capsule)
-            .foregroundStyle(warn ? StatusColor.warning : StatusColor.kept)
+            .foregroundStyle(warn ? StatusColor.lookText : StatusColor.keptText)
     }
 }
 

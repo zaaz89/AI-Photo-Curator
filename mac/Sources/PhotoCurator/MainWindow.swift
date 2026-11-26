@@ -30,10 +30,13 @@ struct MainWindow: View {
                     InspectorView().inspectorColumnWidth(min: 260, ideal: 300, max: 380)
                 }
                 .overlay(alignment: .bottom) {
-                    if library.selection.count > 1 {
-                        SelectionBar(newEvent: $newEvent)
-                            .padding(.bottom, 18)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    VStack(spacing: Space.m) {
+                        UndoToast()
+                        if library.selection.count > 1 {
+                            SelectionBar(newEvent: $newEvent)
+                                .padding(.bottom, 18)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
                     }
                 }
                 .overlay(alignment: .top) { MessageBanner() }

@@ -7,6 +7,8 @@ import SwiftUI
 struct StepStory: View {
     @EnvironmentObject var library: LibraryModel
     @State private var open: TripEvent?
+    /// The day whose chapters wait for "Split again" to be confirmed (names are lost, no undo).
+    @State private var resetDay: DayChapters?
 
     var body: some View {
         StepPage(step: .story, lead: library.tr("lead_story"), status: status) {
@@ -21,7 +23,7 @@ struct StepStory: View {
                             if let place = dayPlace(day) { Text(place).font(.title3).foregroundStyle(.secondary) }
                             Spacer()
                             Menu {
-                                Button(library.tr("resetChapters")) { library.resetChapters(day: day.day) }
+                                Button(library.tr("resetChapters") + "…") { resetDay = day }
                             } label: { Image(systemName: "ellipsis.circle") }
                                 .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary)
                                 .help(library.tr("dayMenu")).accessibilityLabel(library.tr("dayMenu"))
@@ -34,6 +36,14 @@ struct StepStory: View {
             }
         }
         .sheet(item: $open) { e in ChapterSheet(eventId: e.id) }
+        .confirmationDialog(String(format: library.tr("resetChaptersTitle"), resetDay.map { formatDay($0.day, library.lang, style: .long) } ?? ""),
+                            isPresented: Binding(get: { resetDay != nil }, set: { if !$0 { resetDay = nil } }),
+                            titleVisibility: .visible, presenting: resetDay) { d in
+            Button(library.tr("resetChaptersConfirm"), role: .destructive) { library.resetChapters(day: d.day); resetDay = nil }
+            Button(library.tr("keepChapters"), role: .cancel) { resetDay = nil }
+        } message: { d in
+            Text(String(format: library.tr("resetChaptersText"), Strings.count(d.chapters.count, .chapter, library.lang)))
+        }
     }
 
     var status: String {

@@ -21,9 +21,10 @@ import Testing
     }
     keys.subtract(["phase_", "sort_", "tier_", "w_", "key", "ownerFrom_", "step_", "stepTitle_", "action_", "nextText_",
                    "funnel_", "funnelHelp_", "exportKind_", "exportKindText_", "folders_", "names_", "review_", "why2_",
-                   "strict_", "strictText_", "tray_", "trayEmpty_", "trayHint_", "trayShort_", "stagePhase_"])
+                   "strict_", "strictText_", "tray_", "trayEmpty_", "trayHint_", "trayShort_", "stagePhase_", "toast_"])
     keys.formUnion(SortVerdict.allCases.filter { $0 != .album }.flatMap { v in ["tray_", "trayEmpty_", "trayHint_", "trayShort_"].map { $0 + v.rawValue } })
     keys.formUnion(["reading", "quality", "faces", "other", "reveal", "moments"].map { "stagePhase_" + $0 })
+    keys.formUnion(["putBack", "leaveOut", "keptInAlbum"].map { "toast_" + $0 })
     keys.formUnion(EngineSettings.strictnessLevels.flatMap { ["strict_" + $0, "strictText_" + $0] })
     for s in GuideStep.allCases { keys.formUnion(["step_", "stepTitle_", "action_", "nextText_"].map { $0 + s.rawValue }) }
     keys.formUnion(["inAlbum", "extraFrames", "blurry", "leftOut"].flatMap { ["funnel_" + $0, "funnelHelp_" + $0] })

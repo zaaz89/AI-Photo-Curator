@@ -31,6 +31,13 @@ Files:
 | `StatusColor.stacked` | `.cyan` | near-identical frames stacked |
 | `StatusColor.warning` | `.orange` | warnings, pending work |
 | `StatusColor.accent` | `.accentColor` | accent |
+| `StatusColor.removedFill` + `onRemoved` | dark red (0.72, 0.11, 0.11) + white, 6.5:1 | small "blurry" badges (M12c; white on system red is 3.5:1) |
+| `StatusColor.onLook` | near black (white 0.1), 8:1 on orange | text or glyph on a solid `look` / `warning` fill (white on orange is 2.2:1) |
+| `StatusColor.lookText` / `keptText` | dark amber / dark green in light mode, system orange / green in dark | coloured text on an 18% tint of its own colour (5.0:1 light, 5.7:1 dark); not inside views forced to dark |
+
+`UndoToast` (DesignSystem/UndoToast.swift, M12c): the one confirmation for reversible actions. Call
+`library.offerUndo(.putBack, count:)` (or `offerUndo(text)`) right after an action that registered its undo; the
+toast's Undo calls the window's undo manager, so it matches Cmd+Z.
 
 Status colours are system colours, so light and dark appearance both work. Decorative colours (stage
 background blobs, AI glow gradient, step and person tints) are not status colours and stay where they are.
